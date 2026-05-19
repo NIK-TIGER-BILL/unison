@@ -23,3 +23,8 @@ func zeroData(count: Int) -> Data {
 func epochDate(_ seconds: TimeInterval = 0) -> Date {
     Date(timeIntervalSince1970: seconds)
 }
+
+/// Construct a fresh `UUID`. Lets test files avoid `import Foundation`.
+func freshUUID() -> UUID {
+    UUID()
+}
