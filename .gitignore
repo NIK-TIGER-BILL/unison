@@ -1,1 +1,13 @@
 .superpowers/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Generated artifacts
+build/
+DerivedData/
+
+# macOS
+.DS_Store
