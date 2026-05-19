@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 import UnisonDomain
 import UnisonUI
@@ -11,7 +12,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public var transcriptWindow: TranscriptWindowController!
     public var onboardingWindow: OnboardingWindowController!
 
-    private var stateObserveTask: Task<Void, Never>?
+    private var lastActive = false
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = StatusItemController(popoverVM: composition.popoverVM)
@@ -22,31 +23,31 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             onboardingWindow.show()
         }
 
-        let orch = composition.orchestrator
-        let transcript = transcriptWindow!
-        let status = statusItem!
-        stateObserveTask = Task { @MainActor in
-            var lastActive = false
-            while !Task.isCancelled {
-                let isActive = orch.state.isActive
-                if isActive != lastActive {
-                    if isActive {
-                        transcript.show()
-                        status.setActiveIcon(true)
-                    } else {
-                        transcript.hide()
-                        status.setActiveIcon(false)
-                    }
-                    lastActive = isActive
-                }
-                try? await Task.sleep(nanoseconds: 200_000_000)
-            }
-        }
+        observeOrchestratorState()
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
-        stateObserveTask?.cancel()
         let orch = composition.orchestrator
         Task { @MainActor in await orch.stop() }
+    }
+
+    private func observeOrchestratorState() {
+        withObservationTracking {
+            applyActiveState(composition.orchestrator.state.isActive)
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.observeOrchestratorState() }
+        }
+    }
+
+    private func applyActiveState(_ isActive: Bool) {
+        guard isActive != lastActive else { return }
+        lastActive = isActive
+        if isActive {
+            transcriptWindow.show()
+            statusItem.setActiveIcon(true)
+        } else {
+            transcriptWindow.hide()
+            statusItem.setActiveIcon(false)
+        }
     }
 }
