@@ -147,3 +147,125 @@ private func makeOrchestrator(
     #expect(outgoing[0].sampleRate == 24_000, "Frame must be at OpenAI wire rate")
     #expect(outgoing[0].format == .int16, "Frame must be wire format Int16")
 }
+
+// Stream variant that always fails connect — used to drive initial-connect failure path.
+final class FailingMockStream: TranslationStream, @unchecked Sendable {
+    let transcripts: AsyncStream<TranscriptDelta>
+    let output: AsyncStream<AudioFrame>
+    let connectionState: AsyncStream<ConnectionState>
+    let failure: TranslationError
+    init(failure: TranslationError) {
+        transcripts = AsyncStream { _ in }
+        output = AsyncStream { _ in }
+        connectionState = AsyncStream { _ in }
+        self.failure = failure
+    }
+    func connect(target: Language) async throws {
+        throw failure
+    }
+    func send(_ frame: AudioFrame) async {}
+    func close() async {}
+}
+
+final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
+    let failure: TranslationError
+    init(failure: TranslationError = .apiKeyInvalid) { self.failure = failure }
+    func make(speaker: Speaker) -> any TranslationStream {
+        FailingMockStream(failure: failure)
+    }
+}
+
+@Test @MainActor func orchestrator_initialConnectFailure_setsErrorState() async {
+    let factory = FailingMockFactory(failure: .apiKeyInvalid)
+    let o = TranslationOrchestrator(
+        micCapture: MockMicrophoneCapture(),
+        peerCapture: MockPeerAudioCapture(),
+        outputMixer: MockAudioOutputMixer(),
+        virtualMicPlayer: MockAudioPlayer(),
+        translationFactory: factory,
+        permissions: defaultPerms(),
+        deviceRegistry: defaultRegistry(),
+        clock: SystemClock(),
+        transformer: MockAudioFormatTransformer()
+    )
+    await o.start(mode: .call, languages: .default)
+    #expect(o.state.errorValue == .apiKeyInvalid)
+}
+
+@Test @MainActor func orchestrator_initialConnectFailure_genericError_mapsToNetworkLost() async {
+    // A non-TranslationError thrown from connect should map to .networkLost.
+    struct GenericError: Error {}
+    final class GenericFailFactory: TranslationStreamFactory, @unchecked Sendable {
+        func make(speaker: Speaker) -> any TranslationStream {
+            final class S: TranslationStream, @unchecked Sendable {
+                let transcripts: AsyncStream<TranscriptDelta> = AsyncStream { _ in }
+                let output: AsyncStream<AudioFrame> = AsyncStream { _ in }
+                let connectionState: AsyncStream<ConnectionState> = AsyncStream { _ in }
+                func connect(target: Language) async throws { throw GenericError() }
+                func send(_ frame: AudioFrame) async {}
+                func close() async {}
+            }
+            return S()
+        }
+    }
+    let o = TranslationOrchestrator(
+        micCapture: MockMicrophoneCapture(),
+        peerCapture: MockPeerAudioCapture(),
+        outputMixer: MockAudioOutputMixer(),
+        virtualMicPlayer: MockAudioPlayer(),
+        translationFactory: GenericFailFactory(),
+        permissions: defaultPerms(),
+        deviceRegistry: defaultRegistry(),
+        clock: SystemClock(),
+        transformer: MockAudioFormatTransformer()
+    )
+    await o.start(mode: .call, languages: .default)
+    #expect(o.state.errorValue == .networkLost)
+}
+
+@Test @MainActor func orchestrator_midSessionFailure_transitionsToReconnecting() async throws {
+    // FakeClock keeps the retry-loop suspended in `clock.sleep` so we can
+    // observe the .reconnecting transition without waiting for the retry to fire.
+    let fakeClock = FakeClock(now: epochDate(0))
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: fakeClock)
+    await o.start(mode: .call, languages: .default)
+    // Sanity: orchestrator should be in .translating now
+    guard case .translating = o.state else {
+        Issue.record("Expected .translating after start, got \(o.state)")
+        return
+    }
+
+    // Push a .failed event on the peer stream's connectionState
+    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost))
+
+    // Give the observer task time to react and the failure handler to set state.
+    // The retry-loop will then call clock.sleep(for: 1) which suspends on FakeClock.
+    for _ in 0..<20 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .reconnecting = o.state { break }
+    }
+
+    if case .reconnecting(let mode, _) = o.state {
+        #expect(mode == .call)
+    } else {
+        Issue.record("Expected .reconnecting, got \(o.state)")
+    }
+}
+
+@Test @MainActor func orchestrator_terminalErrorMidSession_setsErrorWithoutReconnect() async throws {
+    // apiKeyInvalid is terminal — orchestrator should transition straight to .error.
+    let fakeClock = FakeClock(now: epochDate(0))
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: fakeClock)
+    await o.start(mode: .call, languages: .default)
+
+    factory.streams[.peer]?.emitConnectionState(.failed(.apiKeyInvalid))
+
+    for _ in 0..<20 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .error = o.state { break }
+    }
+
+    #expect(o.state.errorValue == .apiKeyInvalid)
+}

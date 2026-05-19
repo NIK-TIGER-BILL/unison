@@ -71,17 +71,108 @@ public final class TranslationOrchestrator {
         // Peer (incoming) stream — used in both modes
         let peer = translationFactory.make(speaker: .peer)
         peerStream = peer
-        try? await peer.connect(target: languages.mine)
+        do {
+            try await peer.connect(target: languages.mine)
+        } catch {
+            state = .error(mapConnectError(error))
+            return
+        }
         wireIncomingPipeline(stream: peer)
+        observeConnectionState(stream: peer, speaker: .peer, target: languages.mine, mode: mode)
 
         if mode == .call {
             let me = translationFactory.make(speaker: .me)
             meStream = me
-            try? await me.connect(target: languages.peer)
+            do {
+                try await me.connect(target: languages.peer)
+            } catch {
+                state = .error(mapConnectError(error))
+                return
+            }
             wireOutgoingPipeline(stream: me)
+            observeConnectionState(stream: me, speaker: .me, target: languages.peer, mode: mode)
         }
 
         state = .translating(mode: mode, startedAt: clock.now())
+    }
+
+    private func mapConnectError(_ error: Error) -> TranslationError {
+        if let te = error as? TranslationError { return te }
+        return .networkLost
+    }
+
+    private func observeConnectionState(
+        stream: any TranslationStream,
+        speaker: Speaker,
+        target: Language,
+        mode: SessionMode
+    ) {
+        let connStates = stream.connectionState
+        let task = Task { @MainActor [weak self] in
+            for await connState in connStates {
+                guard let self else { return }
+                switch connState {
+                case .failed(let err):
+                    await self.handleStreamFailure(error: err, speaker: speaker, target: target, mode: mode)
+                case .disconnected:
+                    // Treat ungraceful disconnect as failure while translating
+                    if case .translating = self.state {
+                        await self.handleStreamFailure(error: .networkLost, speaker: speaker, target: target, mode: mode)
+                    }
+                case .connecting, .connected, .reconnecting:
+                    break
+                }
+            }
+        }
+        pipelineTasks.append(task)
+    }
+
+    private func handleStreamFailure(
+        error: TranslationError,
+        speaker: Speaker,
+        target: Language,
+        mode: SessionMode
+    ) async {
+        // Don't try to recover from terminal errors
+        switch error {
+        case .apiKeyInvalid, .insufficientCredits, .permissionDenied:
+            state = .error(error)
+            return
+        default:
+            break
+        }
+        state = .reconnecting(mode: mode, since: clock.now())
+        var backoff = BackoffPolicy(initial: 1, cap: 30)
+        // Re-create the stream and try again, up to 5 attempts then give up
+        for _ in 0..<5 {
+            let delay = backoff.nextDelay()
+            do {
+                try await clock.sleep(for: delay)
+            } catch {
+                return // cancelled
+            }
+            if Task.isCancelled { return }
+            let newStream = translationFactory.make(speaker: speaker)
+            do {
+                try await newStream.connect(target: target)
+                // Success — replace stream reference and re-wire pipeline
+                switch speaker {
+                case .peer:
+                    peerStream = newStream
+                    wireIncomingPipeline(stream: newStream)
+                case .me:
+                    meStream = newStream
+                    wireOutgoingPipeline(stream: newStream)
+                }
+                observeConnectionState(stream: newStream, speaker: speaker, target: target, mode: mode)
+                state = .translating(mode: mode, startedAt: clock.now())
+                return
+            } catch {
+                continue // try next backoff iteration
+            }
+        }
+        // All retries failed
+        state = .error(.networkLost)
     }
 
     public func stop() async {

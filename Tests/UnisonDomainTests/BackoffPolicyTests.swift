@@ -1,5 +1,5 @@
 import Testing
-@testable import UnisonTranslation
+@testable import UnisonDomain
 
 @Test func backoff_exponentialDoubling() {
     var p = BackoffPolicy(initial: 1, cap: 30)
