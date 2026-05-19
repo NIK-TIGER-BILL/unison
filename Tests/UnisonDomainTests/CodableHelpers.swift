@@ -16,3 +16,10 @@ func encodeDecode<T: Codable>(_ value: T) throws -> T {
 func zeroData(count: Int) -> Data {
     Data(repeating: 0, count: count)
 }
+
+/// Construct a `Date` at the given Unix epoch seconds. Lets test files
+/// avoid `import Foundation` (which conflicts with `import Testing` on
+/// this CLT install).
+func epochDate(_ seconds: TimeInterval = 0) -> Date {
+    Date(timeIntervalSince1970: seconds)
+}
