@@ -43,7 +43,8 @@ public final class Composition {
             translationFactory: factory,
             permissions: permissions,
             deviceRegistry: registry,
-            clock: SystemClock()
+            clock: SystemClock(),
+            transformer: ResamplerAdapter()
         )
 
         let initialSettings = settingsStore.load()

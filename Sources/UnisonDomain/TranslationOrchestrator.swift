@@ -15,6 +15,7 @@ public final class TranslationOrchestrator {
     private let permissions: any PermissionsService
     private let deviceRegistry: any AudioDeviceRegistry
     private let clock: any Clock
+    private let transformer: any AudioFormatTransformer
 
     private var meStream: (any TranslationStream)?
     private var peerStream: (any TranslationStream)?
@@ -30,7 +31,8 @@ public final class TranslationOrchestrator {
         translationFactory: any TranslationStreamFactory,
         permissions: any PermissionsService,
         deviceRegistry: any AudioDeviceRegistry,
-        clock: any Clock
+        clock: any Clock,
+        transformer: any AudioFormatTransformer
     ) {
         self.transcript = TranscriptStore()
         self.micCapture = micCapture
@@ -41,6 +43,7 @@ public final class TranslationOrchestrator {
         self.permissions = permissions
         self.deviceRegistry = deviceRegistry
         self.clock = clock
+        self.transformer = transformer
     }
 
     public func start(mode: SessionMode, languages: LanguagePair, settings: Settings = .default) async {
@@ -103,12 +106,23 @@ public final class TranslationOrchestrator {
 
     private func wireOutgoingPipeline(stream: any TranslationStream) {
         let micFrames = micCapture.start(deviceUID: currentSettings.inputDeviceUID)
+        let transformer = self.transformer
         let task1 = Task { [stream] in
-            for await frame in micFrames { await stream.send(frame) }
+            for await frame in micFrames {
+                let wire = transformer.toWire(frame)
+                await stream.send(wire)
+            }
         }
-        let task2 = Task { [virtualMicPlayer, stream] in
-            await virtualMicPlayer.play(stream.output)
-            _ = stream
+        let task2 = Task { [virtualMicPlayer, stream, transformer] in
+            let resampled = AsyncStream<AudioFrame> { continuation in
+                Task {
+                    for await wireFrame in stream.output {
+                        continuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
+                    }
+                    continuation.finish()
+                }
+            }
+            await virtualMicPlayer.play(resampled)
         }
         let task3 = Task { @MainActor [transcript, stream] in
             for await d in stream.transcripts {
@@ -124,6 +138,7 @@ public final class TranslationOrchestrator {
 
     private func wireIncomingPipeline(stream: any TranslationStream) {
         let peerFrames = peerCapture.start()
+        let transformer = self.transformer
 
         var translationContinuation: AsyncStream<AudioFrame>.Continuation!
         var passthroughContinuation: AsyncStream<AudioFrame>.Continuation!
@@ -139,11 +154,21 @@ public final class TranslationOrchestrator {
             passthroughContinuation.finish()
         }
         let sender = Task { [stream] in
-            for await frame in translationFrames { await stream.send(frame) }
+            for await frame in translationFrames {
+                let wire = transformer.toWire(frame)
+                await stream.send(wire)
+            }
         }
-        let translatedPlay = Task { [outputMixer, stream] in
-            await outputMixer.playTranslated(stream.output)
-            _ = stream
+        let translatedPlay = Task { [outputMixer, stream, transformer] in
+            let resampled = AsyncStream<AudioFrame> { continuation in
+                Task {
+                    for await wireFrame in stream.output {
+                        continuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
+                    }
+                    continuation.finish()
+                }
+            }
+            await outputMixer.playTranslated(resampled)
         }
         let originalPlay = Task { [outputMixer] in
             await outputMixer.playOriginal(passthroughFrames)

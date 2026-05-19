@@ -25,14 +25,16 @@ private func makeOrchestrator(
     factory: MockTranslationStreamFactory = .init(),
     perms: MockPermissionsService? = nil,
     registry: MockAudioDeviceRegistry? = nil,
-    clock: any Clock = SystemClock()
+    clock: any Clock = SystemClock(),
+    transformer: any AudioFormatTransformer = MockAudioFormatTransformer()
 ) -> TranslationOrchestrator {
     let resolvedRegistry = registry ?? defaultRegistry()
     let resolvedPerms = perms ?? defaultPerms()
     return TranslationOrchestrator(
         micCapture: mic, peerCapture: peer, outputMixer: mixer,
         virtualMicPlayer: bhPlayer, translationFactory: factory,
-        permissions: resolvedPerms, deviceRegistry: resolvedRegistry, clock: clock
+        permissions: resolvedPerms, deviceRegistry: resolvedRegistry, clock: clock,
+        transformer: transformer
     )
 }
 
@@ -127,4 +129,21 @@ private func makeOrchestrator(
     await o.start(mode: .listen, languages: LanguagePair(mine: .ru, peer: .en))
     #expect(factory.streams[.me] == nil)
     #expect(factory.streams[.peer]?.connectedTo == .ru)
+}
+
+@Test @MainActor func orchestrator_callMode_micFrames_convertedToWireFormatBeforeSend() async throws {
+    let mic = MockMicrophoneCapture()
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(mic: mic, factory: factory)
+    await o.start(mode: .call, languages: .default)
+
+    // Emit a fake mic frame in capture format (48kHz F32, 100ms)
+    let captureFrame = AudioFrame(pcm: zeroData(count: 48_000 * 4 / 10), sampleRate: 48_000, channels: 1, format: .float32)
+    mic.emit(captureFrame)
+    try await Task.sleep(nanoseconds: 100_000_000)
+
+    let outgoing = factory.streams[.me]!.sentFrames
+    #expect(outgoing.count == 1, "Expected 1 frame sent to OUT stream, got \(outgoing.count)")
+    #expect(outgoing[0].sampleRate == 24_000, "Frame must be at OpenAI wire rate")
+    #expect(outgoing[0].format == .int16, "Frame must be wire format Int16")
 }

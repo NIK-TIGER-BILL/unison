@@ -16,7 +16,8 @@ private func makeOrchestratorForVM(perms: MockPermissionsService = .init()) -> T
         translationFactory: MockTranslationStreamFactory(),
         permissions: perms,
         deviceRegistry: registry,
-        clock: SystemClock()
+        clock: SystemClock(),
+        transformer: MockAudioFormatTransformer()
     )
 }
 
