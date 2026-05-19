@@ -2,10 +2,9 @@ import SwiftUI
 
 @main
 struct UnisonAppEntry: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
     var body: some Scene {
-        WindowGroup {
-            Text("Unison — bootstrap")
-                .frame(width: 300, height: 200)
-        }
+        Settings { EmptyView() }
     }
 }
