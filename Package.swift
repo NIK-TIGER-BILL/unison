@@ -22,7 +22,7 @@ let package = Package(
             "UnisonDomain", "UnisonTranslation", "UnisonAudio",
             "UnisonSystem", "UnisonUI",
         ]),
-        .testTarget(name: "UnisonDomainTests", dependencies: ["UnisonDomain"]),
+        .testTarget(name: "UnisonDomainTests", dependencies: ["UnisonDomain", "UnisonUI"]),
         .testTarget(name: "UnisonTranslationTests", dependencies: ["UnisonTranslation"]),
         .testTarget(name: "UnisonAudioTests", dependencies: ["UnisonAudio"],
                     resources: [.copy("Fixtures")]),
