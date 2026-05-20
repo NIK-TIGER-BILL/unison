@@ -8,13 +8,16 @@ public actor OpenAIRealtimeStream: TranslationStream {
     private let url: URL
     private let speaker: Speaker
 
-    private var transcriptContinuation: AsyncStream<TranscriptDelta>.Continuation?
-    private var outputContinuation: AsyncStream<AudioFrame>.Continuation?
-    private var connectionContinuation: AsyncStream<ConnectionState>.Continuation?
-
     public nonisolated let transcripts: AsyncStream<TranscriptDelta>
     public nonisolated let output: AsyncStream<AudioFrame>
     public nonisolated let connectionState: AsyncStream<ConnectionState>
+
+    // AsyncStream.Continuation is Sendable; making these `nonisolated let`
+    // means the first yield from connect() always finds a non-nil continuation
+    // (no actor-hop race between init and the first caller awaiting connect()).
+    private nonisolated let transcriptContinuation: AsyncStream<TranscriptDelta>.Continuation
+    private nonisolated let outputContinuation: AsyncStream<AudioFrame>.Continuation
+    private nonisolated let connectionContinuation: AsyncStream<ConnectionState>.Continuation
 
     private var receiveTask: Task<Void, Never>?
     private var closeReasonTask: Task<Void, Never>?
@@ -39,29 +42,18 @@ public actor OpenAIRealtimeStream: TranslationStream {
         self.transcripts = AsyncStream { tc = $0 }
         self.output = AsyncStream { oc = $0 }
         self.connectionState = AsyncStream { cc = $0 }
-
-        Task { [weak self] in
-            await self?.setContinuations(tc: tc, oc: oc, cc: cc)
-        }
-    }
-
-    private func setContinuations(
-        tc: AsyncStream<TranscriptDelta>.Continuation,
-        oc: AsyncStream<AudioFrame>.Continuation,
-        cc: AsyncStream<ConnectionState>.Continuation
-    ) {
         self.transcriptContinuation = tc
         self.outputContinuation = oc
         self.connectionContinuation = cc
     }
 
     public func connect(target: Language) async throws {
-        connectionContinuation?.yield(.connecting)
+        connectionContinuation.yield(.connecting)
         try await client.connect(url: url, headers: [
             "Authorization": "Bearer \(apiKey)",
             "OpenAI-Beta": "realtime=v1",
         ])
-        connectionContinuation?.yield(.connected)
+        connectionContinuation.yield(.connected)
 
         let stream = client.receive()
         receiveTask = Task { [weak self] in
@@ -99,10 +91,10 @@ public actor OpenAIRealtimeStream: TranslationStream {
         receiveTask?.cancel()
         closeReasonTask?.cancel()
         await client.close()
-        connectionContinuation?.yield(.disconnected)
-        transcriptContinuation?.finish()
-        outputContinuation?.finish()
-        connectionContinuation?.finish()
+        connectionContinuation.yield(.disconnected)
+        transcriptContinuation.finish()
+        outputContinuation.finish()
+        connectionContinuation.finish()
     }
 
     private func handleClose(reason: WSCloseReason) {
@@ -111,9 +103,9 @@ public actor OpenAIRealtimeStream: TranslationStream {
         // before this fires; the closeReasonTask is cancelled in close().
         switch reason {
         case .normal:
-            connectionContinuation?.yield(.disconnected)
+            connectionContinuation.yield(.disconnected)
         case .abnormal, .error:
-            connectionContinuation?.yield(.failed(.networkLost))
+            connectionContinuation.yield(.failed(.networkLost))
         }
     }
 
@@ -125,15 +117,15 @@ public actor OpenAIRealtimeStream: TranslationStream {
         case .outputAudioDelta(let p):
             guard let pcm = Data(base64Encoded: p.delta) else { return }
             let frame = AudioFrame(pcm: pcm, sampleRate: 24_000, channels: 1, format: .int16)
-            outputContinuation?.yield(frame)
+            outputContinuation.yield(frame)
         case .outputTranscriptDelta(let p):
             let delta = TranscriptDelta(
                 entryId: currentEntryId, speaker: speaker,
                 kind: .translated, text: p.delta, isFinal: false
             )
-            transcriptContinuation?.yield(delta)
+            transcriptContinuation.yield(delta)
         case .sessionClosed:
-            connectionContinuation?.yield(.disconnected)
+            connectionContinuation.yield(.disconnected)
         case .error(let e):
             let mapped: TranslationError = {
                 switch e.code {
@@ -143,7 +135,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
                 default: return .networkLost
                 }
             }()
-            connectionContinuation?.yield(.failed(mapped))
+            connectionContinuation.yield(.failed(mapped))
         case .unknown:
             break
         }

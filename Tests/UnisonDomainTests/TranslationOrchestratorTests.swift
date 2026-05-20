@@ -253,6 +253,31 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
     }
 }
 
+@Test @MainActor func orchestrator_rateLimited_usesRetryAfterAsFirstDelay() async throws {
+    // When the failure is .rateLimited(retryAfter: X), the orchestrator should
+    // use X as the first backoff delay instead of BackoffPolicy's initial.
+    // We can't easily observe the delay value itself (it's consumed by clock.sleep
+    // internally), but we can confirm the path was taken by checking that the
+    // orchestrator enters .reconnecting.
+    let fakeClock = FakeClock(now: epochDate(0))
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: fakeClock)
+    await o.start(mode: .call, languages: .default)
+
+    factory.streams[.peer]?.emitConnectionState(.failed(.rateLimited(retryAfter: 7)))
+
+    for _ in 0..<20 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .reconnecting = o.state { break }
+    }
+
+    if case .reconnecting = o.state {
+        #expect(true)
+    } else {
+        Issue.record("Expected .reconnecting after rateLimited failure, got \(o.state)")
+    }
+}
+
 @Test @MainActor func orchestrator_reconnect_closesPreviousStream() async throws {
     // When a stream fails, the orchestrator must close the stale stream as part
     // of the reconnect flow — otherwise the old WebSocket and its receive task

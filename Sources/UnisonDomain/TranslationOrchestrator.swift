@@ -206,18 +206,36 @@ public final class TranslationOrchestrator {
 
         state = .reconnecting(mode: mode, since: clock.now())
         var backoff = BackoffPolicy(initial: 1, cap: 30)
+        var firstAttempt = true
         // Re-create the stream and try again, up to 5 attempts then give up
         for _ in 0..<5 {
-            let delay = backoff.nextDelay()
+            // Honor server-supplied retry-after on the first attempt only;
+            // subsequent attempts use exponential backoff.
+            let delay: TimeInterval
+            if firstAttempt, case .rateLimited(let retryAfter) = error {
+                delay = retryAfter
+            } else {
+                delay = backoff.nextDelay()
+            }
+            firstAttempt = false
             do {
                 try await clock.sleep(for: delay)
             } catch {
                 return // cancelled
             }
-            if Task.isCancelled { return }
+            // The user may have called stop() while we were sleeping. If state
+            // is no longer .reconnecting, abandon the retry loop quietly so we
+            // don't stomp on whatever state stop() established.
+            guard case .reconnecting = state else { return }
+
             let newStream = translationFactory.make(speaker: speaker)
             do {
                 try await newStream.connect(target: target)
+                // stop() may also race with the connect() await — re-check.
+                guard case .reconnecting = state else {
+                    await newStream.close()
+                    return
+                }
                 // Success — replace stream reference and re-wire pipeline
                 switch speaker {
                 case .peer:
