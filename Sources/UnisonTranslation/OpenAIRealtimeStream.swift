@@ -6,6 +6,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
     private let client: any WSClient
     private let clock: any Clock
     private let url: URL
+    private let speaker: Speaker
 
     private var transcriptContinuation: AsyncStream<TranscriptDelta>.Continuation?
     private var outputContinuation: AsyncStream<AudioFrame>.Continuation?
@@ -22,11 +23,13 @@ public actor OpenAIRealtimeStream: TranslationStream {
         apiKey: String,
         client: any WSClient,
         clock: any Clock,
+        speaker: Speaker = .peer,
         url: URL = URL(string: "wss://api.openai.com/v1/realtime/translations")!
     ) {
         self.apiKey = apiKey
         self.client = client
         self.clock = clock
+        self.speaker = speaker
         self.url = url
 
         var tc: AsyncStream<TranscriptDelta>.Continuation!
@@ -104,7 +107,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
             outputContinuation?.yield(frame)
         case .outputTranscriptDelta(let p):
             let delta = TranscriptDelta(
-                entryId: currentEntryId, speaker: .peer,
+                entryId: currentEntryId, speaker: speaker,
                 kind: .translated, text: p.delta, isFinal: false
             )
             transcriptContinuation?.yield(delta)

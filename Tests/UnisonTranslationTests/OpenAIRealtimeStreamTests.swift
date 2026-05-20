@@ -60,7 +60,7 @@ import Testing
 
 @Test func stream_outputTranscriptDeltaEmitsTranscript() async throws {
     let ws = FakeWSClient()
-    let stream = OpenAIRealtimeStream(apiKey: "sk-test", client: ws, clock: SystemClock())
+    let stream = OpenAIRealtimeStream(apiKey: "sk-test", client: ws, clock: SystemClock(), speaker: .me)
     try await stream.connect(target: .en)
 
     let collector = Task { () -> TranscriptDelta? in
@@ -74,6 +74,7 @@ import Testing
     let delta = await collector.value
     #expect(delta?.text == "Hello")
     #expect(delta?.kind == .translated)
+    #expect(delta?.speaker == .me)
 }
 
 @Test func stream_errorEventEmitsFailedConnectionState() async throws {

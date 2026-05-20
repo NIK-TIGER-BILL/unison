@@ -217,11 +217,7 @@ public final class TranslationOrchestrator {
         }
         let task3 = Task { @MainActor [transcript, stream] in
             for await d in stream.transcripts {
-                let mine = TranscriptDelta(
-                    entryId: d.entryId, speaker: .me, kind: d.kind,
-                    text: d.text, isFinal: d.isFinal
-                )
-                transcript.apply(mine)
+                transcript.apply(d)
             }
         }
         pipelineTasks.append(contentsOf: [task1, task2, task3])
@@ -266,11 +262,7 @@ public final class TranslationOrchestrator {
         }
         let transcripts = Task { @MainActor [transcript, stream] in
             for await d in stream.transcripts {
-                let peer = TranscriptDelta(
-                    entryId: d.entryId, speaker: .peer, kind: d.kind,
-                    text: d.text, isFinal: d.isFinal
-                )
-                transcript.apply(peer)
+                transcript.apply(d)
             }
         }
         pipelineTasks.append(contentsOf: [splitter, sender, translatedPlay, originalPlay, transcripts])

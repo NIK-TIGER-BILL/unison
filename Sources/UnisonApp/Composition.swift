@@ -100,6 +100,6 @@ final class OpenAIRealtimeStreamFactory: TranslationStreamFactory, @unchecked Se
     }
 
     func make(speaker: Speaker) -> any TranslationStream {
-        OpenAIRealtimeStream(apiKey: apiKeyProvider(), client: URLSessionWSClient(), clock: clock)
+        OpenAIRealtimeStream(apiKey: apiKeyProvider(), client: URLSessionWSClient(), clock: clock, speaker: speaker)
     }
 }

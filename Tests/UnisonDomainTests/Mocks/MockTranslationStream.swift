@@ -2,6 +2,7 @@ import Foundation
 @testable import UnisonDomain
 
 public final class MockTranslationStream: TranslationStream, @unchecked Sendable {
+    public let speaker: Speaker
     public var connectedTo: Language?
     public var sentFrames: [AudioFrame] = []
     public var closeCalls = 0
@@ -14,7 +15,8 @@ public final class MockTranslationStream: TranslationStream, @unchecked Sendable
     public let output: AsyncStream<AudioFrame>
     public let connectionState: AsyncStream<ConnectionState>
 
-    public init() {
+    public init(speaker: Speaker = .peer) {
+        self.speaker = speaker
         var tc: AsyncStream<TranscriptDelta>.Continuation!
         var oc: AsyncStream<AudioFrame>.Continuation!
         var cc: AsyncStream<ConnectionState>.Continuation!
@@ -48,7 +50,7 @@ public final class MockTranslationStreamFactory: TranslationStreamFactory, @unch
     public var streams: [Speaker: MockTranslationStream] = [:]
     public init() {}
     public func make(speaker: Speaker) -> any TranslationStream {
-        let s = MockTranslationStream()
+        let s = MockTranslationStream(speaker: speaker)
         streams[speaker] = s
         return s
     }
