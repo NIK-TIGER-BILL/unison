@@ -196,6 +196,11 @@ public final class TranslationOrchestrator {
 
     // MARK: - Pipelines
 
+    // Bound buffer size for splitter/resampled streams. At ~100ms per frame,
+    // 50 frames ≈ 5 seconds of audio — enough to ride out brief network
+    // stalls while preventing unbounded memory growth on prolonged stalls.
+    private static let pipelineFrameBuffer = 50
+
     private func wireOutgoingPipeline(stream: any TranslationStream) {
         let micFrames = micCapture.start(deviceUID: currentSettings.inputDeviceUID)
         let transformer = self.transformer
@@ -206,15 +211,18 @@ public final class TranslationOrchestrator {
             }
         }
         let task2 = Task { [virtualMicPlayer, stream, transformer] in
-            let resampled = AsyncStream<AudioFrame> { continuation in
-                Task {
-                    for await wireFrame in stream.output {
-                        continuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
-                    }
-                    continuation.finish()
+            var resampledContinuation: AsyncStream<AudioFrame>.Continuation!
+            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
+                resampledContinuation = $0
+            }
+            let pump = Task {
+                for await wireFrame in stream.output {
+                    resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
                 }
+                resampledContinuation.finish()
             }
             await virtualMicPlayer.play(resampled)
+            pump.cancel()
         }
         let task3 = Task { @MainActor [transcript, stream] in
             for await d in stream.transcripts {
@@ -230,8 +238,12 @@ public final class TranslationOrchestrator {
 
         var translationContinuation: AsyncStream<AudioFrame>.Continuation!
         var passthroughContinuation: AsyncStream<AudioFrame>.Continuation!
-        let translationFrames = AsyncStream<AudioFrame> { translationContinuation = $0 }
-        let passthroughFrames = AsyncStream<AudioFrame> { passthroughContinuation = $0 }
+        let translationFrames = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
+            translationContinuation = $0
+        }
+        let passthroughFrames = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
+            passthroughContinuation = $0
+        }
 
         let splitter = Task {
             for await frame in peerFrames {
@@ -248,15 +260,18 @@ public final class TranslationOrchestrator {
             }
         }
         let translatedPlay = Task { [outputMixer, stream, transformer] in
-            let resampled = AsyncStream<AudioFrame> { continuation in
-                Task {
-                    for await wireFrame in stream.output {
-                        continuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
-                    }
-                    continuation.finish()
+            var resampledContinuation: AsyncStream<AudioFrame>.Continuation!
+            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
+                resampledContinuation = $0
+            }
+            let pump = Task {
+                for await wireFrame in stream.output {
+                    resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
                 }
+                resampledContinuation.finish()
             }
             await outputMixer.playTranslated(resampled)
+            pump.cancel()
         }
         let originalPlay = Task { [outputMixer] in
             await outputMixer.playOriginal(passthroughFrames)
