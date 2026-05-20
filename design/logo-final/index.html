@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Logo · FINAL</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<!-- ═══════════ MASTER LOGO ═══════════ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<symbol id="logo-unison" viewBox="0 0 256 256">
+  <g stroke="currentColor" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Letter U -->
+    <path d="M82 66 V146 C82 177.5 102.5 198 128 198 C153.5 198 174 177.5 174 146 V 66"/>
+    <!-- Left audio wave bars (two voice streams left) -->
+    <path d="M58 86 V136"/>
+    <path d="M38 102 V126"/>
+    <!-- Right audio wave bars (two voice streams right) -->
+    <path d="M198 86 V136"/>
+    <path d="M218 102 V126"/>
+  </g>
+</symbol>
+
+<!-- Variation: paused (без боковых штрихов = звуки замолчали) -->
+<symbol id="logo-unison-paused" viewBox="0 0 256 256">
+  <g stroke="currentColor" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M82 66 V146 C82 177.5 102.5 198 128 198 C153.5 198 174 177.5 174 146 V 66"/>
+  </g>
+</symbol>
+
+<!-- Filter для glow в active state -->
+<filter id="liquidGlassSubtle" x="-10%" y="-10%" width="120%" height="120%">
+<feTurbulence type="fractalNoise" baseFrequency="0.014 0.02" numOctaves="2" seed="3" result="noise"/>
+<feGaussianBlur in="noise" stdDeviation="2.5" result="blurredNoise"/>
+<feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="12" xChannelSelector="R" yChannelSelector="G"/>
+</filter>
+</defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --ready: #58e09a;
+  --active: #5ac8fa;
+  --error: #ff7a8c;
+  --warn: #ffb454;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg); color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.03em; margin-bottom: 4px;
+}
+.page-header h1 .accent { color: var(--accent); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; max-width: 760px; }
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px; letter-spacing: 0.04em; flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.layout {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 48px;
+  display: flex; flex-direction: column;
+  gap: 56px;
+}
+
+.section h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 20px;
+  letter-spacing: -0.02em;
+  color: rgba(255,255,255,0.95);
+  margin-bottom: 8px;
+}
+.section .lead {
+  font-size: 13px;
+  color: var(--page-mute);
+  margin-bottom: 24px;
+  max-width: 720px;
+  line-height: 1.55;
+}
+.section .lead strong { color: var(--page-fg); font-weight: 500; }
+.section .lead code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11.5px;
+  background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;
+}
+
+/* ═══════ Hero logo (huge) ═══════ */
+.hero {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+.hero-card {
+  border-radius: 14px;
+  padding: 56px 32px;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 320px;
+}
+.hero-card.on-aurora {
+  background:
+    radial-gradient(ellipse 60% 50% at 70% 30%, rgba(100, 230, 255, 0.35), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 30% 70%, rgba(255, 110, 200, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+  box-shadow: 0 24px 64px -16px rgba(0,0,0,0.6);
+}
+.hero-card.on-flat {
+  background: linear-gradient(180deg, #18181c, #0e0e12);
+  border: 0.5px solid rgba(255,255,255,0.08);
+}
+.hero-card svg { width: 180px; height: 180px; color: #fff; }
+
+/* ═══════ App icon (Dock-style) ═══════ */
+.app-icons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 28px;
+}
+.app-icon-card {
+  display: flex; flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 32px 16px 18px;
+  background: rgba(255,255,255,0.025);
+  border: 0.5px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+}
+.app-icon {
+  width: 160px; height: 160px;
+  border-radius: 36px;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 24px 48px -12px rgba(0,0,0,0.6),
+    0 4px 14px rgba(0,0,0,0.45),
+    inset 0 1.5px 0 rgba(255,255,255,0.18),
+    inset 0 -1.5px 0 rgba(0,0,0,0.3);
+  display: flex; align-items: center; justify-content: center;
+}
+/* Aurora app icon background */
+.app-icon.aurora {
+  background:
+    radial-gradient(ellipse 70% 60% at 30% 25%, rgba(100, 230, 255, 0.65), transparent 60%),
+    radial-gradient(ellipse 60% 60% at 75% 75%, rgba(255, 110, 200, 0.55), transparent 65%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(165deg, #1a1142, #0a0820);
+}
+.app-icon.dark {
+  background: linear-gradient(165deg, #20202a, #08080c);
+}
+.app-icon.light {
+  background: linear-gradient(165deg, #f5f5f7, #d8d8de);
+}
+.app-icon::before {
+  content: ""; position: absolute;
+  top: 0; left: 0; right: 0; height: 50%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.18) 0%, transparent 100%);
+  pointer-events: none;
+}
+.app-icon svg { width: 124px; height: 124px; position: relative; z-index: 1; }
+.app-icon.aurora svg, .app-icon.dark svg { color: #fff; }
+.app-icon.light svg { color: #0a0820; }
+.app-icon-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.55);
+}
+
+/* ═══════ Menubar simulation ═══════ */
+.menubar-section {
+  display: flex; flex-direction: column;
+  gap: 24px;
+}
+.menubar-states {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+.state-card {
+  padding: 18px 16px 14px;
+  background: rgba(255,255,255,0.025);
+  border: 0.5px solid rgba(255,255,255,0.06);
+  border-radius: 11px;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 12px;
+}
+.state-card .demo-area {
+  width: 100%;
+  height: 80px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+  background: rgba(8,8,10,0.6);
+  position: relative;
+}
+.state-card .label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.state-card.idle .label { color: rgba(255,255,255,0.55); }
+.state-card.active .label { color: var(--active); }
+.state-card.paused .label { color: rgba(255,255,255,0.35); }
+.state-card.error .label { color: var(--error); }
+
+.state-card .demo-area svg {
+  width: 22px; height: 22px;
+}
+.state-card.idle .demo-area svg { color: rgba(255,255,255,0.88); opacity: 0.88; }
+.state-card.active .demo-area svg { color: var(--active); animation: pulseLogo 1.6s ease-in-out infinite; }
+.state-card.paused .demo-area svg { color: rgba(255,255,255,0.4); }
+.state-card.error .demo-area svg { color: var(--error); }
+.state-card.error .demo-area::after {
+  content: ""; position: absolute;
+  top: 24px; right: 50%; margin-right: -16px;
+  width: 7px; height: 7px;
+  background: var(--error);
+  border-radius: 50%;
+  box-shadow: 0 0 5px var(--error);
+}
+
+@keyframes pulseLogo {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.05); }
+}
+
+/* Realistic menubar */
+.menubar-real {
+  background:
+    radial-gradient(ellipse 60% 80% at 50% 50%, rgba(100, 230, 255, 0.10), transparent 70%),
+    rgba(20, 22, 28, 0.78);
+  backdrop-filter: blur(20px);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  height: 28px;
+  display: flex; align-items: center;
+  padding: 0 10px;
+  gap: 16px;
+  font-family: -apple-system, 'DM Sans', sans-serif;
+  font-size: 12.5px;
+  color: rgba(255,255,255,0.92);
+  letter-spacing: -0.005em;
+}
+.menubar-real .left-apps { display: flex; gap: 14px; }
+.menubar-real .left-apps span:first-child { font-weight: 600; }
+.menubar-real .spacer { flex: 1; }
+.menubar-real .right-items {
+  display: flex; align-items: center; gap: 10px;
+}
+.menubar-real .right-items .item {
+  display: flex; align-items: center;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.menubar-real .right-items .unison-slot {
+  width: 22px; height: 22px;
+  padding: 2px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+.menubar-real .right-items .unison-slot:hover { background: rgba(255,255,255,0.10); }
+.menubar-real .right-items .unison-slot svg {
+  width: 100%; height: 100%;
+  color: rgba(255,255,255,0.95);
+  display: block;
+}
+.menubar-real .clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+}
+
+/* ═══════ In-context surfaces ═══════ */
+.context-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 24px;
+}
+.context-card {
+  padding: 16px;
+  background: rgba(255,255,255,0.025);
+  border: 0.5px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+}
+.context-card .demo {
+  background:
+    radial-gradient(ellipse 70% 50% at 70% 30%, rgba(100, 230, 255, 0.30), transparent 60%),
+    radial-gradient(ellipse 80% 60% at 30% 70%, rgba(255, 110, 200, 0.28), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+  border-radius: 10px;
+  padding: 28px 20px;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 200px;
+}
+.context-card .caption {
+  margin-top: 12px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.45);
+}
+
+/* Onboarding header mock */
+.onboarding-header-mock {
+  display: flex; flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.onboarding-header-mock .logo-wrap {
+  width: 56px; height: 56px;
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.14);
+  border-radius: 16px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.18);
+}
+.onboarding-header-mock .logo-wrap svg { width: 32px; height: 32px; color: #fff; }
+.onboarding-header-mock h3 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 22px;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+
+/* About modal mock */
+.about-modal-mock {
+  width: 320px;
+  background: rgba(20, 22, 30, 0.65);
+  backdrop-filter: blur(36px) saturate(200%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border: 0.5px solid rgba(255,255,255,0.13);
+  border-radius: 14px;
+  padding: 28px 24px 22px;
+  box-shadow: 0 16px 36px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.16);
+  display: flex; flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.about-modal-mock .big-logo {
+  width: 72px; height: 72px;
+  background:
+    radial-gradient(ellipse 70% 60% at 30% 25%, rgba(100, 230, 255, 0.55), transparent 60%),
+    radial-gradient(ellipse 60% 60% at 75% 75%, rgba(255, 110, 200, 0.45), transparent 65%),
+    linear-gradient(165deg, #1a1142, #0a0820);
+  border-radius: 18px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.4), inset 0 1.5px 0 rgba(255,255,255,0.2);
+}
+.about-modal-mock .big-logo svg { width: 44px; height: 44px; color: #fff; }
+.about-modal-mock .app-name {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 400; font-size: 17px;
+  color: #fff;
+  letter-spacing: -0.015em;
+}
+.about-modal-mock .version {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 0.04em;
+}
+.about-modal-mock .tagline {
+  font-size: 12px;
+  color: rgba(255,255,255,0.65);
+  text-align: center;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+.about-modal-mock .copyright {
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.35);
+  margin-top: 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 0.04em;
+}
+
+/* Popover-mini mock */
+.popover-mini-mock {
+  width: 280px;
+  background: rgba(20, 22, 30, 0.62);
+  backdrop-filter: blur(36px) saturate(200%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border: 0.5px solid rgba(255,255,255,0.13);
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: 0 16px 36px rgba(0,0,0,0.5);
+  display: flex; align-items: center; gap: 10px;
+}
+.popover-mini-mock svg { width: 22px; height: 22px; color: #fff; flex-shrink: 0; }
+.popover-mini-mock .info { display: flex; flex-direction: column; }
+.popover-mini-mock .name {
+  font-size: 12.5px; font-weight: 500;
+  color: #fff;
+  letter-spacing: -0.005em;
+}
+.popover-mini-mock .status {
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.5);
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 0.04em;
+  display: flex; align-items: center; gap: 5px;
+  margin-top: 2px;
+}
+.popover-mini-mock .dot {
+  width: 5px; height: 5px;
+  background: var(--ready);
+  border-radius: 50%;
+  box-shadow: 0 0 4px var(--ready);
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Logo · <span class="accent">FINAL</span></h1>
+<p>Финальный логотип: <strong>U</strong> с двумя боковыми штрихами по обеим сторонам — два голосовых потока обнимают форму соединения. Минималистичный stroke-only, читается на любом размере, моноширинно симметричен.</p>
+<div class="nav">
+<a href="/popover-final/">Popover</a>
+<a href="/onboarding-final/">Onboarding</a>
+<a href="/transcript-final/">Transcript</a>
+<a href="/settings-final/">Settings</a>
+<a class="current" href="/logo-final/">Logo</a>
+</div>
+</header>
+
+<main class="layout">
+
+<!-- ════════════════════════ HERO ════════════════════════ -->
+<section class="section">
+<h2>Логотип</h2>
+<p class="lead">
+Боковые штрихи по обеим сторонам U — это <strong>два голосовых потока / два участника звонка</strong>. Общая U-форма — <strong>соединение, синхронизация и перевод в реальном времени</strong>. Один stroke-weight (<code>12px</code> при <code>viewBox 256×256</code>), round caps + joins. Работает в `currentColor` — наследует цвет от состояния.
+</p>
+<div class="hero">
+<div class="hero-card on-aurora">
+<svg><use href="#logo-unison"/></svg>
+</div>
+<div class="hero-card on-flat">
+<svg><use href="#logo-unison"/></svg>
+</div>
+</div>
+</section>
+
+<!-- ════════════════════════ MENUBAR ════════════════════════ -->
+<section class="section">
+<h2>В верхней строке macOS</h2>
+<p class="lead">
+Иконка в menubar. Click → открывается popover. Состояния: <strong>idle</strong> (запущено, ничего не происходит), <strong>active</strong> (идёт перевод, pulse), <strong>paused</strong> (на паузе, без штрихов = звуки замолчали), <strong>error</strong> (badge-точка справа сверху).
+</p>
+<div class="menubar-section">
+<div class="menubar-states">
+<div class="state-card idle">
+<div class="demo-area"><svg><use href="#logo-unison"/></svg></div>
+<span class="label">idle</span>
+</div>
+<div class="state-card active">
+<div class="demo-area"><svg><use href="#logo-unison"/></svg></div>
+<span class="label">active</span>
+</div>
+<div class="state-card paused">
+<div class="demo-area"><svg><use href="#logo-unison-paused"/></svg></div>
+<span class="label">paused</span>
+</div>
+<div class="state-card error">
+<div class="demo-area"><svg><use href="#logo-unison"/></svg></div>
+<span class="label">error</span>
+</div>
+</div>
+
+<div class="menubar-real">
+<div class="left-apps"><span>Zoom</span><span>File</span><span>Edit</span><span>View</span><span>Share</span></div>
+<div class="spacer"></div>
+<div class="right-items">
+<div class="item unison-slot" title="Unison"><svg><use href="#logo-unison"/></svg></div>
+<div class="item">🔋</div>
+<div class="item">🔔</div>
+<div class="item clock">14:38</div>
+</div>
+</div>
+</div>
+</section>
+
+<!-- ════════════════════════ APP ICON ════════════════════════ -->
+<section class="section">
+<h2>App icon (Dock, Finder, Spotlight)</h2>
+<p class="lead">
+Иконка приложения в Dock: <code>160×160</code> с округлением <code>36px</code>, специулярная подсветка сверху, тёплая тень. Три варианта подложки: <strong>Aurora</strong> (бренд), тёмная (для системы с тёмной темой), светлая (контраст).
+</p>
+<div class="app-icons">
+<div class="app-icon-card">
+<div class="app-icon aurora"><svg><use href="#logo-unison"/></svg></div>
+<span class="app-icon-label">Aurora · primary</span>
+</div>
+<div class="app-icon-card">
+<div class="app-icon dark"><svg><use href="#logo-unison"/></svg></div>
+<span class="app-icon-label">Dark</span>
+</div>
+<div class="app-icon-card">
+<div class="app-icon light"><svg><use href="#logo-unison"/></svg></div>
+<span class="app-icon-label">Light</span>
+</div>
+</div>
+</section>
+
+<!-- ════════════════════════ IN-CONTEXT ════════════════════════ -->
+<section class="section">
+<h2>Внутри других окон</h2>
+<p class="lead">
+Логотип также появляется в шапке <strong>onboarding</strong>, в <strong>About</strong>-модалке и компактном popover'е (если будет вариант мини-окна).
+</p>
+<div class="context-grid">
+
+<!-- Onboarding header -->
+<div class="context-card">
+<div class="demo">
+<div class="onboarding-header-mock">
+<div class="logo-wrap"><svg><use href="#logo-unison"/></svg></div>
+<h3>Установка</h3>
+</div>
+</div>
+<div class="caption">Onboarding · header</div>
+</div>
+
+<!-- About modal -->
+<div class="context-card">
+<div class="demo">
+<div class="about-modal-mock">
+<div class="big-logo"><svg><use href="#logo-unison"/></svg></div>
+<span class="app-name">Unison</span>
+<span class="version">v 1.0.0 · build 42</span>
+<p class="tagline">Real-time двухсторонний голосовой переводчик</p>
+<span class="copyright">© 2026 · MIT licence</span>
+</div>
+</div>
+<div class="caption">About modal</div>
+</div>
+
+<!-- Compact popover (small) -->
+<div class="context-card">
+<div class="demo">
+<div class="popover-mini-mock">
+<svg><use href="#logo-unison"/></svg>
+<div class="info">
+<span class="name">Unison</span>
+<span class="status"><span class="dot"></span>готов к запуску</span>
+</div>
+</div>
+</div>
+<div class="caption">Compact status popover</div>
+</div>
+
+</div>
+</section>
+
+<!-- ════════════════════════ SVG SOURCE ════════════════════════ -->
+<section class="section">
+<h2>Source SVG</h2>
+<p class="lead">
+Канонический файл логотипа, <code>viewBox="0 0 256 256"</code>, <code>stroke="currentColor"</code> — наследует цвет.
+</p>
+<pre style="background: rgba(255,255,255,0.04); border: 0.5px solid rgba(255,255,255,0.08); padding: 18px 22px; border-radius: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: rgba(245,245,247,0.88); overflow-x: auto; line-height: 1.6; letter-spacing: 0;">&lt;svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg"&gt;
+  &lt;g stroke="currentColor" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"&gt;
+    &lt;!-- Letter U --&gt;
+    &lt;path d="M82 66 V146 C82 177.5 102.5 198 128 198 C153.5 198 174 177.5 174 146 V 66"/&gt;
+    &lt;!-- Two voice streams · left --&gt;
+    &lt;path d="M58 86 V136"/&gt;
+    &lt;path d="M38 102 V126"/&gt;
+    &lt;!-- Two voice streams · right --&gt;
+    &lt;path d="M198 86 V136"/&gt;
+    &lt;path d="M218 102 V126"/&gt;
+  &lt;/g&gt;
+&lt;/svg&gt;</pre>
+</section>
+
+</main>
+
+</body>
+</html>

@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Menubar icon · R1</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --ready: #58e09a;
+  --active: #5ac8fa;
+  --error: #ff7a8c;
+  --warn: #ffb454;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg); color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.03em; margin-bottom: 4px;
+}
+.page-header h1 .accent { color: var(--accent); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; max-width: 760px; }
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px; letter-spacing: 0.04em; flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 40px;
+  padding: 48px;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+.variation { display: flex; flex-direction: column; gap: 14px; }
+.variation-label {
+  display: flex; align-items: baseline; justify-content: space-between;
+}
+.variation-label .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; color: var(--page-mute);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+
+.card-desc {
+  font-size: 12.5px; color: var(--page-mute);
+  line-height: 1.55;
+}
+.card-desc strong { color: var(--page-fg); font-weight: 500; }
+.card-desc code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px;
+}
+
+/* Simulated macOS menubar */
+.menubar-sim {
+  position: relative;
+  height: 26px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)),
+    radial-gradient(ellipse 60% 80% at 50% 50%, rgba(100, 230, 255, 0.10), transparent 70%),
+    rgba(20, 22, 28, 0.78);
+  backdrop-filter: blur(20px);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  border-radius: 5px;
+  display: flex; align-items: center;
+  padding: 0 8px;
+  gap: 14px;
+  font-family: -apple-system, 'DM Sans', sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.92);
+  letter-spacing: -0.005em;
+}
+.menubar-sim .left-apps {
+  display: flex; gap: 12px;
+  color: rgba(255,255,255,0.85);
+}
+.menubar-sim .left-apps span:first-child { font-weight: 600; }
+.menubar-sim .spacer { flex: 1; }
+.menubar-sim .right-items {
+  display: flex; align-items: center; gap: 10px;
+  color: rgba(255,255,255,0.75);
+}
+.menubar-sim .right-items .item {
+  display: flex; align-items: center;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.menubar-sim .right-items .item:hover { background: rgba(255,255,255,0.08); }
+.menubar-sim .right-items .unison-slot {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  padding: 3px;
+  position: relative;
+}
+.menubar-sim .right-items .unison-slot svg {
+  width: 100%; height: 100%;
+  display: block;
+}
+.menubar-sim .clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: rgba(255,255,255,0.92);
+}
+
+/* State row */
+.states-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  padding: 14px;
+  background: rgba(255,255,255,0.025);
+  border: 0.5px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+}
+.state-cell {
+  display: flex; flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 4px 8px;
+  border-radius: 7px;
+  background: rgba(255,255,255,0.02);
+}
+.state-cell .preview {
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.state-cell .preview svg { width: 18px; height: 18px; display: block; }
+.state-cell .label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9.5px; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.5);
+}
+.state-cell.idle .label { color: rgba(255,255,255,0.5); }
+.state-cell.active .label { color: var(--active); }
+.state-cell.paused .label { color: rgba(255,255,255,0.35); }
+.state-cell.error .label { color: var(--error); }
+
+/* Icon coloring per state */
+.icon { color: rgba(255,255,255,0.85); }
+.icon.idle { color: rgba(255,255,255,0.85); opacity: 0.85; }
+.icon.active { color: var(--active); }
+.icon.paused { color: rgba(255,255,255,0.4); }
+.icon.error { color: var(--error); }
+.icon.error::after {
+  content: ""; position: absolute;
+  top: 0; right: 0;
+  width: 6px; height: 6px;
+  background: var(--error);
+  border-radius: 50%;
+  box-shadow: 0 0 4px var(--error);
+}
+
+/* Active state — pulse animation */
+@keyframes audioPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+.icon.active svg { animation: audioPulse 1.4s ease-in-out infinite; }
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Menubar icon · <span class="accent">R1</span></h1>
+<p>6 концепций иконки в верхней строке macOS. Каждая показана в 4 состояниях: <strong>idle</strong> (приложение запущено), <strong>active</strong> (идёт перевод, pulsing), <strong>paused</strong> (на паузе), <strong>error</strong> (с badge). Снизу — симуляция menubar для context-feel.</p>
+<div class="nav">
+<a href="/popover-final/">Popover</a>
+<a href="/onboarding-final/">Onboarding</a>
+<a href="/transcript-final/">Transcript</a>
+<a href="/settings-final/">Settings</a>
+<a class="current" href="/menubar-round-1/">Menubar R1</a>
+</div>
+</header>
+
+<main class="grid">
+
+<!-- ═══════════════════════ V1 · U monogram ═══════════════════════ -->
+<div class="variation">
+<div class="variation-label"><span class="num">V1 · U monogram</span></div>
+<div class="states-row">
+<div class="state-cell idle">
+<div class="preview"><span class="icon idle">
+<svg viewBox="0 0 22 22" fill="none"><path d="M5 5 V13 a 6 6 0 0 0 12 0 V 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+</span></div>
+<span class="label">idle</span>
+</div>
+<div class="state-cell active">
+<div class="preview"><span class="icon active">
+<svg viewBox="0 0 22 22" fill="none"><path d="M5 5 V13 a 6 6 0 0 0 12 0 V 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 5 V13 a 6 6 0 0 0 12 0 V 5 L 17 5" fill="currentColor" opacity="0.18"/></svg>
+</span></div>
+<span class="label">active</span>
+</div>
+<div class="state-cell paused">
+<div class="preview"><span class="icon paused">
+<svg viewBox="0 0 22 22" fill="none"><path d="M5 5 V13 a 6 6 0 0 0 12 0 V 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+</span></div>
+<span class="label">paused</span>
+</div>
+<div class="state-cell error">
+<div class="preview"><span class="icon error">
+<svg viewBox="0 0 22 22" fill="none"><path d="M5 5 V13 a 6 6 0 0 0 12 0 V 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+</span></div>
+<span class="label">error</span>
+</div>
+</div>
+<div class="menubar-sim">
+<div class="left-apps"><span>Zoom</span><span>File</span><span>Edit</span><span>View</span></div>
+<div class="spacer"></div>
+<div class="right-items">
+<div class="item unison-slot"><svg viewBox="0 0 22 22" fill="none"><path d="M5 5 V13 a 6 6 0 0 0 12 0 V 5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></div>
+<div class="item">🔋</div>
+<div class="item">🔔</div>
+<div class="item clock">14:38</div>
+</div>
+</div>
+<p class="card-desc"><strong>U monogram.</strong> Буква U — первая буква названия. Простая дуга, читается на любом размере. <code>stroke-width: 1.7</code>, round caps. В active state — filled fill снизу + pulse. Минимализм, легко узнаётся.</p>
+</div>
+
+<!-- ═══════════════════════ V2 · Translate exchange (↔) ═══════════════════════ -->
+<div class="variation">
+<div class="variation-label"><span class="num">V2 · Translate exchange</span></div>
+<div class="states-row">
+<div class="state-cell idle">
+<div class="preview"><span class="icon idle">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M4 8 H17 L 14 5"/><path d="M18 14 H5 L 8 17"/></g></svg>
+</span></div>
+<span class="label">idle</span>
+</div>
+<div class="state-cell active">
+<div class="preview"><span class="icon active">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M4 8 H17 L 14 5"/><path d="M18 14 H5 L 8 17"/></g></svg>
+</span></div>
+<span class="label">active</span>
+</div>
+<div class="state-cell paused">
+<div class="preview"><span class="icon paused">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M4 8 H17 L 14 5"/><path d="M18 14 H5 L 8 17"/></g></svg>
+</span></div>
+<span class="label">paused</span>
+</div>
+<div class="state-cell error">
+<div class="preview"><span class="icon error">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"><path d="M4 8 H17 L 14 5"/><path d="M18 14 H5 L 8 17"/></g></svg>
+</span></div>
+<span class="label">error</span>
+</div>
+</div>
+<div class="menubar-sim">
+<div class="left-apps"><span>Zoom</span><span>File</span><span>Edit</span><span>View</span></div>
+<div class="spacer"></div>
+<div class="right-items">
+<div class="item unison-slot"><svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8 H17 L 14 5"/><path d="M18 14 H5 L 8 17"/></g></svg></div>
+<div class="item">🔋</div>
+<div class="item">🔔</div>
+<div class="item clock">14:38</div>
+</div>
+</div>
+<p class="card-desc"><strong>Translate exchange.</strong> Две стрелки в противоположных направлениях — универсальный знак «обмен», «двусторонний перевод». Прямая семантическая связь с функцией. Понятно даже без знания app.</p>
+</div>
+
+<!-- ═══════════════════════ V3 · Sound wave ═══════════════════════ -->
+<div class="variation">
+<div class="variation-label"><span class="num">V3 · Sound wave</span></div>
+<div class="states-row">
+<div class="state-cell idle">
+<div class="preview"><span class="icon idle">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="4" y1="11" x2="4" y2="11"/><line x1="7" y1="9" x2="7" y2="13"/><line x1="10" y1="6" x2="10" y2="16"/><line x1="13" y1="8" x2="13" y2="14"/><line x1="16" y1="10" x2="16" y2="12"/><line x1="19" y1="11" x2="19" y2="11"/></g></svg>
+</span></div>
+<span class="label">idle</span>
+</div>
+<div class="state-cell active">
+<div class="preview"><span class="icon active">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><line x1="4" y1="11" x2="4" y2="11"/><line x1="7" y1="8" x2="7" y2="14"/><line x1="10" y1="5" x2="10" y2="17"/><line x1="13" y1="7" x2="13" y2="15"/><line x1="16" y1="9" x2="16" y2="13"/><line x1="19" y1="11" x2="19" y2="11"/></g></svg>
+</span></div>
+<span class="label">active</span>
+</div>
+<div class="state-cell paused">
+<div class="preview"><span class="icon paused">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="6" y1="11" x2="16" y2="11"/></g></svg>
+</span></div>
+<span class="label">paused</span>
+</div>
+<div class="state-cell error">
+<div class="preview"><span class="icon error">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="4" y1="11" x2="4" y2="11"/><line x1="7" y1="9" x2="7" y2="13"/><line x1="10" y1="6" x2="10" y2="16"/><line x1="13" y1="8" x2="13" y2="14"/><line x1="16" y1="10" x2="16" y2="12"/><line x1="19" y1="11" x2="19" y2="11"/></g></svg>
+</span></div>
+<span class="label">error</span>
+</div>
+</div>
+<div class="menubar-sim">
+<div class="left-apps"><span>Zoom</span><span>File</span><span>Edit</span><span>View</span></div>
+<div class="spacer"></div>
+<div class="right-items">
+<div class="item unison-slot"><svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><line x1="4" y1="11" x2="4" y2="11"/><line x1="7" y1="9" x2="7" y2="13"/><line x1="10" y1="6" x2="10" y2="16"/><line x1="13" y1="8" x2="13" y2="14"/><line x1="16" y1="10" x2="16" y2="12"/><line x1="19" y1="11" x2="19" y2="11"/></g></svg></div>
+<div class="item">🔋</div>
+<div class="item">🔔</div>
+<div class="item clock">14:38</div>
+</div>
+</div>
+<p class="card-desc"><strong>Sound wave.</strong> Audio-визуализация: 6 вертикальных полос разной высоты — классическая equalizer-эстетика. Active — амплитуда увеличивается, pulse. Paused — sсхлопывается в одну линию. Метафора: голос на лету.</p>
+</div>
+
+<!-- ═══════════════════════ V4 · Chat bubbles ═══════════════════════ -->
+<div class="variation">
+<div class="variation-label"><span class="num">V4 · Chat bubbles</span></div>
+<div class="states-row">
+<div class="state-cell idle">
+<div class="preview"><span class="icon idle">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6 a 2 2 0 0 1 2 -2 H 11 a 2 2 0 0 1 2 2 V 10 a 2 2 0 0 1 -2 2 H 7 L 4 14 V 12 H 5 a 2 2 0 0 1 -2 -2 Z"/><path d="M9 12 V 13 a 2 2 0 0 0 2 2 H 16 L 19 17 V 15 H 18 a 2 2 0 0 0 2 -2 V 10 a 2 2 0 0 0 -2 -2 H 13"/></g></svg>
+</span></div>
+<span class="label">idle</span>
+</div>
+<div class="state-cell active">
+<div class="preview"><span class="icon active">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6 a 2 2 0 0 1 2 -2 H 11 a 2 2 0 0 1 2 2 V 10 a 2 2 0 0 1 -2 2 H 7 L 4 14 V 12 H 5 a 2 2 0 0 1 -2 -2 Z" fill="currentColor" fill-opacity="0.15"/><path d="M9 12 V 13 a 2 2 0 0 0 2 2 H 16 L 19 17 V 15 H 18 a 2 2 0 0 0 2 -2 V 10 a 2 2 0 0 0 -2 -2 H 13"/></g></svg>
+</span></div>
+<span class="label">active</span>
+</div>
+<div class="state-cell paused">
+<div class="preview"><span class="icon paused">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6 a 2 2 0 0 1 2 -2 H 11 a 2 2 0 0 1 2 2 V 10 a 2 2 0 0 1 -2 2 H 7 L 4 14 V 12 H 5 a 2 2 0 0 1 -2 -2 Z"/><path d="M9 12 V 13 a 2 2 0 0 0 2 2 H 16 L 19 17 V 15 H 18 a 2 2 0 0 0 2 -2 V 10 a 2 2 0 0 0 -2 -2 H 13"/></g></svg>
+</span></div>
+<span class="label">paused</span>
+</div>
+<div class="state-cell error">
+<div class="preview"><span class="icon error">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6 a 2 2 0 0 1 2 -2 H 11 a 2 2 0 0 1 2 2 V 10 a 2 2 0 0 1 -2 2 H 7 L 4 14 V 12 H 5 a 2 2 0 0 1 -2 -2 Z"/><path d="M9 12 V 13 a 2 2 0 0 0 2 2 H 16 L 19 17 V 15 H 18 a 2 2 0 0 0 2 -2 V 10 a 2 2 0 0 0 -2 -2 H 13"/></g></svg>
+</span></div>
+<span class="label">error</span>
+</div>
+</div>
+<div class="menubar-sim">
+<div class="left-apps"><span>Zoom</span><span>File</span><span>Edit</span><span>View</span></div>
+<div class="spacer"></div>
+<div class="right-items">
+<div class="item unison-slot"><svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6 a 2 2 0 0 1 2 -2 H 11 a 2 2 0 0 1 2 2 V 10 a 2 2 0 0 1 -2 2 H 7 L 4 14 V 12 H 5 a 2 2 0 0 1 -2 -2 Z"/><path d="M9 12 V 13 a 2 2 0 0 0 2 2 H 16 L 19 17 V 15 H 18 a 2 2 0 0 0 2 -2 V 10 a 2 2 0 0 0 -2 -2 H 13"/></g></svg></div>
+<div class="item">🔋</div>
+<div class="item">🔔</div>
+<div class="item clock">14:38</div>
+</div>
+</div>
+<p class="card-desc"><strong>Chat bubbles.</strong> Два пересекающихся пузыря — оригинал и перевод. Соответствует bubble pattern в transcript window. Минус: при 18px-размере детали мелкие; работает в paused/error хуже.</p>
+</div>
+
+<!-- ═══════════════════════ V5 · Speaker ripple ═══════════════════════ -->
+<div class="variation">
+<div class="variation-label"><span class="num">V5 · Speaker ripple</span></div>
+<div class="states-row">
+<div class="state-cell idle">
+<div class="preview"><span class="icon idle">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="1.5" fill="currentColor" stroke="none"/><path d="M7.5 8.5 a 4.5 4.5 0 0 0 0 5"/><path d="M14.5 8.5 a 4.5 4.5 0 0 1 0 5"/><path d="M5 6 a 7 7 0 0 0 0 10"/><path d="M17 6 a 7 7 0 0 1 0 10"/></g></svg>
+</span></div>
+<span class="label">idle</span>
+</div>
+<div class="state-cell active">
+<div class="preview"><span class="icon active">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="1.5" fill="currentColor" stroke="none"/><path d="M7.5 8.5 a 4.5 4.5 0 0 0 0 5"/><path d="M14.5 8.5 a 4.5 4.5 0 0 1 0 5"/><path d="M5 6 a 7 7 0 0 0 0 10"/><path d="M17 6 a 7 7 0 0 1 0 10"/></g></svg>
+</span></div>
+<span class="label">active</span>
+</div>
+<div class="state-cell paused">
+<div class="preview"><span class="icon paused">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="1.5" fill="currentColor" stroke="none"/><path d="M7.5 8.5 a 4.5 4.5 0 0 0 0 5" opacity="0.5"/><path d="M14.5 8.5 a 4.5 4.5 0 0 1 0 5" opacity="0.5"/></g></svg>
+</span></div>
+<span class="label">paused</span>
+</div>
+<div class="state-cell error">
+<div class="preview"><span class="icon error">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="1.5" fill="currentColor" stroke="none"/><path d="M7.5 8.5 a 4.5 4.5 0 0 0 0 5"/><path d="M14.5 8.5 a 4.5 4.5 0 0 1 0 5"/></g></svg>
+</span></div>
+<span class="label">error</span>
+</div>
+</div>
+<div class="menubar-sim">
+<div class="left-apps"><span>Zoom</span><span>File</span><span>Edit</span><span>View</span></div>
+<div class="spacer"></div>
+<div class="right-items">
+<div class="item unison-slot"><svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="1.5" fill="currentColor" stroke="none"/><path d="M7.5 8.5 a 4.5 4.5 0 0 0 0 5"/><path d="M14.5 8.5 a 4.5 4.5 0 0 1 0 5"/><path d="M5 6 a 7 7 0 0 0 0 10"/><path d="M17 6 a 7 7 0 0 1 0 10"/></g></svg></div>
+<div class="item">🔋</div>
+<div class="item">🔔</div>
+<div class="item clock">14:38</div>
+</div>
+</div>
+<p class="card-desc"><strong>Speaker ripple.</strong> Точка с симметричными звуковыми «лепестками» — голос из двух источников. Минимальный 1-пиксельный stroke, концентричные дуги. Active — лепестки можно дополнительно анимировать (расширение).</p>
+</div>
+
+<!-- ═══════════════════════ V6 · Two arrows + dot ═══════════════════════ -->
+<div class="variation">
+<div class="variation-label"><span class="num">V6 · U with sound wave</span></div>
+<div class="states-row">
+<div class="state-cell idle">
+<div class="preview"><span class="icon idle">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"><path d="M5 6 V12 a 6 6 0 0 0 12 0 V 6"/><path d="M7.5 14.5 Q 11 17 14.5 14.5"/></g></svg>
+</span></div>
+<span class="label">idle</span>
+</div>
+<div class="state-cell active">
+<div class="preview"><span class="icon active">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.9" stroke-linecap="round" fill="none"><path d="M5 6 V12 a 6 6 0 0 0 12 0 V 6"/><path d="M7.5 14.5 Q 11 17 14.5 14.5"/></g><circle cx="11" cy="9" r="2" fill="currentColor" opacity="0.3"/></svg>
+</span></div>
+<span class="label">active</span>
+</div>
+<div class="state-cell paused">
+<div class="preview"><span class="icon paused">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"><path d="M5 6 V12 a 6 6 0 0 0 12 0 V 6"/></g></svg>
+</span></div>
+<span class="label">paused</span>
+</div>
+<div class="state-cell error">
+<div class="preview"><span class="icon error">
+<svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"><path d="M5 6 V12 a 6 6 0 0 0 12 0 V 6"/><path d="M7.5 14.5 Q 11 17 14.5 14.5"/></g></svg>
+</span></div>
+<span class="label">error</span>
+</div>
+</div>
+<div class="menubar-sim">
+<div class="left-apps"><span>Zoom</span><span>File</span><span>Edit</span><span>View</span></div>
+<div class="spacer"></div>
+<div class="right-items">
+<div class="item unison-slot"><svg viewBox="0 0 22 22" fill="none"><g stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"><path d="M5 6 V12 a 6 6 0 0 0 12 0 V 6"/><path d="M7.5 14.5 Q 11 17 14.5 14.5"/></g></svg></div>
+<div class="item">🔋</div>
+<div class="item">🔔</div>
+<div class="item clock">14:38</div>
+</div>
+</div>
+<p class="card-desc"><strong>U with sound wave.</strong> Буква U с маленькой волной-«улыбкой» внизу — гибрид брендинга и audio-метафоры. Paused = U без волны (звук «замолчал»). Active — точка-«голос» внутри U.</p>
+</div>
+
+</main>
+
+</body>
+</html>

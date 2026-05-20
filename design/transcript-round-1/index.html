@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Transcript · R1</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,200;9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="liquidGlass" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="2" seed="9" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="3" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+
+    <symbol id="icon-close" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <line x1="4" y1="4" x2="12" y2="12"/>
+        <line x1="12" y1="4" x2="4" y2="12"/>
+      </g>
+    </symbol>
+    <symbol id="icon-pin" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 2 L8 7 L11 9 L8 9 L8 14 L5 9 L8 9 L8 7 Z" fill="currentColor" stroke="none" opacity="0.85"/>
+      </g>
+    </symbol>
+    <symbol id="icon-drag" viewBox="0 0 16 16">
+      <g fill="currentColor">
+        <circle cx="6" cy="4" r="1"/>
+        <circle cx="10" cy="4" r="1"/>
+        <circle cx="6" cy="8" r="1"/>
+        <circle cx="10" cy="8" r="1"/>
+        <circle cx="6" cy="12" r="1"/>
+        <circle cx="10" cy="12" r="1"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --me-color: #b6e0ff;
+  --peer-color: #ffd6c0;
+  --ready: #58e09a;
+  --active: #5ac8fa;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.03em; margin-bottom: 4px;
+}
+.page-header h1 .accent { color: var(--accent); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; }
+.page-header p code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11.5px;
+  background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;
+}
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+  gap: 40px;
+  padding: 48px 48px 64px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+.card { display: flex; flex-direction: column; gap: 14px; }
+.card-label {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 2px;
+}
+.card-label .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; color: var(--page-mute);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.card-desc { font-size: 12.5px; color: var(--page-mute); line-height: 1.55; max-width: 380px; }
+.card-desc strong { color: var(--page-fg); font-weight: 500; }
+.card-desc code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px;
+}
+
+.frame {
+  position: relative;
+  height: 480px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 24px 64px -16px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4);
+}
+.menubar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex; align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px;
+  z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+.desktop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+
+/* Position transcript window in upper-right area (floating overlay) */
+.transcript-pos {
+  position: absolute;
+  top: 38px; right: 18px;
+  z-index: 5;
+}
+
+/* ════ Base transcript window (Liquid Glass) ════ */
+.transcript {
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  backdrop-filter: blur(22px) saturate(160%) url(#liquidGlass);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  border-radius: 18px;
+  color: #f5f5f7;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 24px 56px -8px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -1px 0 rgba(0,0,0,0.4),
+    inset 1px 0 0 rgba(255,255,255,0.06),
+    inset -1px 0 0 rgba(255,255,255,0.06);
+}
+.transcript::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 60%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.14) 0%, transparent 35%),
+    radial-gradient(ellipse 100% 60% at 30% 0%, rgba(255,255,255,0.20), transparent 70%);
+  border-radius: 18px 18px 50% 50% / 18px 18px 30% 30%;
+  pointer-events: none; mix-blend-mode: screen;
+}
+.transcript::after {
+  content: "";
+  position: absolute; inset: 0;
+  border-radius: 18px;
+  padding: 1px;
+  background: conic-gradient(from 135deg at 50% 50%,
+    rgba(255,255,255,0.4), rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.4) 50%, rgba(255,255,255,0.05) 75%, rgba(255,255,255,0.4));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; opacity: 0.5;
+}
+
+/* Title bar (draggable area) */
+.t-titlebar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px 8px;
+  position: relative; z-index: 1;
+  cursor: grab;
+  user-select: none;
+}
+.t-titlebar:active { cursor: grabbing; }
+.t-title {
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  display: flex; align-items: center; gap: 6px;
+}
+.t-title .dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--active);
+  box-shadow: 0 0 6px rgba(90, 200, 250, 0.7);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.t-title .timer {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.4);
+  letter-spacing: 0.04em;
+  margin-left: 4px;
+}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.t-titlebar .spacer { flex: 1; }
+.t-titlebar .t-btn {
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.5);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.t-titlebar .t-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.t-titlebar .t-btn svg { width: 11px; height: 11px; }
+
+/* Speaker badges/colors */
+.speaker-me { color: var(--me-color); }
+.speaker-peer { color: var(--peer-color); }
+
+/* ═══════════════════════ V1 — Floating Caption ═══════════════════════ */
+.v1 .transcript { width: 380px; }
+.v1 .t-body {
+  padding: 8px 16px 18px;
+  display: flex; flex-direction: column; gap: 16px;
+  position: relative; z-index: 1;
+  min-height: 200px;
+  justify-content: flex-end;
+}
+.v1 .caption {
+  display: flex; flex-direction: column; gap: 4px;
+  transition: opacity 0.4s;
+}
+.v1 .caption .speaker-tag {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-weight: 500;
+}
+.v1 .caption .original {
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.35;
+}
+.v1 .caption .translated {
+  font-size: 14px;
+  color: rgba(255,255,255,0.6);
+  letter-spacing: -0.005em;
+  line-height: 1.4;
+  font-style: italic;
+}
+.v1 .caption.history { opacity: 0.35; }
+.v1 .caption.history .original { font-size: 14px; }
+.v1 .caption.history .translated { font-size: 12px; }
+.v1 .caption.current .original { color: #fff; }
+
+/* ═══════════════════════ V2 — Karaoke Pair ═══════════════════════ */
+.v2 .transcript { width: 380px; }
+.v2 .t-body {
+  padding: 8px 0 0;
+  position: relative; z-index: 1;
+}
+.v2 .karaoke {
+  padding: 14px 16px 18px;
+  display: flex; flex-direction: column; gap: 8px;
+  border-bottom: 0.5px solid rgba(255,255,255,0.08);
+}
+.v2 .karaoke .speaker-tag {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.v2 .karaoke .original {
+  font-size: 19px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+.v2 .karaoke .translated {
+  font-size: 14.5px;
+  color: rgba(255,255,255,0.7);
+  letter-spacing: -0.005em;
+  line-height: 1.4;
+  padding-left: 12px;
+  border-left: 2px solid rgba(255, 182, 224, 0.4);
+}
+.v2 .history {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 8px 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+.v2 .history-turn {
+  padding: 7px 16px;
+  display: flex; flex-direction: column; gap: 2px;
+  border-bottom: 0.5px dashed rgba(255,255,255,0.04);
+}
+.v2 .history-turn .head {
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+.v2 .history-turn .head .ts {
+  color: rgba(255,255,255,0.3);
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  margin-left: auto;
+}
+.v2 .history-turn .original {
+  font-size: 12.5px;
+  color: rgba(255,255,255,0.75);
+  letter-spacing: -0.005em;
+}
+.v2 .history-turn .translated {
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.45);
+  font-style: italic;
+}
+
+/* ═══════════════════════ V3 — Chat Bubbles ═══════════════════════ */
+.v3 .transcript { width: 360px; }
+.v3 .t-body {
+  padding: 6px 14px 14px;
+  max-height: 360px;
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  position: relative; z-index: 1;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+.v3 .bubble {
+  max-width: 80%;
+  padding: 9px 12px;
+  border-radius: 14px;
+  font-size: 13px;
+  letter-spacing: -0.005em;
+  line-height: 1.4;
+  position: relative;
+}
+.v3 .bubble .original { font-weight: 500; }
+.v3 .bubble .translated {
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.55);
+  font-style: italic;
+  margin-top: 3px;
+  padding-top: 5px;
+  border-top: 0.5px solid rgba(255,255,255,0.08);
+}
+.v3 .bubble.me {
+  align-self: flex-end;
+  background: linear-gradient(180deg, rgba(182, 224, 255, 0.18), rgba(120, 180, 220, 0.10));
+  border: 0.5px solid rgba(182, 224, 255, 0.2);
+}
+.v3 .bubble.peer {
+  align-self: flex-start;
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.08);
+}
+
+/* ═══════════════════════ V4 — Split Vertical ═══════════════════════ */
+.v4 .transcript { width: 380px; }
+.v4 .t-body {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  position: relative; z-index: 1;
+}
+.v4 .panel {
+  padding: 14px 18px;
+  display: flex; flex-direction: column; gap: 6px;
+  min-height: 130px;
+  justify-content: center;
+}
+.v4 .panel.me { border-bottom: 0.5px solid rgba(255,255,255,0.08); }
+.v4 .panel .speaker-tag {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-weight: 500;
+}
+.v4 .panel .original {
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.35;
+}
+.v4 .panel .translated {
+  font-size: 13px;
+  color: rgba(255,255,255,0.6);
+  font-style: italic;
+  letter-spacing: -0.005em;
+}
+.v4 .panel .ts {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: rgba(255,255,255,0.3);
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+
+/* ═══════════════════════ V5 — Newspaper Columns ═══════════════════════ */
+.v5 .transcript { width: 460px; }
+.v5 .t-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  position: relative; z-index: 1;
+  max-height: 320px;
+}
+.v5 .col {
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 14px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+.v5 .col.me { border-right: 0.5px solid rgba(255,255,255,0.08); }
+.v5 .col .speaker-head {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-weight: 500;
+  padding-bottom: 8px;
+  border-bottom: 0.5px solid rgba(255,255,255,0.06);
+  margin-bottom: 4px;
+  position: sticky; top: 0;
+  background: rgba(20,20,30,0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.v5 .turn {
+  display: flex; flex-direction: column; gap: 3px;
+}
+.v5 .turn .original {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+}
+.v5 .turn .translated {
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.55);
+  font-style: italic;
+  letter-spacing: -0.005em;
+}
+.v5 .turn.current {
+  padding-bottom: 6px;
+  border-bottom: 0.5px solid rgba(255, 182, 224, 0.25);
+}
+
+/* ═══════════════════════ V6 — Compact Timeline ═══════════════════════ */
+.v6 .transcript { width: 380px; }
+.v6 .t-body {
+  padding: 4px 12px 12px;
+  max-height: 340px;
+  overflow-y: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  letter-spacing: -0.005em;
+  position: relative; z-index: 1;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+.v6 .row {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 4px 0;
+  border-bottom: 0.5px solid rgba(255,255,255,0.04);
+}
+.v6 .row:last-child { border-bottom: none; }
+.v6 .row .ts {
+  color: rgba(255,255,255,0.3);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+  width: 38px;
+}
+.v6 .row .prefix {
+  flex-shrink: 0;
+  font-weight: 600;
+  width: 32px;
+  font-size: 11px;
+}
+.v6 .row .content {
+  flex: 1; min-width: 0;
+  font-family: 'DM Sans', sans-serif;
+  display: flex; flex-direction: column; gap: 1px;
+}
+.v6 .row .original {
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: rgba(255,255,255,0.95);
+}
+.v6 .row .translated {
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: -0.005em;
+  font-style: italic;
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Transcript · <span class="accent">R1</span></h1>
+<p>Floating-окно поверх всех приложений во время активной сессии. Показывает оригинал + перевод обеих сторон. Draggable, всегда на верху. Шесть UX-моделей.</p>
+<div class="nav">
+<a href="/popover-final/">Popover</a>
+<a href="/onboarding-final/">Onboarding</a>
+<a class="current" href="/transcript-round-1/">Transcript R1</a>
+</div>
+</header>
+
+<main class="grid">
+
+<!-- V1 — Floating Caption -->
+<div class="card">
+<div class="card-label"><span class="num">V1 · Floating Caption</span></div>
+<div class="frame">
+<div class="menubar"><span class="app-name">Zoom</span><span>Meeting</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="transcript-pos v1">
+<div class="transcript">
+<div class="t-titlebar">
+<svg style="width:11px;height:11px;color:rgba(255,255,255,0.3)"><use href="#icon-drag"/></svg>
+<div class="t-title"><span class="dot"></span>Перевод <span class="timer">02:14</span></div>
+<span class="spacer"></span>
+<a class="t-btn"><svg><use href="#icon-close"/></svg></a>
+</div>
+<div class="t-body">
+<div class="caption history">
+<div class="speaker-tag speaker-me">Я</div>
+<div class="original">Привет, как дела?</div>
+<div class="translated">Hi, how are you?</div>
+</div>
+<div class="caption history">
+<div class="speaker-tag speaker-peer">Собеседник</div>
+<div class="original">I'm good. What about the meeting?</div>
+<div class="translated">Хорошо. Что насчёт встречи?</div>
+</div>
+<div class="caption current">
+<div class="speaker-tag speaker-me">Я</div>
+<div class="original">Давай завтра в 10 утра.</div>
+<div class="translated">Let's do tomorrow at 10 AM.</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Floating Caption.</strong> Текущая фраза крупная (18px), история уходит вверх с opacity 0.35. Маленький speaker-тег цветом. Внизу — текущий turn, новые добавляются снизу, старые поднимаются и блёкнут. Минимальный фокус на «что говорят прямо сейчас».</p>
+</div>
+
+<!-- V2 — Karaoke Pair -->
+<div class="card">
+<div class="card-label"><span class="num">V2 · Karaoke Pair</span></div>
+<div class="frame">
+<div class="menubar"><span class="app-name">Zoom</span><span>Meeting</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="transcript-pos v2">
+<div class="transcript">
+<div class="t-titlebar">
+<svg style="width:11px;height:11px;color:rgba(255,255,255,0.3)"><use href="#icon-drag"/></svg>
+<div class="t-title"><span class="dot"></span>Перевод <span class="timer">02:14</span></div>
+<span class="spacer"></span>
+<a class="t-btn"><svg><use href="#icon-close"/></svg></a>
+</div>
+<div class="t-body">
+<div class="karaoke">
+<div class="speaker-tag speaker-me">Я говорю</div>
+<div class="original">Давай завтра в 10 утра.</div>
+<div class="translated">Let's do tomorrow at 10 AM.</div>
+</div>
+<div class="history">
+<div class="history-turn">
+<div class="head"><span class="speaker-peer">Собеседник</span><span class="ts">14:36</span></div>
+<div class="original">I'm good. What about the meeting?</div>
+<div class="translated">Хорошо. Что насчёт встречи?</div>
+</div>
+<div class="history-turn">
+<div class="head"><span class="speaker-me">Я</span><span class="ts">14:36</span></div>
+<div class="original">Привет, как дела?</div>
+<div class="translated">Hi, how are you?</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Karaoke Pair.</strong> Текущий turn — крупный hero блок наверху (original 19px + translated 14.5 с accent-borderline). Под ним — компактная история turns в обратном хронологическом порядке. Самый «концертный» фокус на live-репликe.</p>
+</div>
+
+<!-- V3 — Chat Bubbles -->
+<div class="card">
+<div class="card-label"><span class="num">V3 · Chat Bubbles</span></div>
+<div class="frame">
+<div class="menubar"><span class="app-name">Zoom</span><span>Meeting</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="transcript-pos v3">
+<div class="transcript">
+<div class="t-titlebar">
+<svg style="width:11px;height:11px;color:rgba(255,255,255,0.3)"><use href="#icon-drag"/></svg>
+<div class="t-title"><span class="dot"></span>Перевод <span class="timer">02:14</span></div>
+<span class="spacer"></span>
+<a class="t-btn"><svg><use href="#icon-close"/></svg></a>
+</div>
+<div class="t-body">
+<div class="bubble me">
+<div class="original">Привет, как дела?</div>
+<div class="translated">Hi, how are you?</div>
+</div>
+<div class="bubble peer">
+<div class="original">I'm good. What about the meeting?</div>
+<div class="translated">Хорошо. Что насчёт встречи?</div>
+</div>
+<div class="bubble me">
+<div class="original">Давай завтра в 10 утра.</div>
+<div class="translated">Let's do tomorrow at 10 AM.</div>
+</div>
+<div class="bubble peer">
+<div class="original">Sounds good.</div>
+<div class="translated">Звучит хорошо.</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Chat Bubbles.</strong> Классический iMessage-style. «Я» справа с голубым tint'ом, «Собеседник» слева нейтральным. В каждом bubble: оригинал крупно + перевод курсивом ниже с тонкой разделительной линией. Понятная привычная метафора.</p>
+</div>
+
+<!-- V4 — Split Vertical -->
+<div class="card">
+<div class="card-label"><span class="num">V4 · Split Vertical</span></div>
+<div class="frame">
+<div class="menubar"><span class="app-name">Zoom</span><span>Meeting</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="transcript-pos v4">
+<div class="transcript">
+<div class="t-titlebar">
+<svg style="width:11px;height:11px;color:rgba(255,255,255,0.3)"><use href="#icon-drag"/></svg>
+<div class="t-title"><span class="dot"></span>Перевод <span class="timer">02:14</span></div>
+<span class="spacer"></span>
+<a class="t-btn"><svg><use href="#icon-close"/></svg></a>
+</div>
+<div class="t-body">
+<div class="panel me">
+<div class="speaker-tag speaker-me">Я</div>
+<div class="original">Давай завтра в 10 утра.</div>
+<div class="translated">Let's do tomorrow at 10 AM.</div>
+<div class="ts">14:38</div>
+</div>
+<div class="panel peer">
+<div class="speaker-tag speaker-peer">Собеседник</div>
+<div class="original">I'm good. What about the meeting?</div>
+<div class="translated">Хорошо. Что насчёт встречи?</div>
+<div class="ts">14:36</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Split Vertical.</strong> Окно разделено пополам. Сверху — последняя моя фраза, снизу — последняя фраза собеседника. Обновляется на месте. История не показана, только «вот что я сказал последний раз / вот что они сказали». Очень глазам легко — известно куда смотреть.</p>
+</div>
+
+<!-- V5 — Newspaper Columns -->
+<div class="card">
+<div class="card-label"><span class="num">V5 · Newspaper Columns</span></div>
+<div class="frame">
+<div class="menubar"><span class="app-name">Zoom</span><span>Meeting</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="transcript-pos v5">
+<div class="transcript">
+<div class="t-titlebar">
+<svg style="width:11px;height:11px;color:rgba(255,255,255,0.3)"><use href="#icon-drag"/></svg>
+<div class="t-title"><span class="dot"></span>Перевод <span class="timer">02:14</span></div>
+<span class="spacer"></span>
+<a class="t-btn"><svg><use href="#icon-close"/></svg></a>
+</div>
+<div class="t-body">
+<div class="col me">
+<div class="speaker-head speaker-me">Я</div>
+<div class="turn">
+<div class="original">Привет, как дела?</div>
+<div class="translated">Hi, how are you?</div>
+</div>
+<div class="turn current">
+<div class="original">Давай завтра в 10 утра.</div>
+<div class="translated">Let's do tomorrow at 10 AM.</div>
+</div>
+</div>
+<div class="col peer">
+<div class="speaker-head speaker-peer">Собеседник</div>
+<div class="turn">
+<div class="original">I'm good. What about the meeting?</div>
+<div class="translated">Хорошо. Что насчёт встречи?</div>
+</div>
+<div class="turn">
+<div class="original">Sounds good.</div>
+<div class="translated">Звучит хорошо.</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Newspaper Columns.</strong> Две независимые колонки, левая «Я», правая «Собеседник». Каждая со своим скроллом, sticky-headers. Можно сравнивать что кто сказал когда. Шире окна (460), скорее для крупных мониторов.</p>
+</div>
+
+<!-- V6 — Compact Timeline -->
+<div class="card">
+<div class="card-label"><span class="num">V6 · Compact Timeline</span></div>
+<div class="frame">
+<div class="menubar"><span class="app-name">Zoom</span><span>Meeting</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="transcript-pos v6">
+<div class="transcript">
+<div class="t-titlebar">
+<svg style="width:11px;height:11px;color:rgba(255,255,255,0.3)"><use href="#icon-drag"/></svg>
+<div class="t-title"><span class="dot"></span>Перевод <span class="timer">02:14</span></div>
+<span class="spacer"></span>
+<a class="t-btn"><svg><use href="#icon-close"/></svg></a>
+</div>
+<div class="t-body">
+<div class="row">
+<span class="ts">14:36</span>
+<span class="prefix speaker-me">RU →</span>
+<div class="content">
+<div class="original">Привет, как дела?</div>
+<div class="translated">Hi, how are you?</div>
+</div>
+</div>
+<div class="row">
+<span class="ts">14:36</span>
+<span class="prefix speaker-peer">EN ←</span>
+<div class="content">
+<div class="original">I'm good. What about the meeting?</div>
+<div class="translated">Хорошо. Что насчёт встречи?</div>
+</div>
+</div>
+<div class="row">
+<span class="ts">14:38</span>
+<span class="prefix speaker-me">RU →</span>
+<div class="content">
+<div class="original">Давай завтра в 10 утра.</div>
+<div class="translated">Let's do tomorrow at 10 AM.</div>
+</div>
+</div>
+<div class="row">
+<span class="ts">14:38</span>
+<span class="prefix speaker-peer">EN ←</span>
+<div class="content">
+<div class="original">Sounds good.</div>
+<div class="translated">Звучит хорошо.</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Compact Timeline.</strong> Самый плотный вид. IBM Plex Mono для timestamps и языковых codes (<code>RU → / EN ←</code>) — стрелка показывает направление перевода. Body — DM Sans. Похоже на лог или CLI-вывод. Максимум turns на экран.</p>
+</div>
+
+</main>
+
+</body>
+</html>

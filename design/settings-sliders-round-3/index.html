@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Slider thumbs · R3 neutral</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent-link: #ffb6e0;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg); color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.03em; margin-bottom: 4px;
+}
+.page-header h1 .accent { color: var(--accent-link); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; max-width: 700px; }
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px; letter-spacing: 0.04em; flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent-link); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 40px;
+  padding: 48px;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+.variation { display: flex; flex-direction: column; gap: 14px; }
+.variation-label {
+  display: flex; align-items: baseline; justify-content: space-between;
+}
+.variation-label .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; color: var(--page-mute);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+
+.stage {
+  background:
+    radial-gradient(ellipse 70% 50% at 70% 30%, rgba(100, 230, 255, 0.30), transparent 60%),
+    radial-gradient(ellipse 80% 60% at 30% 70%, rgba(255, 110, 200, 0.28), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+  padding: 30px;
+  border-radius: 14px;
+  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  min-height: 260px;
+}
+
+.settings-popover {
+  width: 280px;
+  padding: 16px;
+  background: rgba(20, 22, 30, 0.65);
+  backdrop-filter: blur(36px) saturate(200%);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border-radius: 14px;
+  border: 0.5px solid rgba(255,255,255,0.12);
+  box-shadow: 0 20px 48px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.14);
+  color: #f5f5f7;
+}
+.group + .group {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 0.5px solid rgba(255,255,255,0.08);
+}
+.group-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12.5px; font-weight: 500;
+  color: rgba(255,255,255,0.9);
+  letter-spacing: -0.005em;
+  margin-bottom: 10px;
+}
+.group-head .value {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.04em;
+}
+
+/* Base — neutral white fill, no accent color */
+.slider-track {
+  position: relative;
+  height: 4px;
+  background: rgba(255,255,255,0.10);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.slider-track .fill {
+  position: absolute;
+  top: 0; left: 0; height: 100%;
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.card-desc {
+  font-size: 12.5px; color: var(--page-mute);
+  line-height: 1.55; max-width: 360px;
+}
+.card-desc strong { color: var(--page-fg); font-weight: 500; }
+.card-desc code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px;
+}
+
+/* ═══════════════════════ T1 · Soft dot ═══════════════════════ */
+.t1 .thumb {
+  position: absolute;
+  top: 50%;
+  width: 12px; height: 12px;
+  background: linear-gradient(180deg, #fff, #d8d8da);
+  border: 0.5px solid rgba(0,0,0,0.25);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.5);
+}
+
+/* ═══════════════════════ T2 · Vertical handle ═══════════════════════ */
+.t2 .slider-track {
+  height: 6px;
+  border-radius: 3px;
+}
+.t2 .thumb {
+  position: absolute;
+  top: 50%;
+  width: 4px; height: 18px;
+  background: linear-gradient(180deg, #fff, #ddd);
+  border-radius: 2px;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+}
+
+/* ═══════════════════════ T3 · Glass capsule ═══════════════════════ */
+.t3 .thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px; height: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.4), rgba(255,255,255,0.18));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 0.5px solid rgba(255,255,255,0.35);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow:
+    0 2px 6px rgba(0,0,0,0.4),
+    inset 0 1px 0 rgba(255,255,255,0.4),
+    inset 0 -1px 0 rgba(0,0,0,0.1);
+}
+.t3 .thumb::before {
+  content: "";
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 4px; height: 3px;
+  background: rgba(255,255,255,0.55);
+  border-radius: 50%;
+  filter: blur(1px);
+}
+
+/* ═══════════════════════ T4 · Double ring ═══════════════════════ */
+.t4 .thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px; height: 14px;
+  background: #fff;
+  border: 1.5px solid rgba(255,255,255,0.5);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow:
+    0 2px 5px rgba(0,0,0,0.4),
+    0 0 0 0.5px rgba(0,0,0,0.18);
+}
+.t4 .thumb::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border: 0.5px solid rgba(255,255,255,0.12);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* ═══════════════════════ T5 · Inset notch ═══════════════════════ */
+.t5 .slider-track {
+  height: 6px;
+  border-radius: 3px;
+}
+.t5 .thumb {
+  position: absolute;
+  top: 50%;
+  width: 3px; height: 12px;
+  background: #fff;
+  border-radius: 1.5px;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 6px rgba(255,255,255,0.5), 0 1px 2px rgba(0,0,0,0.3);
+}
+
+/* ═══════════════════════ T6 · Frosted glow ═══════════════════════ */
+.t6 .thumb {
+  position: absolute;
+  top: 50%;
+  width: 16px; height: 16px;
+  background: radial-gradient(circle at center, rgba(255,255,255,1) 0%, rgba(255,255,255,0.55) 35%, transparent 75%);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.t6 .thumb::after {
+  content: "";
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 6px; height: 6px;
+  background: #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 8px rgba(255,255,255,0.95);
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Slider thumbs · <span class="accent">R3 neutral</span></h1>
+<p>Те же 6 направлений thumb'а, но без розового акцента — нейтральная палитра white / grey / glass. Fill тоже сменён на нейтральный белый <code style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:rgba(255,255,255,0.06);padding:1px 4px;border-radius:3px;color:rgba(245,245,247,0.9)">rgba(255,255,255,0.55)</code>.</p>
+<div class="nav">
+<a href="/transcript-final/">Transcript</a>
+<a href="/settings-sliders-round-1/">Sliders R1</a>
+<a href="/settings-sliders-round-2/">R2</a>
+<a class="current" href="/settings-sliders-round-3/">R3 neutral</a>
+</div>
+</header>
+
+<main class="grid">
+
+<!-- T1 -->
+<div class="variation">
+<div class="variation-label"><span class="num">T1 · Soft dot</span></div>
+<div class="stage">
+<div class="settings-popover t1">
+<div class="group">
+<div class="group-head"><span>Размер транскрипта</span><span class="value">M</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 50%"></div>
+<div class="thumb" style="left: 50%"></div>
+</div>
+</div>
+<div class="group">
+<div class="group-head"><span>Громкость оригинала</span><span class="value">20%</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 20%"></div>
+<div class="thumb" style="left: 20%"></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Soft dot.</strong> Белый с лёгким градиентом сверху-вниз (<code>#fff → #d8d8da</code>), тонкая тёмная обводка, inset highlight. Чистый Apple HIG — но матовее, не «пластиковый».</p>
+</div>
+
+<!-- T2 -->
+<div class="variation">
+<div class="variation-label"><span class="num">T2 · Vertical handle</span></div>
+<div class="stage">
+<div class="settings-popover t2">
+<div class="group">
+<div class="group-head"><span>Размер транскрипта</span><span class="value">M</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 50%"></div>
+<div class="thumb" style="left: 50%"></div>
+</div>
+</div>
+<div class="group">
+<div class="group-head"><span>Громкость оригинала</span><span class="value">20%</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 20%"></div>
+<div class="thumb" style="left: 20%"></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Vertical handle.</strong> Тонкая вертикальная палочка 4×18 + утолщённый трек (6px). iOS lock-screen volume style. «Ручка» которую очевидно хочется потянуть.</p>
+</div>
+
+<!-- T3 -->
+<div class="variation">
+<div class="variation-label"><span class="num">T3 · Glass capsule</span></div>
+<div class="stage">
+<div class="settings-popover t3">
+<div class="group">
+<div class="group-head"><span>Размер транскрипта</span><span class="value">M</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 50%"></div>
+<div class="thumb" style="left: 50%"></div>
+</div>
+</div>
+<div class="group">
+<div class="group-head"><span>Громкость оригинала</span><span class="value">20%</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 20%"></div>
+<div class="thumb" style="left: 20%"></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Glass capsule.</strong> Полупрозрачный стеклянный кружок с <code>backdrop-filter: blur(8px)</code>, inner highlight, маленький specular блик. Один материал с popover'ом — единая эстетика.</p>
+</div>
+
+<!-- T4 -->
+<div class="variation">
+<div class="variation-label"><span class="num">T4 · Double ring</span></div>
+<div class="stage">
+<div class="settings-popover t4">
+<div class="group">
+<div class="group-head"><span>Размер транскрипта</span><span class="value">M</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 50%"></div>
+<div class="thumb" style="left: 50%"></div>
+</div>
+</div>
+<div class="group">
+<div class="group-head"><span>Громкость оригинала</span><span class="value">20%</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 20%"></div>
+<div class="thumb" style="left: 20%"></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Double ring.</strong> Белый центр + тонкая полупрозрачная обводка вокруг + внешнее «эхо» из ещё одного кольца. Без цвета — но визуально «слоистый», аккуратный, более solid чем simple dot.</p>
+</div>
+
+<!-- T5 -->
+<div class="variation">
+<div class="variation-label"><span class="num">T5 · Inset notch</span></div>
+<div class="stage">
+<div class="settings-popover t5">
+<div class="group">
+<div class="group-head"><span>Размер транскрипта</span><span class="value">M</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 50%"></div>
+<div class="thumb" style="left: 50%"></div>
+</div>
+</div>
+<div class="group">
+<div class="group-head"><span>Громкость оригинала</span><span class="value">20%</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 20%"></div>
+<div class="thumb" style="left: 20%"></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Inset notch.</strong> Короткая вертикальная плашка (3×12) с лёгким glow — сидит ровно в треке (6px), не выпирает. Похоже на бегунок термостата Nest. Очень компактно, без «шара» наверху.</p>
+</div>
+
+<!-- T6 -->
+<div class="variation">
+<div class="variation-label"><span class="num">T6 · Frosted glow</span></div>
+<div class="stage">
+<div class="settings-popover t6">
+<div class="group">
+<div class="group-head"><span>Размер транскрипта</span><span class="value">M</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 50%"></div>
+<div class="thumb" style="left: 50%"></div>
+</div>
+</div>
+<div class="group">
+<div class="group-head"><span>Громкость оригинала</span><span class="value">20%</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 20%"></div>
+<div class="thumb" style="left: 20%"></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Frosted glow.</strong> Маленькая белая точка + радиальное белое сияние без чёткой границы. Без цвета, всё нейтральное. Эфирный, расплывчатый — как огонёк свечи.</p>
+</div>
+
+</main>
+
+</body>
+</html>

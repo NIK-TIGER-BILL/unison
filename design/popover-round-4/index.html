@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Popover · Round 4 · V2 arrow variations</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=IBM+Plex+Mono:wght@300;400&family=Instrument+Serif:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="liquidGlass" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="2" seed="9" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="3" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+
+    <!-- Proper SF Symbols-style gear (teeth, not rays) -->
+    <symbol id="icon-gear" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1c.895.264 1.318 1.285.872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858z"/>
+    </symbol>
+
+    <symbol id="icon-play" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M4 2.5c0-.5.5-.8.95-.55l8.5 5.05c.45.27.45.93 0 1.2l-8.5 5.05c-.45.26-.95-.05-.95-.55v-10.2z"/>
+    </symbol>
+
+    <symbol id="icon-mic" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <rect x="6" y="2" width="4" height="8" rx="2"/>
+        <path d="M3.5 7.5v1a4.5 4.5 0 0 0 9 0v-1M8 13v1.5"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-ear" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 14c-2-1-3-3-3-6a5 5 0 0 1 10 0c0 2-1.5 3-3 3s-2.5 1-2.5 2.5"/>
+      </g>
+    </symbol>
+
+    <!-- ARROW VARIANTS -->
+
+    <!-- arrow-a: simple double-headed line -->
+    <symbol id="arrow-a" viewBox="0 0 40 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="6" y1="8" x2="34" y2="8"/>
+        <polyline points="10,4 6,8 10,12"/>
+        <polyline points="30,4 34,8 30,12"/>
+      </g>
+    </symbol>
+
+    <!-- arrow-b: stacked split arrows (top→ bottom←) -->
+    <symbol id="arrow-b" viewBox="0 0 40 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="6" y1="5" x2="32" y2="5"/>
+        <polyline points="28,2 32,5 28,8"/>
+        <line x1="8" y1="11" x2="34" y2="11"/>
+        <polyline points="12,8 8,11 12,14"/>
+      </g>
+    </symbol>
+
+    <!-- arrow-c: iOS-style swap (two curved arrows) -->
+    <symbol id="arrow-c" viewBox="0 0 40 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 5 Q 20 -2 34 5"/>
+        <polyline points="30,2 34,5 30,8"/>
+        <path d="M34 11 Q 20 18 6 11"/>
+        <polyline points="10,14 6,11 10,8"/>
+      </g>
+    </symbol>
+
+    <!-- arrow-d: thin elegant double-head with serif terminals -->
+    <symbol id="arrow-d" viewBox="0 0 40 16">
+      <g fill="none" stroke="currentColor" stroke-width="0.9" stroke-linecap="round">
+        <line x1="4" y1="8" x2="36" y2="8"/>
+        <line x1="4" y1="5.5" x2="4" y2="10.5"/>
+        <line x1="36" y1="5.5" x2="36" y2="10.5"/>
+        <polyline points="9,5 4,8 9,11" stroke-width="0.9"/>
+        <polyline points="31,5 36,8 31,11" stroke-width="0.9"/>
+      </g>
+    </symbol>
+
+    <!-- arrow-e: pill badge with ↔ symbol -->
+    <symbol id="arrow-e" viewBox="0 0 40 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="34" height="10" rx="5" stroke-opacity="0.35"/>
+        <line x1="13" y1="8" x2="27" y2="8"/>
+        <polyline points="16,5 13,8 16,11"/>
+        <polyline points="24,5 27,8 24,11"/>
+      </g>
+    </symbol>
+
+    <!-- arrow-f: minimal two-row hairlines with arrowheads -->
+    <symbol id="arrow-f" viewBox="0 0 40 16">
+      <g fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round">
+        <line x1="8" y1="5" x2="32" y2="5"/>
+        <polyline points="29.5,3.2 32,5 29.5,6.8" stroke-width="1"/>
+        <line x1="8" y1="11" x2="32" y2="11"/>
+        <polyline points="10.5,9.2 8,11 10.5,12.8" stroke-width="1"/>
+      </g>
+    </symbol>
+
+  </defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --card-shadow: 0 24px 64px -16px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 60px 48px 32px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky;
+  top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-size: 36px;
+  letter-spacing: -0.025em;
+  margin-bottom: 8px;
+}
+.page-header h1 em { font-style: italic; color: #ffb6e0; font-weight: 300; }
+.page-header p {
+  color: var(--page-mute);
+  font-size: 14px;
+  max-width: 720px;
+  line-height: 1.55;
+}
+.page-header p code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.page-header .nav {
+  margin-top: 16px;
+  display: flex; gap: 16px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: #ffb6e0; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+  gap: 48px;
+  padding: 48px 48px 64px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.card { display: flex; flex-direction: column; gap: 14px; }
+.card-label {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 2px;
+}
+.card-label .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; color: var(--page-mute);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.card-desc {
+  font-size: 12.5px; color: var(--page-mute);
+  line-height: 1.55; max-width: 380px;
+}
+.card-desc strong { color: var(--page-fg); font-weight: 500; }
+.card-desc code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 4px; border-radius: 3px;
+}
+
+.frame {
+  position: relative;
+  height: 460px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--card-shadow);
+}
+
+.menubar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex; align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, 'SF Pro Text', sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px;
+  z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+.menubar .clock { font-variant-numeric: tabular-nums; }
+
+.desktop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+
+.popover-wrap {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+}
+
+/* shared Liquid Glass popover */
+.popover {
+  width: 316px;
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  backdrop-filter: blur(20px) saturate(160%) url(#liquidGlass);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border-radius: 22px;
+  color: #f5f5f7;
+  font-family: 'DM Sans', sans-serif;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 32px 80px -8px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -1px 0 rgba(0,0,0,0.4),
+    inset 1px 0 0 rgba(255,255,255,0.06),
+    inset -1px 0 0 rgba(255,255,255,0.06);
+}
+.popover::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 60%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.16) 0%, transparent 35%),
+    radial-gradient(ellipse 100% 60% at 30% 0%, rgba(255,255,255,0.22), transparent 70%);
+  border-radius: 22px 22px 50% 50% / 22px 22px 30% 30%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.popover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 22px;
+  padding: 1px;
+  background: conic-gradient(from 135deg at 50% 50%,
+    rgba(255,255,255,0.4),
+    rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.4) 50%,
+    rgba(255,255,255,0.05) 75%,
+    rgba(255,255,255,0.4));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+/* — header — */
+.top-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+}
+.dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #58e09a;
+  box-shadow: 0 0 8px rgba(88, 224, 154, 0.65);
+}
+.brand-text {
+  font-size: 13px; font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.top-row .spacer { flex: 1; }
+.gear-btn {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.55);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.gear-btn:hover { color: rgba(255,255,255,0.95); background: rgba(255,255,255,0.08); }
+.gear-btn svg { width: 14px; height: 14px; }
+
+/* — mode toggle — */
+.mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 2px; background: rgba(0,0,0,0.22);
+  padding: 3px; border-radius: 10px;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+}
+.mode-seg {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 7px 0; font-size: 12px;
+  color: rgba(255,255,255,0.55);
+  border-radius: 8px; font-weight: 500;
+}
+.mode-seg.on {
+  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06));
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 1px 2px rgba(0,0,0,0.2);
+}
+.mode-seg svg { width: 12px; height: 12px; vertical-align: -1px; }
+
+/* — Start button (full width across all variants) — */
+.start-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08));
+  border: 0.5px solid rgba(255,255,255,0.22);
+  color: #fff;
+  padding: 13px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 13.5px;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  position: relative; z-index: 1;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    inset 0 -1px 0 rgba(0,0,0,0.15),
+    0 4px 12px rgba(0,0,0,0.28);
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+}
+.start-btn svg { width: 11px; height: 11px; }
+
+/* — language bar (varies per variant) — */
+.lang-bar {
+  background: rgba(0,0,0,0.16);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+}
+.lang-side { flex: 1; min-width: 0; }
+.lang-side.right { text-align: right; }
+.lang-lbl {
+  font-size: 9.5px;
+  color: rgba(255,255,255,0.40);
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.lang-val {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+.lang-val .flag { font-size: 14px; margin-right: 3px; }
+.lang-side.right .lang-val .flag { margin-left: 3px; margin-right: 0; }
+.arrow-wrap {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 10px;
+  color: rgba(255,255,255,0.55);
+  flex-shrink: 0;
+}
+.arrow-wrap svg { display: block; }
+
+/* ════════ Variation-specific lang-bar layouts ════════ */
+
+/* V2a — Classic ↔ */
+.va .lang-bar { display: flex; align-items: flex-end; }
+.va .arrow-wrap { padding-bottom: 1px; }
+.va .arrow-wrap svg { width: 36px; height: 14px; }
+
+/* V2b — Split stacked arrows */
+.vb .lang-bar { display: flex; align-items: flex-end; }
+.vb .arrow-wrap { padding-bottom: 0; }
+.vb .arrow-wrap svg { width: 38px; height: 16px; color: rgba(255,255,255,0.65); }
+
+/* V2c — Curved swap arrows */
+.vc .lang-bar { display: flex; align-items: flex-end; }
+.vc .arrow-wrap svg { width: 40px; height: 16px; color: rgba(255, 200, 230, 0.75); }
+
+/* V2d — Refined dual-head with serif terminals */
+.vd .lang-bar { display: flex; align-items: flex-end; }
+.vd .arrow-wrap svg { width: 42px; height: 14px; color: rgba(255,255,255,0.55); }
+
+/* V2e — Pill-badge arrow */
+.ve .lang-bar { display: flex; align-items: center; }
+.ve .arrow-wrap svg { width: 42px; height: 16px; color: rgba(255,255,255,0.7); }
+
+/* V2f — Two parallel arrows (minimal hairline) */
+.vf .lang-bar { display: flex; align-items: flex-end; }
+.vf .arrow-wrap svg { width: 38px; height: 16px; color: rgba(255,255,255,0.55); }
+.vf .arrow-wrap { animation: pulseArrow 3.2s ease-in-out infinite; }
+@keyframes pulseArrow {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; color: rgba(255, 200, 230, 0.85); }
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Popover · <em>Round 4 / V2 + arrow</em></h1>
+<p>База — <strong style="color:#fff">V2 (Workbench)</strong>. Все варианты: <code>full-width Start</code>, мини-лейблы <em>«Я говорю» / «Собеседник»</em>, двунаправленная стрелка между языками, реальный gear (не солнышко). Меняется только дизайн стрелки + мелкие нюансы. Открой в Chrome для рефракции.</p>
+<div class="nav">
+<a href="/popover-round-1/">R1</a>
+<a href="/popover-round-2/">R2</a>
+<a href="/popover-round-3/">R3</a>
+<a class="current" href="/popover-round-4/">R4</a>
+</div>
+</header>
+
+<main class="grid">
+
+<!-- V2a — Classic single-line double-headed -->
+<div class="card">
+<div class="card-label"><span class="num">V2a · Classic ↔</span></div>
+<div class="frame va">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span>🌐</span><span class="clock">14:38</span></div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row"><span class="dot"></span><span class="brand-text">Unison</span><span class="spacer"></span><a class="gear-btn"><svg><use href="#icon-gear"/></svg></a></div>
+<div class="mode-toggle">
+<div class="mode-seg on"><svg><use href="#icon-mic"/></svg> Call</div>
+<div class="mode-seg"><svg><use href="#icon-ear"/></svg> Listen</div>
+</div>
+<div class="lang-bar">
+<div class="lang-side">
+<div class="lang-lbl">Я говорю</div>
+<div class="lang-val"><span class="flag">🇷🇺</span>Русский</div>
+</div>
+<div class="arrow-wrap"><svg><use href="#arrow-a"/></svg></div>
+<div class="lang-side right">
+<div class="lang-lbl">Собеседник</div>
+<div class="lang-val">English<span class="flag">🇬🇧</span></div>
+</div>
+</div>
+<button class="start-btn"><svg><use href="#icon-play"/></svg> Начать перевод</button>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Classic ↔.</strong> Одна линия с двумя стрелками, ровно по центру относительно lang-name. Самая нейтральная, не отвлекает. Stroke 1.2px, round caps. Базовая отсчётная точка.</p>
+</div>
+
+<!-- V2b — Split arrows (top→ bottom←) -->
+<div class="card">
+<div class="card-label"><span class="num">V2b · Split <span style="color:#fff">⇄</span></span></div>
+<div class="frame vb">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span>🌐</span><span class="clock">14:38</span></div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row"><span class="dot"></span><span class="brand-text">Unison</span><span class="spacer"></span><a class="gear-btn"><svg><use href="#icon-gear"/></svg></a></div>
+<div class="mode-toggle">
+<div class="mode-seg on"><svg><use href="#icon-mic"/></svg> Call</div>
+<div class="mode-seg"><svg><use href="#icon-ear"/></svg> Listen</div>
+</div>
+<div class="lang-bar">
+<div class="lang-side">
+<div class="lang-lbl">Я говорю</div>
+<div class="lang-val"><span class="flag">🇷🇺</span>Русский</div>
+</div>
+<div class="arrow-wrap"><svg><use href="#arrow-b"/></svg></div>
+<div class="lang-side right">
+<div class="lang-lbl">Собеседник</div>
+<div class="lang-val">English<span class="flag">🇬🇧</span></div>
+</div>
+</div>
+<button class="start-btn"><svg><use href="#icon-play"/></svg> Начать перевод</button>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Split ⇄.</strong> Две раздельные стрелки — верхняя <em>→</em>, нижняя <em>←</em>. Самый «честный» вариант про двунаправленный поток: видно что это два параллельных канала, не один путь туда-сюда.</p>
+</div>
+
+<!-- V2c — Curved swap (iOS-style) -->
+<div class="card">
+<div class="card-label"><span class="num">V2c · Curved swap</span></div>
+<div class="frame vc">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span>🌐</span><span class="clock">14:38</span></div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row"><span class="dot"></span><span class="brand-text">Unison</span><span class="spacer"></span><a class="gear-btn"><svg><use href="#icon-gear"/></svg></a></div>
+<div class="mode-toggle">
+<div class="mode-seg on"><svg><use href="#icon-mic"/></svg> Call</div>
+<div class="mode-seg"><svg><use href="#icon-ear"/></svg> Listen</div>
+</div>
+<div class="lang-bar">
+<div class="lang-side">
+<div class="lang-lbl">Я говорю</div>
+<div class="lang-val"><span class="flag">🇷🇺</span>Русский</div>
+</div>
+<div class="arrow-wrap"><svg><use href="#arrow-c"/></svg></div>
+<div class="lang-side right">
+<div class="lang-lbl">Собеседник</div>
+<div class="lang-val">English<span class="flag">🇬🇧</span></div>
+</div>
+</div>
+<button class="start-btn"><svg><use href="#icon-play"/></svg> Начать перевод</button>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Curved swap.</strong> Две bezier-арки, верхняя выгнута вверх, нижняя вниз — символ обмена / iOS Transfer. Розовый stroke <code>rgba(255,200,230,0.75)</code> чтобы подчеркнуть «дыхание» Aurora.</p>
+</div>
+
+<!-- V2d — Refined dual-head with serif terminals -->
+<div class="card">
+<div class="card-label"><span class="num">V2d · Refined ⟷</span></div>
+<div class="frame vd">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span>🌐</span><span class="clock">14:38</span></div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row"><span class="dot"></span><span class="brand-text">Unison</span><span class="spacer"></span><a class="gear-btn"><svg><use href="#icon-gear"/></svg></a></div>
+<div class="mode-toggle">
+<div class="mode-seg on"><svg><use href="#icon-mic"/></svg> Call</div>
+<div class="mode-seg"><svg><use href="#icon-ear"/></svg> Listen</div>
+</div>
+<div class="lang-bar">
+<div class="lang-side">
+<div class="lang-lbl">Я говорю</div>
+<div class="lang-val"><span class="flag">🇷🇺</span>Русский</div>
+</div>
+<div class="arrow-wrap"><svg><use href="#arrow-d"/></svg></div>
+<div class="lang-side right">
+<div class="lang-lbl">Собеседник</div>
+<div class="lang-val">English<span class="flag">🇬🇧</span></div>
+</div>
+</div>
+<button class="start-btn"><svg><use href="#icon-play"/></svg> Начать перевод</button>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Refined ⟷.</strong> Тонкий hairline 0.9px + serif-terminals (вертикальные засечки на концах). Технический-чертёжный стиль, как стрелка-размер на чертеже. Spend много места по горизонтали, но «дорогая» по виду.</p>
+</div>
+
+<!-- V2e — Pill badge -->
+<div class="card">
+<div class="card-label"><span class="num">V2e · Pill badge</span></div>
+<div class="frame ve">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span>🌐</span><span class="clock">14:38</span></div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row"><span class="dot"></span><span class="brand-text">Unison</span><span class="spacer"></span><a class="gear-btn"><svg><use href="#icon-gear"/></svg></a></div>
+<div class="mode-toggle">
+<div class="mode-seg on"><svg><use href="#icon-mic"/></svg> Call</div>
+<div class="mode-seg"><svg><use href="#icon-ear"/></svg> Listen</div>
+</div>
+<div class="lang-bar">
+<div class="lang-side">
+<div class="lang-lbl">Я говорю</div>
+<div class="lang-val"><span class="flag">🇷🇺</span>Русский</div>
+</div>
+<div class="arrow-wrap"><svg><use href="#arrow-e"/></svg></div>
+<div class="lang-side right">
+<div class="lang-lbl">Собеседник</div>
+<div class="lang-val">English<span class="flag">🇬🇧</span></div>
+</div>
+</div>
+<button class="start-btn"><svg><use href="#icon-play"/></svg> Начать перевод</button>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Pill badge.</strong> Стрелка живёт внутри pill-капсулы — становится самостоятельным элементом UI, можно нажать чтобы swap'нуть языки. Кликабельность визуально подразумевается.</p>
+</div>
+
+<!-- V2f — Animated pulse parallel arrows -->
+<div class="card">
+<div class="card-label"><span class="num">V2f · Parallel · animated</span></div>
+<div class="frame vf">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span>🌐</span><span class="clock">14:38</span></div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row"><span class="dot"></span><span class="brand-text">Unison</span><span class="spacer"></span><a class="gear-btn"><svg><use href="#icon-gear"/></svg></a></div>
+<div class="mode-toggle">
+<div class="mode-seg on"><svg><use href="#icon-mic"/></svg> Call</div>
+<div class="mode-seg"><svg><use href="#icon-ear"/></svg> Listen</div>
+</div>
+<div class="lang-bar">
+<div class="lang-side">
+<div class="lang-lbl">Я говорю</div>
+<div class="lang-val"><span class="flag">🇷🇺</span>Русский</div>
+</div>
+<div class="arrow-wrap"><svg><use href="#arrow-f"/></svg></div>
+<div class="lang-side right">
+<div class="lang-lbl">Собеседник</div>
+<div class="lang-val">English<span class="flag">🇬🇧</span></div>
+</div>
+</div>
+<button class="start-btn"><svg><use href="#icon-play"/></svg> Начать перевод</button>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Parallel · animated.</strong> Две тонкие параллельные стрелки в противоположных направлениях. Цикл <code>3.2s</code>: яркость и оттенок плавно дышат — намёк на живой двунаправленный поток. Самый «живой» вариант.</p>
+</div>
+
+</main>
+
+</body>
+</html>

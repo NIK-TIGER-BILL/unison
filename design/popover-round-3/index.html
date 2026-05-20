@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Popover · Round 3 · UX содержания</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=Fraunces:opsz,wght@9..144,200;9..144,300;9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@300;400&family=Manrope:wght@400;500;600;700&family=Instrument+Serif:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
+
+<!-- SVG defs: liquid glass filter + reusable icons -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="liquidGlass" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="2" seed="9" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="3" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+
+    <symbol id="icon-gear" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="8" cy="8" r="2.2"/>
+        <path d="M8 1.4v1.8M8 12.8v1.8M2.4 8h1.8M11.8 8h1.8M3.6 3.6l1.3 1.3M11.1 11.1l1.3 1.3M3.6 12.4l1.3-1.3M11.1 4.9l1.3-1.3"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-play" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M4 2.5c0-.5.5-.8.95-.55l8.5 5.05c.45.27.45.93 0 1.2l-8.5 5.05c-.45.26-.95-.05-.95-.55v-10.2z"/>
+    </symbol>
+
+    <symbol id="icon-mic" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <rect x="6" y="2" width="4" height="8" rx="2"/>
+        <path d="M3.5 7.5v1a4.5 4.5 0 0 0 9 0v-1M8 13v1.5"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-ear" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 14c-2-1-3-3-3-6a5 5 0 0 1 10 0c0 2-1.5 3-3 3s-2.5 1-2.5 2.5"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --card-shadow: 0 24px 64px -16px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 60px 48px 32px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky;
+  top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-size: 36px;
+  letter-spacing: -0.025em;
+  margin-bottom: 8px;
+}
+.page-header h1 em { font-style: italic; font-weight: 300; color: #ffb6e0; }
+.page-header p {
+  color: var(--page-mute);
+  font-size: 14px;
+  max-width: 720px;
+  line-height: 1.55;
+}
+.page-header p code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.page-header .nav {
+  margin-top: 16px;
+  display: flex;
+  gap: 16px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.page-header .nav a {
+  color: var(--page-mute);
+  text-decoration: none;
+  padding-bottom: 2px;
+  border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: #ffb6e0; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+  gap: 48px;
+  padding: 48px 48px 64px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.card { display: flex; flex-direction: column; gap: 14px; }
+.card-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 2px;
+}
+.card-label .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--page-mute);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.card-label .title {
+  font-family: 'Fraunces', serif;
+  font-weight: 500;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.card-desc { font-size: 12.5px; color: var(--page-mute); line-height: 1.55; max-width: 380px; }
+.card-desc strong { color: var(--page-fg); font-weight: 500; }
+.card-desc code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.frame {
+  position: relative;
+  height: 440px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--card-shadow);
+}
+
+.menubar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, 'SF Pro Text', sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px;
+  z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+.menubar .clock { font-variant-numeric: tabular-nums; }
+
+.desktop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+
+.popover-wrap {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+}
+
+/* ═════ Base Liquid Glass popover (shared across variants) ═════ */
+.popover {
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  backdrop-filter: blur(20px) saturate(160%) url(#liquidGlass);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border-radius: 26px;
+  color: #f5f5f7;
+  font-family: 'DM Sans', sans-serif;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 32px 80px -8px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -1px 0 rgba(0,0,0,0.4),
+    inset 1px 0 0 rgba(255,255,255,0.06),
+    inset -1px 0 0 rgba(255,255,255,0.06);
+}
+.popover::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 60%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.16) 0%, transparent 35%),
+    radial-gradient(ellipse 100% 60% at 30% 0%, rgba(255,255,255,0.22), transparent 70%);
+  border-radius: 26px 26px 50% 50% / 26px 26px 30% 30%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.popover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 26px;
+  padding: 1px;
+  background: conic-gradient(from 135deg at 50% 50%,
+    rgba(255,255,255,0.4),
+    rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.4) 50%,
+    rgba(255,255,255,0.05) 75%,
+    rgba(255,255,255,0.4));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+/* shared elements */
+.dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #58e09a;
+  box-shadow: 0 0 8px rgba(88, 224, 154, 0.65);
+  vertical-align: middle;
+}
+.gear-btn {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.5);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.gear-btn:hover { color: rgba(255,255,255,0.9); background: rgba(255,255,255,0.06); }
+.gear-btn svg { width: 14px; height: 14px; }
+
+.icon-svg { width: 14px; height: 14px; vertical-align: -2px; }
+
+/* ═══════════════════════ V1 — SENTENCE ═══════════════════════ */
+.v1 .popover { width: 304px; padding: 18px 18px 16px; }
+.v1 .top-row {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 22px;
+  position: relative; z-index: 1;
+}
+.v1 .brand-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 500;
+  color: rgba(255,255,255,0.75);
+  letter-spacing: -0.005em;
+}
+.v1 .mode-chip {
+  display: inline-flex; gap: 2px;
+  background: rgba(0,0,0,0.2); padding: 2px;
+  border-radius: 8px;
+}
+.v1 .mode-seg {
+  padding: 4px 10px; font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  border-radius: 6px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.v1 .mode-seg.on {
+  background: rgba(255,255,255,0.14); color: #fff;
+  box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.2);
+}
+.v1 .sentence {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-size: 24px;
+  line-height: 1.3;
+  letter-spacing: -0.025em;
+  margin-bottom: 22px;
+  position: relative; z-index: 1;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.25);
+}
+.v1 .sentence strong {
+  font-style: italic;
+  font-weight: 400;
+  color: #ffd6f0;
+}
+.v1 .start-btn {
+  display: block; width: 100%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.20), rgba(255,255,255,0.08));
+  border: 0.5px solid rgba(255,255,255,0.22);
+  color: #fff;
+  padding: 13px;
+  border-radius: 12px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  position: relative; z-index: 1;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    inset 0 -1px 0 rgba(0,0,0,0.15),
+    0 4px 12px rgba(0,0,0,0.28);
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+}
+
+/* ═══════════════════════ V2 — WORKBENCH ═══════════════════════ */
+.v2 .popover { width: 312px; padding: 14px 14px 14px; }
+.v2 .top-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 14px; position: relative; z-index: 1;
+}
+.v2 .brand-text {
+  font-size: 13px; font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.v2 .top-row .spacer { flex: 1; }
+.v2 .mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 2px; background: rgba(0,0,0,0.22);
+  padding: 3px; border-radius: 10px;
+  margin-bottom: 10px;
+  position: relative; z-index: 1;
+}
+.v2 .mode-seg {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 7px 0; font-size: 12px;
+  color: rgba(255,255,255,0.55);
+  border-radius: 8px; font-weight: 500;
+}
+.v2 .mode-seg.on {
+  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06));
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 1px 2px rgba(0,0,0,0.2);
+}
+.v2 .lang-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px;
+  background: rgba(0,0,0,0.16);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+  font-size: 14px;
+  letter-spacing: -0.005em;
+}
+.v2 .lang-bar .flag { font-size: 15px; }
+.v2 .lang-bar .arrow { color: rgba(255,255,255,0.45); font-family: 'Instrument Serif', serif; font-style: italic; font-size: 18px; }
+.v2 .start-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08));
+  border: 0.5px solid rgba(255,255,255,0.22);
+  color: #fff; padding: 13px; border-radius: 11px;
+  font-weight: 600; font-size: 13.5px;
+  letter-spacing: -0.005em; cursor: pointer;
+  position: relative; z-index: 1;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 4px 12px rgba(0,0,0,0.28);
+}
+
+/* ═══════════════════════ V3 — STATUS HERO ═══════════════════════ */
+.v3 .popover { width: 304px; padding: 18px 18px 16px; }
+.v3 .top-row {
+  display: flex; justify-content: flex-end; align-items: center;
+  margin-bottom: 18px; position: relative; z-index: 1;
+}
+.v3 .status-hero {
+  text-align: center; margin-bottom: 22px;
+  position: relative; z-index: 1;
+}
+.v3 .status-hero .status-text {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-size: 32px;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+.v3 .status-hero .status-text .dot {
+  width: 9px; height: 9px;
+  margin-right: 4px;
+  vertical-align: 10px;
+}
+.v3 .status-hero .meta {
+  font-size: 12px;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.02em;
+}
+.v3 .status-hero .meta .flag { font-size: 13px; margin: 0 1px; }
+.v3 .status-hero .meta .sep { color: rgba(255,255,255,0.3); margin: 0 6px; }
+.v3 .mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 2px; background: rgba(0,0,0,0.22);
+  padding: 3px; border-radius: 10px;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+}
+.v3 .mode-seg {
+  padding: 6px 0; text-align: center; font-size: 11.5px;
+  color: rgba(255,255,255,0.55);
+  border-radius: 8px; font-weight: 500;
+}
+.v3 .mode-seg.on {
+  background: rgba(255,255,255,0.14);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.v3 .start-btn {
+  display: block; width: 100%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06));
+  border: 0.5px solid rgba(255,255,255,0.2);
+  color: #fff; padding: 12px;
+  border-radius: 11px;
+  text-align: center; font-weight: 600;
+  font-size: 13.5px; cursor: pointer;
+  position: relative; z-index: 1;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 4px 12px rgba(0,0,0,0.25);
+}
+
+/* ═══════════════════════ V4 — TYPOGRAPHIC HERO ═══════════════════════ */
+.v4 .popover { width: 320px; padding: 24px 22px 20px; }
+.v4 .top-row {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 24px; position: relative; z-index: 1;
+}
+.v4 .lang-display {
+  display: flex; flex-direction: column; align-items: center;
+  margin-bottom: 26px;
+  position: relative; z-index: 1;
+}
+.v4 .lang-display .row {
+  font-family: 'Fraunces', serif;
+  font-weight: 200;
+  font-size: 38px;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.v4 .lang-display .row .arrow {
+  font-style: italic;
+  font-weight: 300;
+  font-size: 26px;
+  color: #ffb6e0;
+  margin: 0 8px;
+  vertical-align: 4px;
+}
+.v4 .lang-display .meta {
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  margin-top: 14px;
+}
+.v4 .mode-toggle {
+  display: inline-flex; gap: 16px;
+  margin: 0 auto 18px;
+  position: relative; z-index: 1;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: flex; justify-content: center;
+}
+.v4 .mode-seg {
+  color: rgba(255,255,255,0.4);
+  cursor: pointer;
+  padding-bottom: 2px;
+  border-bottom: 1px solid transparent;
+}
+.v4 .mode-seg.on {
+  color: #fff;
+  border-bottom-color: rgba(255,255,255,0.5);
+}
+.v4 .start-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #fff; padding: 11px;
+  border-radius: 999px;
+  font-family: 'Fraunces', serif;
+  font-weight: 400; font-size: 14px;
+  font-style: italic;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  position: relative; z-index: 1;
+  margin: 0 24px;
+}
+.v4 .start-btn .play-icon {
+  width: 9px; height: 9px;
+  background: #fff;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+
+/* ═══════════════════════ V5 — GIANT ORB ═══════════════════════ */
+.v5 .popover { width: 304px; padding: 14px 18px 18px; }
+.v5 .top-row {
+  display: flex; align-items: center; justify-content: space-between;
+  position: relative; z-index: 1;
+  margin-bottom: 12px;
+}
+.v5 .mode-toggle {
+  display: inline-flex; gap: 2px;
+  background: rgba(0,0,0,0.22);
+  padding: 2px; border-radius: 8px;
+}
+.v5 .mode-seg {
+  padding: 4px 10px; font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  border-radius: 6px; font-weight: 500;
+}
+.v5 .mode-seg.on {
+  background: rgba(255,255,255,0.16); color: #fff;
+  box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.2);
+}
+.v5 .orb-wrap {
+  display: flex; align-items: center; justify-content: center;
+  padding: 18px 0 14px;
+  position: relative; z-index: 1;
+}
+.v5 .orb {
+  width: 144px; height: 144px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 35%, rgba(255,255,255,0.45), rgba(255,255,255,0.05) 55%, rgba(0,0,0,0.15) 100%);
+  border: 0.5px solid rgba(255,255,255,0.3);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  box-shadow:
+    inset 0 2px 4px rgba(255,255,255,0.4),
+    inset 0 -4px 12px rgba(0,0,0,0.3),
+    0 12px 32px rgba(0,0,0,0.4),
+    0 0 0 0 rgba(88, 224, 154, 0.5);
+  animation: orb-pulse 2.4s ease-in-out infinite;
+}
+@keyframes orb-pulse {
+  0%, 100% { box-shadow:
+    inset 0 2px 4px rgba(255,255,255,0.4),
+    inset 0 -4px 12px rgba(0,0,0,0.3),
+    0 12px 32px rgba(0,0,0,0.4),
+    0 0 0 0 rgba(88, 224, 154, 0); }
+  50% { box-shadow:
+    inset 0 2px 4px rgba(255,255,255,0.4),
+    inset 0 -4px 12px rgba(0,0,0,0.3),
+    0 12px 32px rgba(0,0,0,0.4),
+    0 0 0 8px rgba(88, 224, 154, 0.15); }
+}
+.v5 .orb .play-symbol {
+  font-size: 34px; color: #fff;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  margin-left: 4px;
+}
+.v5 .caption {
+  text-align: center;
+  font-size: 13px;
+  color: rgba(255,255,255,0.75);
+  letter-spacing: -0.005em;
+  position: relative; z-index: 1;
+}
+.v5 .caption .flag { font-size: 14px; margin: 0 2px; }
+.v5 .caption .arrow { color: rgba(255,255,255,0.45); margin: 0 6px; font-family: 'Instrument Serif', serif; font-style: italic; }
+
+/* ═══════════════════════ V6 — COMPACT PILL ═══════════════════════ */
+.v6 .popover {
+  width: 360px;
+  padding: 10px 12px;
+}
+.v6 .row {
+  display: flex; align-items: center; gap: 10px;
+  position: relative; z-index: 1;
+}
+.v6 .dot-wrap {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px;
+}
+.v6 .mode-toggle {
+  display: inline-flex; gap: 2px;
+  background: rgba(0,0,0,0.22);
+  padding: 2px; border-radius: 7px;
+}
+.v6 .mode-seg {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 20px;
+  color: rgba(255,255,255,0.5);
+  border-radius: 5px;
+}
+.v6 .mode-seg.on {
+  background: rgba(255,255,255,0.16); color: #fff;
+  box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.2);
+}
+.v6 .mode-seg svg { width: 12px; height: 12px; }
+.v6 .lang-text {
+  flex: 1;
+  font-size: 12.5px;
+  letter-spacing: -0.005em;
+  color: rgba(255,255,255,0.85);
+}
+.v6 .lang-text .flag { font-size: 13px; margin: 0 1px; }
+.v6 .lang-text .arrow { color: rgba(255,255,255,0.45); margin: 0 4px; }
+.v6 .start-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.20), rgba(255,255,255,0.06));
+  border: 0.5px solid rgba(255,255,255,0.2);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 7px;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.25);
+}
+.v6 .start-btn svg { width: 10px; height: 10px; }
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Popover · <em>Round 3</em></h1>
+<p>Все на базе <strong style="color:#ffb6e0">1C Aurora Liquid Glass</strong>. Варьируется содержание, текст, компоновка и UX-модель. Минимализм: только статус-точка вместо <code>BlackHole · ready</code>, кнопка-шестерёнка вместо <code>⌘,</code>, никаких чисел стоимости в idle-состоянии. Открывай в Chrome для SVG-displacement рефракции.</p>
+<div class="nav">
+<a href="/popover-round-1/">Round 1</a>
+<a href="/popover-round-2/">Round 2</a>
+<a class="current" href="/popover-round-3/">Round 3</a>
+</div>
+</header>
+
+<main class="grid">
+
+<!-- V1 SENTENCE -->
+<div class="card">
+<div class="card-label"><span class="num">V1 · Sentence</span></div>
+<div class="frame v1">
+<div class="menubar">
+<span class="app-name">Unison</span><span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span class="clock">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row">
+<div class="brand-chip"><span class="dot"></span> Unison</div>
+<div class="mode-chip">
+<div class="mode-seg on"><svg class="icon-svg"><use href="#icon-mic"/></svg> Call</div>
+<div class="mode-seg"><svg class="icon-svg"><use href="#icon-ear"/></svg> Listen</div>
+</div>
+</div>
+<div class="sentence">Перевожу с <strong>Русского</strong><br>на <strong>English</strong></div>
+<button class="start-btn">Начать перевод</button>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Sentence.</strong> Главное содержание — фраза которая описывает что приложение сделает. Светлый Fraunces 300, italic-pink для языков. Mode-toggle в шапке маленьким chip'ом с иконками. Status-dot рядом с брендом.</p>
+</div>
+
+<!-- V2 WORKBENCH -->
+<div class="card">
+<div class="card-label"><span class="num">V2 · Workbench</span></div>
+<div class="frame v2">
+<div class="menubar">
+<span class="app-name">Unison</span><span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span class="clock">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row">
+<span class="dot"></span>
+<span class="brand-text">Unison</span>
+<span class="spacer"></span>
+<a class="gear-btn"><svg><use href="#icon-gear"/></svg></a>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on"><svg class="icon-svg"><use href="#icon-mic"/></svg> Call</div>
+<div class="mode-seg"><svg class="icon-svg"><use href="#icon-ear"/></svg> Listen</div>
+</div>
+<div class="lang-bar">
+<span><span class="flag">🇷🇺</span> Русский</span>
+<span class="arrow">→</span>
+<span>English <span class="flag">🇬🇧</span></span>
+</div>
+<button class="start-btn"><svg class="icon-svg"><use href="#icon-play"/></svg> Начать</button>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Workbench.</strong> Каждый контрол на своей полке. Status-dot в начале шапки, шестерёнка справа. Mode-toggle с иконками микрофон/ухо, языковая пара в отдельной полосе. Чёткая иерархия: header → mode → langs → action.</p>
+</div>
+
+<!-- V3 STATUS HERO -->
+<div class="card">
+<div class="card-label"><span class="num">V3 · Status Hero</span></div>
+<div class="frame v3">
+<div class="menubar">
+<span class="app-name">Unison</span><span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span class="clock">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row">
+<a class="gear-btn"><svg><use href="#icon-gear"/></svg></a>
+</div>
+<div class="status-hero">
+<div class="status-text"><span class="dot"></span>Готов</div>
+<div class="meta"><span class="flag">🇷🇺</span> RU <span class="sep">·</span> Call <span class="sep">·</span> EN <span class="flag">🇬🇧</span></div>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on">Call</div>
+<div class="mode-seg">Listen</div>
+</div>
+<button class="start-btn">Начать</button>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Status hero.</strong> Главное содержание — текущее состояние: «Готов» / «Перевожу 02:14» / «Соединяюсь…». Языки и режим — caption под статусом. Глаз сразу идёт на статус, не на кнопку. Подходит для long-running сессии.</p>
+</div>
+
+<!-- V4 TYPOGRAPHIC HERO -->
+<div class="card">
+<div class="card-label"><span class="num">V4 · Typographic Hero</span></div>
+<div class="frame v4">
+<div class="menubar">
+<span class="app-name">Unison</span><span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span class="clock">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row">
+<span class="dot"></span>
+<a class="gear-btn"><svg><use href="#icon-gear"/></svg></a>
+</div>
+<div class="lang-display">
+<div class="row">Ру<span class="arrow">→</span>En</div>
+<div class="meta">Русский · English</div>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on">Call</div>
+<div class="mode-seg">Listen</div>
+</div>
+<button class="start-btn"><span class="play-icon"></span> Начать</button>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Typography first.</strong> Языковые коды как огромный display Fraunces 200. Полные названия — расшифровка caps. Mode-toggle минимальный текстовый, кнопка pill outline с italic Fraunces. Эстетика книжной обложки.</p>
+</div>
+
+<!-- V5 GIANT ORB -->
+<div class="card">
+<div class="card-label"><span class="num">V5 · Giant Orb</span></div>
+<div class="frame v5">
+<div class="menubar">
+<span class="app-name">Unison</span><span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span class="clock">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row">
+<div class="mode-toggle">
+<div class="mode-seg on">Call</div>
+<div class="mode-seg">Listen</div>
+</div>
+<a class="gear-btn"><svg><use href="#icon-gear"/></svg></a>
+</div>
+<div class="orb-wrap">
+<div class="orb"><span class="play-symbol">▶</span></div>
+</div>
+<div class="caption">
+<span class="flag">🇷🇺</span> Русский <span class="arrow">↦</span> English <span class="flag">🇬🇧</span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Giant orb.</strong> Кнопка — главный объект. Стеклянная сфера с inner highlight + soft pulse 2.4s (готовность). Language pair — подпись под orb'ом. Mode-toggle и шестерёнка по углам шапки, status-dot живёт внутри пульса. Для тех кому нужен один очень очевидный CTA.</p>
+</div>
+
+<!-- V6 COMPACT PILL -->
+<div class="card">
+<div class="card-label"><span class="num">V6 · Compact Pill</span></div>
+<div class="frame v6">
+<div class="menubar">
+<span class="app-name">Unison</span><span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span class="clock">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="row">
+<div class="dot-wrap"><span class="dot"></span></div>
+<div class="mode-toggle">
+<div class="mode-seg on" title="Call"><svg><use href="#icon-mic"/></svg></div>
+<div class="mode-seg" title="Listen"><svg><use href="#icon-ear"/></svg></div>
+</div>
+<div class="lang-text"><span class="flag">🇷🇺</span> RU <span class="arrow">→</span> EN <span class="flag">🇬🇧</span></div>
+<button class="start-btn"><svg><use href="#icon-play"/></svg> Начать</button>
+<a class="gear-btn"><svg><use href="#icon-gear"/></svg></a>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Compact pill.</strong> Одна горизонтальная строка, всё инлайн: status-dot · mode-icons · lang · start · gear. Высота ~64px, ширина 360. Не отнимает место на экране во время звонка. Идеально если хочется чтобы Unison был «незаметным».</p>
+</div>
+
+</main>
+
+</body>
+</html>

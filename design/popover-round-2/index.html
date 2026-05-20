@@ -1,0 +1,1234 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Popover · Round 2 · Aurora &amp; Liquid Glass</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@300;400&family=Manrope:wght@400;500;600;700&family=Instrument+Serif:ital,wght@0,400;1,400&display=swap" rel="stylesheet">
+
+<!-- ───── SVG FILTERS for Liquid Glass ───── -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Subtle refraction for "soft" glass -->
+    <filter id="liquidGlassSoft" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="2" seed="7" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="3" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <!-- Stronger lensing for "thick" glass -->
+    <filter id="liquidGlassThick" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.008 0.014" numOctaves="3" seed="3" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="4" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="22" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --card-shadow: 0 24px 64px -16px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 60px 48px 32px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky;
+  top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'Fraunces', serif;
+  font-weight: 400;
+  font-size: 36px;
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+}
+.page-header h1 em { font-style: italic; font-weight: 300; color: #ff9f6b; }
+.page-header p {
+  color: var(--page-mute);
+  font-size: 14px;
+  max-width: 720px;
+  line-height: 1.5;
+}
+.page-header .nav {
+  margin-top: 16px;
+  display: flex;
+  gap: 16px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.page-header .nav a {
+  color: var(--page-mute);
+  text-decoration: none;
+  padding-bottom: 2px;
+  border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: #ff9f6b; }
+
+.section-label {
+  padding: 48px 48px 0;
+  max-width: 1600px;
+  margin: 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+.section-label .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--page-mute);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.section-label .label {
+  font-family: 'Fraunces', serif;
+  font-style: italic;
+  font-weight: 300;
+  font-size: 28px;
+  letter-spacing: -0.01em;
+  color: rgba(245,245,247,0.85);
+}
+.section-label .rule {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, rgba(255,255,255,0.18), transparent);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+  gap: 40px;
+  padding: 24px 48px 56px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.card { display: flex; flex-direction: column; gap: 14px; }
+.card-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 2px;
+}
+.card-label .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--page-mute);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.card-label .title {
+  font-family: 'Fraunces', serif;
+  font-weight: 500;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+
+.card-desc { font-size: 12.5px; color: var(--page-mute); line-height: 1.55; max-width: 380px; }
+.card-desc strong { color: var(--page-fg); font-weight: 500; }
+.card-desc code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.frame {
+  position: relative;
+  height: 440px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--card-shadow);
+}
+
+/* Generic macOS Tahoe menu bar — transparent in Tahoe */
+.menubar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, 'SF Pro Text', sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px;
+  z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar.dark { color: rgba(245,245,247,0.95); }
+.menubar.light-bg { color: rgba(20,20,22,0.95); text-shadow: 0 0 4px rgba(255,255,255,0.3); }
+.menubar .apple { font-size: 13px; }
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+.menubar .clock { font-variant-numeric: tabular-nums; }
+
+.desktop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+}
+
+.popover-wrap {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+}
+
+/* ═══════════════════════ AURORA FAMILY ═══════════════════════ */
+
+/* ── 1A: AURORA DEEP ── */
+.v1a .desktop {
+  background:
+    radial-gradient(ellipse 70% 50% at 78% 22%, rgba(120, 230, 200, 0.42), transparent 65%),
+    radial-gradient(ellipse 80% 60% at 22% 80%, rgba(170, 130, 255, 0.38), transparent 65%),
+    radial-gradient(ellipse 50% 30% at 50% 105%, rgba(255, 140, 180, 0.25), transparent 60%),
+    linear-gradient(150deg, #0e1228 0%, #15193a 45%, #0a0d23 100%);
+}
+.v1a .popover {
+  width: 312px;
+  background: rgba(20, 22, 38, 0.45);
+  backdrop-filter: blur(36px) saturate(180%);
+  -webkit-backdrop-filter: blur(36px) saturate(180%);
+  border-radius: 22px;
+  padding: 22px 22px 16px;
+  font-family: 'DM Sans', sans-serif;
+  color: #eef0f5;
+  box-shadow:
+    0 32px 64px -8px rgba(0,0,0,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.14),
+    inset 0 -1px 0 rgba(0,0,0,0.3);
+  position: relative;
+  overflow: hidden;
+}
+.v1a .popover::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 40% at 50% 0%, rgba(255,255,255,0.10), transparent 70%);
+  pointer-events: none;
+}
+.v1a .popover::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 23px;
+  padding: 1px;
+  background: linear-gradient(135deg,
+    rgba(120, 230, 200, 0.45),
+    rgba(255,255,255,0.05) 35%,
+    transparent 50%,
+    rgba(255,255,255,0.05) 65%,
+    rgba(170, 130, 255, 0.4));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.v1a .pop-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; }
+.v1a .brand {
+  font-family: 'Fraunces', serif;
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  position: relative;
+}
+.v1a .brand::after {
+  content: "";
+  display: inline-block;
+  width: 6px; height: 6px;
+  background: #78e6c8;
+  border-radius: 50%;
+  margin-left: 8px;
+  box-shadow: 0 0 10px #78e6c8;
+  vertical-align: 4px;
+}
+.v1a .gear { color: rgba(255,255,255,0.4); font-size: 14px; cursor: pointer; }
+.v1a .mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+  background: rgba(0,0,0,0.25);
+  padding: 3px; border-radius: 11px;
+  margin-bottom: 16px;
+  border: 0.5px solid rgba(255,255,255,0.05);
+}
+.v1a .mode-seg {
+  padding: 8px; text-align: center;
+  font-size: 12.5px;
+  color: rgba(238,240,245,0.55);
+  border-radius: 9px;
+  letter-spacing: -0.005em;
+  font-weight: 500;
+}
+.v1a .mode-seg.on {
+  background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.06));
+  color: #f8f9fc;
+  box-shadow:
+    inset 0 0.5px 0 rgba(255,255,255,0.2),
+    0 1px 2px rgba(0,0,0,0.25);
+}
+.v1a .lang-card {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px;
+  padding: 6px 4px;
+}
+.v1a .lang-side { flex: 1; }
+.v1a .lang-side.right { text-align: right; }
+.v1a .lang-lbl {
+  font-size: 9.5px;
+  color: rgba(238,240,245,0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 3px;
+  font-weight: 500;
+}
+.v1a .lang-val {
+  font-family: 'Fraunces', serif;
+  font-weight: 400;
+  font-size: 19px;
+  letter-spacing: -0.015em;
+}
+.v1a .lang-arrow {
+  color: #78e6c8;
+  font-size: 18px;
+  padding: 0 12px;
+  font-family: 'Instrument Serif', serif;
+}
+.v1a .start-btn {
+  background: linear-gradient(180deg, #8ef0d4, #5dc7a8);
+  color: #062418;
+  padding: 14px;
+  border-radius: 12px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  margin-bottom: 14px;
+  cursor: pointer;
+  box-shadow:
+    0 6px 18px rgba(120, 230, 200, 0.3),
+    inset 0 1px 0 rgba(255,255,255,0.4),
+    inset 0 -1px 0 rgba(0,0,0,0.1);
+}
+.v1a .footer {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 10.5px;
+  color: rgba(238,240,245,0.45);
+  padding-top: 12px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 0.02em;
+}
+.v1a .footer .cost { color: rgba(120, 230, 200, 0.7); }
+
+/* ── 1B: AURORA WARM (LIGHT) ── */
+.v1b .desktop {
+  background:
+    radial-gradient(ellipse 60% 40% at 75% 25%, rgba(255, 200, 130, 0.65), transparent 65%),
+    radial-gradient(ellipse 70% 55% at 25% 75%, rgba(255, 140, 170, 0.55), transparent 65%),
+    radial-gradient(ellipse 50% 30% at 50% 100%, rgba(200, 160, 255, 0.45), transparent 60%),
+    linear-gradient(150deg, #fef0e0 0%, #fcd9bd 50%, #f4b890 100%);
+}
+.v1b .popover {
+  width: 312px;
+  background: rgba(255, 250, 245, 0.55);
+  backdrop-filter: blur(32px) saturate(160%);
+  -webkit-backdrop-filter: blur(32px) saturate(160%);
+  border-radius: 22px;
+  padding: 22px 22px 16px;
+  font-family: 'DM Sans', sans-serif;
+  color: #2a1f15;
+  box-shadow:
+    0 32px 64px -8px rgba(120, 70, 30, 0.25),
+    inset 0 1px 0 rgba(255,255,255,0.6),
+    inset 0 -1px 0 rgba(120, 70, 30, 0.1);
+  position: relative;
+  overflow: hidden;
+  border: 0.5px solid rgba(255,255,255,0.4);
+}
+.v1b .popover::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 90% 50% at 50% 0%, rgba(255,255,255,0.4), transparent 70%);
+  pointer-events: none;
+}
+.v1b .pop-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; }
+.v1b .brand {
+  font-family: 'Fraunces', serif;
+  font-weight: 500;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  color: #2a1f15;
+}
+.v1b .brand::after {
+  content: "";
+  display: inline-block;
+  width: 6px; height: 6px;
+  background: #d4513e;
+  border-radius: 50%;
+  margin-left: 8px;
+  box-shadow: 0 0 8px rgba(212, 81, 62, 0.6);
+  vertical-align: 4px;
+}
+.v1b .gear { color: rgba(42, 31, 21, 0.4); font-size: 14px; cursor: pointer; }
+.v1b .mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+  background: rgba(42, 31, 21, 0.08);
+  padding: 3px; border-radius: 11px;
+  margin-bottom: 16px;
+}
+.v1b .mode-seg {
+  padding: 8px; text-align: center;
+  font-size: 12.5px;
+  color: rgba(42, 31, 21, 0.55);
+  border-radius: 9px;
+  font-weight: 500;
+}
+.v1b .mode-seg.on {
+  background: rgba(255, 255, 255, 0.85);
+  color: #2a1f15;
+  box-shadow: 0 1px 2px rgba(120, 70, 30, 0.15);
+}
+.v1b .lang-card { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding: 6px 4px; }
+.v1b .lang-side { flex: 1; }
+.v1b .lang-side.right { text-align: right; }
+.v1b .lang-lbl {
+  font-size: 9.5px; color: rgba(42, 31, 21, 0.45);
+  text-transform: uppercase; letter-spacing: 0.12em;
+  margin-bottom: 3px; font-weight: 500;
+}
+.v1b .lang-val {
+  font-family: 'Fraunces', serif; font-weight: 500;
+  font-size: 19px; letter-spacing: -0.015em;
+}
+.v1b .lang-arrow {
+  color: #d4513e; font-size: 18px; padding: 0 12px;
+  font-family: 'Instrument Serif', serif;
+}
+.v1b .start-btn {
+  background: linear-gradient(180deg, #d4513e, #b53c2a);
+  color: #fff5ec;
+  padding: 14px; border-radius: 12px;
+  text-align: center; font-weight: 600;
+  font-size: 14px; letter-spacing: -0.01em;
+  margin-bottom: 14px;
+  box-shadow:
+    0 6px 18px rgba(212, 81, 62, 0.35),
+    inset 0 1px 0 rgba(255,255,255,0.25);
+  cursor: pointer;
+}
+.v1b .footer {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 10.5px; color: rgba(42, 31, 21, 0.5);
+  padding-top: 12px; border-top: 1px solid rgba(42, 31, 21, 0.1);
+  font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.02em;
+}
+.v1b .footer .cost { color: #b53c2a; font-weight: 500; }
+
+/* ── 1C: AURORA LIQUID ── */
+.v1c .desktop {
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+.v1c .popover {
+  width: 312px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  backdrop-filter: blur(20px) saturate(160%) url(#liquidGlassSoft);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border-radius: 26px;
+  padding: 22px;
+  font-family: 'DM Sans', sans-serif;
+  color: #f5f5f7;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 32px 80px -8px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -1px 0 rgba(0,0,0,0.4),
+    inset 1px 0 0 rgba(255,255,255,0.06),
+    inset -1px 0 0 rgba(255,255,255,0.06);
+}
+.v1c .popover::before {
+  /* Specular highlight — top edge */
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 60%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.18) 0%, transparent 35%),
+    radial-gradient(ellipse 100% 60% at 30% 0%, rgba(255,255,255,0.25), transparent 70%);
+  border-radius: 26px 26px 50% 50% / 26px 26px 30% 30%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.v1c .popover::after {
+  /* Rim light */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 26px;
+  padding: 1px;
+  background: conic-gradient(from 135deg at 50% 50%,
+    rgba(255,255,255,0.4),
+    rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.4) 50%,
+    rgba(255,255,255,0.05) 75%,
+    rgba(255,255,255,0.4));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.6;
+}
+.v1c .pop-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px; position: relative; z-index: 1; }
+.v1c .brand {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-size: 24px;
+  letter-spacing: -0.025em;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.v1c .brand em {
+  font-style: italic;
+  font-weight: 400;
+  background: linear-gradient(135deg, #ffb6e0, #b6e0ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.v1c .gear { color: rgba(255,255,255,0.4); font-size: 14px; }
+.v1c .mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 3px;
+  background: rgba(0,0,0,0.2);
+  padding: 3px; border-radius: 12px;
+  margin-bottom: 16px;
+  position: relative; z-index: 1;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);
+}
+.v1c .mode-seg {
+  padding: 8px; text-align: center;
+  font-size: 12.5px;
+  color: rgba(245,245,247,0.5);
+  border-radius: 9px;
+  font-weight: 500;
+}
+.v1c .mode-seg.on {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.20), rgba(255,255,255,0.08));
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.3),
+    inset 0 -1px 0 rgba(0,0,0,0.1),
+    0 1px 3px rgba(0,0,0,0.3);
+}
+.v1c .lang-pair {
+  text-align: center;
+  margin-bottom: 16px;
+  position: relative; z-index: 1;
+}
+.v1c .lang-val {
+  font-family: 'Fraunces', serif;
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.v1c .lang-val .arrow {
+  font-style: italic;
+  color: #b6e0ff;
+  margin: 0 12px;
+  font-weight: 300;
+}
+.v1c .lang-lbl {
+  font-size: 9.5px;
+  color: rgba(245,245,247,0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  margin-top: 4px;
+}
+.v1c .start-btn {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06));
+  color: #fff;
+  padding: 13px;
+  border-radius: 13px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 14px;
+  position: relative; z-index: 1;
+  cursor: pointer;
+  border: 0.5px solid rgba(255,255,255,0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.3),
+    inset 0 -1px 0 rgba(0,0,0,0.15),
+    0 4px 12px rgba(0,0,0,0.3);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.v1c .footer {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 10.5px; color: rgba(245,245,247,0.45);
+  padding-top: 12px;
+  border-top: 0.5px solid rgba(255,255,255,0.08);
+  font-family: 'IBM Plex Mono', monospace;
+  position: relative; z-index: 1;
+}
+
+/* ═══════════════════════ NATIVE LIQUID GLASS FAMILY ═══════════════════════ */
+
+/* ── 6A: NATIVE LIQUID GLASS DARK ── */
+.v6a .desktop {
+  background:
+    radial-gradient(ellipse 60% 40% at 80% 20%, rgba(80, 110, 180, 0.45), transparent 65%),
+    radial-gradient(ellipse 60% 40% at 20% 80%, rgba(140, 80, 160, 0.35), transparent 65%),
+    linear-gradient(160deg, #1a2240 0%, #0d1530 60%, #050a1e 100%);
+}
+.v6a .popover {
+  width: 296px;
+  background:
+    linear-gradient(180deg, rgba(60, 64, 80, 0.55), rgba(40, 44, 60, 0.55));
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border-radius: 16px;
+  padding: 14px;
+  color: #f5f5f7;
+  font-family: -apple-system, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif;
+  position: relative;
+  overflow: hidden;
+  border: 0.5px solid rgba(255,255,255,0.12);
+  box-shadow:
+    0 18px 40px rgba(0,0,0,0.45),
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    inset 0 -1px 0 rgba(0,0,0,0.3);
+}
+.v6a .popover::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 50%;
+  background: radial-gradient(ellipse 80% 80% at 50% 0%, rgba(255,255,255,0.12), transparent 70%);
+  pointer-events: none;
+}
+.v6a .popover::after {
+  /* Specular edge — top */
+  content: "";
+  position: absolute;
+  top: 0; left: 18px; right: 18px;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(255,255,255,0.45), transparent);
+  pointer-events: none;
+}
+.v6a .pop-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; position: relative; z-index: 1; }
+.v6a .brand { font-size: 13px; font-weight: 600; letter-spacing: -0.02em; }
+.v6a .brand-dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  background: #34c759;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 1px;
+  box-shadow: 0 0 6px rgba(52, 199, 89, 0.6);
+}
+.v6a .gear {
+  color: rgba(255,255,255,0.5); font-size: 13px;
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+}
+.v6a .mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr;
+  background: rgba(0,0,0,0.3); padding: 2px;
+  border-radius: 8px; gap: 2px;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.25);
+}
+.v6a .mode-seg {
+  padding: 6px 0; text-align: center; font-size: 12px;
+  color: rgba(255,255,255,0.55);
+  border-radius: 6px; font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.v6a .mode-seg.on {
+  background: rgba(255,255,255,0.14);
+  color: #f5f5f7;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    inset 0 -1px 0 rgba(0,0,0,0.15),
+    0 0.5px 1.5px rgba(0,0,0,0.3);
+}
+.v6a .lang-pair {
+  text-align: center; font-size: 13px;
+  color: rgba(255,255,255,0.85);
+  margin-bottom: 12px; letter-spacing: -0.01em;
+  position: relative; z-index: 1;
+}
+.v6a .lang-pair .flag { font-size: 14px; vertical-align: -1px; margin: 0 2px; }
+.v6a .lang-pair .arrow { color: rgba(255,255,255,0.45); margin: 0 6px; }
+.v6a .start-btn {
+  background:
+    linear-gradient(180deg, #4a9eff, #1f7ce8);
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 7px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 590;
+  letter-spacing: -0.01em;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.3),
+    inset 0 -1px 0 rgba(0,0,0,0.15),
+    0 2px 6px rgba(31, 124, 232, 0.4);
+}
+.v6a .footer {
+  font-size: 11px; color: rgba(255,255,255,0.5);
+  padding-top: 10px;
+  border-top: 0.5px solid rgba(255,255,255,0.08);
+  display: flex; justify-content: space-between;
+  letter-spacing: -0.01em;
+  position: relative; z-index: 1;
+}
+
+/* ── 6B: NATIVE LIQUID GLASS LIGHT ── */
+.v6b .desktop {
+  background:
+    radial-gradient(ellipse 55% 40% at 75% 20%, rgba(255, 220, 180, 0.7), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 25% 75%, rgba(180, 220, 255, 0.65), transparent 60%),
+    linear-gradient(165deg, #f0e6d8 0%, #e8d8c8 50%, #d8c4b0 100%);
+}
+.v6b .popover {
+  width: 296px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.65), rgba(255,255,255,0.45));
+  backdrop-filter: blur(40px) saturate(190%);
+  -webkit-backdrop-filter: blur(40px) saturate(190%);
+  border-radius: 16px;
+  padding: 14px;
+  color: #1c1c1e;
+  font-family: -apple-system, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif;
+  position: relative;
+  overflow: hidden;
+  border: 0.5px solid rgba(255,255,255,0.8);
+  box-shadow:
+    0 18px 40px rgba(80, 60, 40, 0.18),
+    inset 0 1px 0 rgba(255,255,255,0.9),
+    inset 0 -1px 0 rgba(0,0,0,0.06);
+}
+.v6b .popover::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 50%;
+  background: radial-gradient(ellipse 80% 80% at 50% 0%, rgba(255,255,255,0.6), transparent 70%);
+  pointer-events: none;
+}
+.v6b .popover::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 18px; right: 18px;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(255,255,255,0.95), transparent);
+  pointer-events: none;
+}
+.v6b .pop-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; position: relative; z-index: 1; }
+.v6b .brand { font-size: 13px; font-weight: 600; letter-spacing: -0.02em; color: #1c1c1e; }
+.v6b .brand-dot {
+  display: inline-block; width: 6px; height: 6px;
+  background: #34c759; border-radius: 50%;
+  margin-right: 6px; vertical-align: 1px;
+  box-shadow: 0 0 6px rgba(52, 199, 89, 0.5);
+}
+.v6b .gear {
+  color: rgba(0,0,0,0.45); font-size: 13px;
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+}
+.v6b .mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr;
+  background: rgba(0,0,0,0.06); padding: 2px;
+  border-radius: 8px; gap: 2px;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+  box-shadow: inset 0 0.5px 1px rgba(0,0,0,0.05);
+}
+.v6b .mode-seg {
+  padding: 6px 0; text-align: center; font-size: 12px;
+  color: rgba(0,0,0,0.55);
+  border-radius: 6px; font-weight: 500; letter-spacing: -0.01em;
+}
+.v6b .mode-seg.on {
+  background: rgba(255,255,255,0.95); color: #1c1c1e;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,1),
+    0 0.5px 2px rgba(0,0,0,0.12);
+}
+.v6b .lang-pair {
+  text-align: center; font-size: 13px;
+  color: rgba(0,0,0,0.85);
+  margin-bottom: 12px; letter-spacing: -0.01em;
+  position: relative; z-index: 1;
+}
+.v6b .lang-pair .flag { font-size: 14px; vertical-align: -1px; margin: 0 2px; }
+.v6b .lang-pair .arrow { color: rgba(0,0,0,0.45); margin: 0 6px; }
+.v6b .start-btn {
+  background:
+    linear-gradient(180deg, #007aff, #0064d8);
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 7px;
+  text-align: center; font-size: 13px;
+  font-weight: 590; letter-spacing: -0.01em;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.35),
+    inset 0 -1px 0 rgba(0,0,0,0.1),
+    0 2px 6px rgba(0, 122, 255, 0.3);
+}
+.v6b .footer {
+  font-size: 11px; color: rgba(0,0,0,0.5);
+  padding-top: 10px;
+  border-top: 0.5px solid rgba(0,0,0,0.08);
+  display: flex; justify-content: space-between;
+  letter-spacing: -0.01em;
+  position: relative; z-index: 1;
+}
+
+/* ── 6C: NATIVE TINTED LIQUID GLASS (with real refraction) ── */
+.v6c .desktop {
+  background:
+    radial-gradient(ellipse 70% 50% at 75% 25%, rgba(255, 140, 80, 0.6), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 25% 80%, rgba(140, 90, 255, 0.55), transparent 60%),
+    linear-gradient(160deg, #2a1547 0%, #4a1f5a 40%, #1a1340 100%);
+}
+.v6c .popover {
+  width: 304px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.04));
+  backdrop-filter: blur(24px) saturate(170%) url(#liquidGlassThick);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  border-radius: 18px;
+  padding: 16px;
+  color: #fff;
+  font-family: -apple-system, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 24px 60px rgba(0,0,0,0.5),
+    inset 0 1.5px 0 rgba(255,255,255,0.25),
+    inset 0 -1px 0 rgba(0,0,0,0.4),
+    inset 1px 0 0 rgba(255,255,255,0.08),
+    inset -1px 0 0 rgba(255,255,255,0.08);
+}
+.v6c .popover::before {
+  /* Top specular sweep */
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 100%;
+  background:
+    radial-gradient(ellipse 120% 50% at 30% -10%, rgba(255,255,255,0.30), transparent 60%),
+    radial-gradient(ellipse 80% 30% at 70% 5%, rgba(255,255,255,0.18), transparent 55%);
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.v6c .popover::after {
+  /* Animated edge shimmer */
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  padding: 1.5px;
+  background: conic-gradient(from 45deg at 50% 50%,
+    rgba(255, 200, 220, 0.5),
+    rgba(180, 220, 255, 0.4) 25%,
+    rgba(200, 180, 255, 0.5) 50%,
+    rgba(255, 220, 200, 0.4) 75%,
+    rgba(255, 200, 220, 0.5));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.7;
+  animation: rim-rotate 14s linear infinite;
+}
+@keyframes rim-rotate {
+  to { transform: rotate(360deg); }
+}
+.v6c .pop-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; position: relative; z-index: 1; }
+.v6c .brand {
+  font-size: 14px; font-weight: 600; letter-spacing: -0.02em;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}
+.v6c .brand-dot {
+  display: inline-block; width: 6px; height: 6px;
+  background: #34c759; border-radius: 50%;
+  margin-right: 6px; vertical-align: 1px;
+  box-shadow: 0 0 8px rgba(52, 199, 89, 0.7);
+}
+.v6c .gear {
+  color: rgba(255,255,255,0.5); font-size: 13px;
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+}
+.v6c .mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr;
+  background: rgba(0,0,0,0.25); padding: 3px;
+  border-radius: 10px; gap: 2px;
+  margin-bottom: 14px;
+  position: relative; z-index: 1;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.35);
+}
+.v6c .mode-seg {
+  padding: 7px 0; text-align: center; font-size: 12px;
+  color: rgba(255,255,255,0.55);
+  border-radius: 7px; font-weight: 500;
+}
+.v6c .mode-seg.on {
+  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06));
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.3),
+    inset 0 -1px 0 rgba(0,0,0,0.15),
+    0 1px 2px rgba(0,0,0,0.25);
+  text-shadow: 0 1px 1px rgba(0,0,0,0.3);
+}
+.v6c .lang-pair {
+  text-align: center; font-size: 14px;
+  margin-bottom: 14px; letter-spacing: -0.01em;
+  position: relative; z-index: 1;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.v6c .lang-pair .flag { font-size: 15px; vertical-align: -1px; margin: 0 2px; }
+.v6c .lang-pair .arrow { color: rgba(255, 200, 220, 0.7); margin: 0 8px; }
+.v6c .start-btn {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.10));
+  color: #fff;
+  padding: 10px 12px;
+  border-radius: 9px;
+  text-align: center; font-size: 13.5px;
+  font-weight: 600; letter-spacing: -0.01em;
+  margin-bottom: 13px;
+  position: relative; z-index: 1;
+  cursor: pointer;
+  border: 0.5px solid rgba(255,255,255,0.25);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.35),
+    inset 0 -1px 0 rgba(0,0,0,0.15),
+    0 4px 12px rgba(0,0,0,0.35);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.v6c .footer {
+  font-size: 11px; color: rgba(255,255,255,0.55);
+  padding-top: 11px;
+  border-top: 0.5px solid rgba(255,255,255,0.1);
+  display: flex; justify-content: space-between;
+  letter-spacing: -0.01em;
+  position: relative; z-index: 1;
+}
+
+/* Refraction tag */
+.refraction-tag {
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border: 1px solid rgba(120, 230, 200, 0.4);
+  color: rgba(120, 230, 200, 0.9);
+  border-radius: 3px;
+  margin-left: 8px;
+  vertical-align: 2px;
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Popover · <em>Round 2</em></h1>
+<p>Эволюция направлений 1 (Aurora) и 6 (Native), с добавлением Apple Liquid Glass из macOS Tahoe 26 — SVG-displacement через <code style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;">feDisplacementMap</code> как backdrop-filter, specular highlights, rim light. Liquid Glass работает в Chromium-based браузерах (Chrome, Edge, Arc, новый Safari). Открывай в Chrome для полного эффекта.</p>
+<div class="nav">
+<a href="/popover-round-1/">← Round 1</a>
+<a class="current" href="/popover-round-2/">Round 2</a>
+</div>
+</header>
+
+<div class="section-label">
+<span class="num">A · Aurora family</span>
+<span class="label">эволюция №1 с разными настроениями</span>
+<span class="rule"></span>
+</div>
+
+<main class="grid">
+
+<!-- 1A -->
+<div class="card">
+<div class="card-label"><span class="num">1A · Aurora Deep</span></div>
+<div class="frame v1a">
+<div class="menubar dark">
+<span class="apple"></span><span class="app-name">Unison</span>
+<span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span class="clock">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="pop-head">
+<div class="brand">Unison</div>
+<div class="gear">⌘,</div>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on">Call</div>
+<div class="mode-seg">Listen</div>
+</div>
+<div class="lang-card">
+<div class="lang-side">
+<div class="lang-lbl">Я говорю</div>
+<div class="lang-val">Русский</div>
+</div>
+<div class="lang-arrow">→</div>
+<div class="lang-side right">
+<div class="lang-lbl">Собеседник</div>
+<div class="lang-val">English</div>
+</div>
+</div>
+<div class="start-btn">Начать перевод</div>
+<div class="footer">
+<span>BlackHole · ready</span>
+<span class="cost">~$0.06/мин</span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Deeper aurora.</strong> Большая аврора, асимметричное распределение зелёного/фиолетового/розового. Шрифт <code>Fraunces</code> для всего основного, надписи мелкие моноширинные. Conic-gradient rim вокруг панели мягко переливается.</p>
+</div>
+
+<!-- 1B -->
+<div class="card">
+<div class="card-label"><span class="num">1B · Aurora Warm Light</span></div>
+<div class="frame v1b">
+<div class="menubar light-bg">
+<span class="apple"></span><span class="app-name">Unison</span>
+<span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span class="clock">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="pop-head">
+<div class="brand">Unison</div>
+<div class="gear">⌘,</div>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on">Call</div>
+<div class="mode-seg">Listen</div>
+</div>
+<div class="lang-card">
+<div class="lang-side">
+<div class="lang-lbl">Я говорю</div>
+<div class="lang-val">Русский</div>
+</div>
+<div class="lang-arrow">→</div>
+<div class="lang-side right">
+<div class="lang-lbl">Собеседник</div>
+<div class="lang-val">English</div>
+</div>
+</div>
+<div class="start-btn">Начать перевод</div>
+<div class="footer">
+<span>BlackHole · готов</span>
+<span class="cost">~$0.06/мин</span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Warm sunrise.</strong> Тёплая light-палитра: персик / коралл / лаванда. Glass-панель из почти-белого матового материала, тёмный текст, terracotta-акценты. Тот же ритм что 1A, но дневной.</p>
+</div>
+
+<!-- 1C -->
+<div class="card">
+<div class="card-label"><span class="num">1C · Aurora <span class="refraction-tag">LIQUID GLASS</span></span></div>
+<div class="frame v1c">
+<div class="menubar dark">
+<span class="apple"></span><span class="app-name">Unison</span>
+<span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span class="clock">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="pop-head">
+<div class="brand">Uni<em>son</em></div>
+<div class="gear">⌘,</div>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on">Call</div>
+<div class="mode-seg">Listen</div>
+</div>
+<div class="lang-pair">
+<div class="lang-val">Русский<span class="arrow">→</span>English</div>
+<div class="lang-lbl">Language pair</div>
+</div>
+<div class="start-btn">Начать перевод</div>
+<div class="footer">
+<span>BlackHole · ready</span>
+<span>~$0.06/мин</span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Real refraction.</strong> SVG <code>feDisplacementMap</code> искажает реальный фон сквозь стекло, плюс conic-gradient rim-light + специальный specular highlight на верхней кромке. Italic-цвет «son» через linear-gradient text. <code>backdrop-filter</code> с URL-фильтром.</p>
+</div>
+
+</main>
+
+<div class="section-label">
+<span class="num">B · Native macOS family</span>
+<span class="label">эволюция №6 c Liquid Glass из Tahoe</span>
+<span class="rule"></span>
+</div>
+
+<main class="grid">
+
+<!-- 6A -->
+<div class="card">
+<div class="card-label"><span class="num">6A · Native Glass Dark</span></div>
+<div class="frame v6a">
+<div class="menubar dark">
+<span class="apple"></span><span class="app-name">Unison</span>
+<span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span class="clock">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="pop-head">
+<div class="brand"><span class="brand-dot"></span>Unison</div>
+<div class="gear">⚙</div>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on">Call</div>
+<div class="mode-seg">Listen</div>
+</div>
+<div class="lang-pair">
+<span class="flag">🇷🇺</span> Русский <span class="arrow">→</span> <span class="flag">🇬🇧</span> English
+</div>
+<div class="start-btn">Начать перевод</div>
+<div class="footer">
+<span>Mic · BlackHole 2ch</span>
+<span>~$0.06/мин</span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>HIG + thicker glass.</strong> Standard popover macOS, но с настоящим Tahoe-style material: усиленный backdrop blur + saturate, top specular line, inset rim. SF Pro, синяя primary CTA, всё по правилам.</p>
+</div>
+
+<!-- 6B -->
+<div class="card">
+<div class="card-label"><span class="num">6B · Native Glass Light</span></div>
+<div class="frame v6b">
+<div class="menubar light-bg">
+<span class="apple"></span><span class="app-name">Unison</span>
+<span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span class="clock">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="pop-head">
+<div class="brand"><span class="brand-dot"></span>Unison</div>
+<div class="gear">⚙</div>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on">Call</div>
+<div class="mode-seg">Listen</div>
+</div>
+<div class="lang-pair">
+<span class="flag">🇷🇺</span> Русский <span class="arrow">→</span> <span class="flag">🇬🇧</span> English
+</div>
+<div class="start-btn">Начать перевод</div>
+<div class="footer">
+<span>Mic · BlackHole 2ch</span>
+<span>~$0.06/мин</span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Same in light.</strong> Тот же 6A, но light-mode: молочная панель поверх тёплых обоев, тёмный текст, classic Apple-blue CTA. macOS auto-switch dark/light можно сделать.</p>
+</div>
+
+<!-- 6C -->
+<div class="card">
+<div class="card-label"><span class="num">6C · Tinted <span class="refraction-tag">LIQUID GLASS</span></span></div>
+<div class="frame v6c">
+<div class="menubar dark">
+<span class="apple"></span><span class="app-name">Unison</span>
+<span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span class="clock">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="pop-head">
+<div class="brand"><span class="brand-dot"></span>Unison</div>
+<div class="gear">⚙</div>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on">Call</div>
+<div class="mode-seg">Listen</div>
+</div>
+<div class="lang-pair">
+<span class="flag">🇷🇺</span> Русский <span class="arrow">→</span> <span class="flag">🇬🇧</span> English
+</div>
+<div class="start-btn">Начать перевод</div>
+<div class="footer">
+<span>Mic · BlackHole 2ch</span>
+<span>~$0.06/мин</span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Full Liquid Glass.</strong> Stronger displacement (scale=22) + анимированный rim shimmer (conic-gradient 14s rotate) + двуслойный specular sweep. Прозрачная белая CTA с inset highlight — берёт оттенки обоев. Самый «iOS 26 / Tahoe».</p>
+</div>
+
+</main>
+
+</body>
+</html>

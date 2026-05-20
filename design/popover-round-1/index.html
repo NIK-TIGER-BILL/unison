@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Popover · Round 1</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500&family=JetBrains+Mono:wght@300;400;500;600&family=Bricolage+Grotesque:wght@400;600;700;800&family=Outfit:wght@300;400;500;600;800&family=Major+Mono+Display&family=IBM+Plex+Mono:wght@300;400&family=Manrope:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --page-bg: #0a0a0c;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --card-shadow: 0 24px 64px -16px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 60px 48px 32px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky;
+  top: 0;
+  background: rgba(10,10,12,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'Fraunces', serif;
+  font-weight: 400;
+  font-size: 36px;
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+}
+.page-header h1 em { font-style: italic; font-weight: 300; color: #ff9f6b; }
+.page-header p {
+  color: var(--page-mute);
+  font-size: 14px;
+  max-width: 640px;
+  line-height: 1.5;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+  gap: 56px;
+  padding: 56px 48px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.card-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 4px;
+}
+.card-label .num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--page-mute);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.card-label .title {
+  font-family: 'Fraunces', serif;
+  font-weight: 500;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+}
+
+.card-desc {
+  font-size: 13px;
+  color: var(--page-mute);
+  line-height: 1.55;
+  max-width: 380px;
+}
+
+.card-desc strong { color: var(--page-fg); font-weight: 500; }
+
+.frame {
+  position: relative;
+  height: 420px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--card-shadow);
+}
+
+/* Mac menu bar */
+.menubar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  background: linear-gradient(to bottom, rgba(28,28,30,0.92), rgba(20,20,22,0.92));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, 'SF Pro Text', sans-serif;
+  font-size: 12px;
+  color: #f5f5f7;
+  gap: 14px;
+  z-index: 10;
+}
+.menubar .apple { width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; }
+.menubar .apple::before {
+  content: ""; width: 12px; height: 14px;
+  background: radial-gradient(ellipse at 28% 38%, transparent 12%, #f5f5f7 13%);
+  mask: radial-gradient(ellipse 4px 4px at 9px 2px, transparent 100%, #000 0) , linear-gradient(#000,#000);
+  -webkit-mask-composite: source-over;
+  clip-path: path('M 5,2 C 6,1 8,1 9,2 C 10,3 11,3 12,3 C 11,4 10,5 10,6 C 10,8 11,9 11,10 C 10,12 9,13 7,13 C 6,13 5,12 4,12 C 3,12 2,13 1,13 C -1,11 0,8 1,7 C 2,6 3,5 3,4 C 4,3 4,2 5,2 Z');
+  background: #f5f5f7;
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .menu-item { color: rgba(255,255,255,0.85); }
+.menubar .spacer { flex: 1; }
+.menubar .status-icon {
+  width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px;
+  border-radius: 4px;
+  position: relative;
+}
+.menubar .clock { font-variant-numeric: tabular-nums; }
+
+/* Desktop wallpaper area */
+.desktop {
+  position: absolute;
+  top: 26px; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+}
+
+.popover {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.connector {
+  position: absolute;
+  top: 24px;
+  right: 22px;
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  transform: rotate(45deg);
+  z-index: -1;
+}
+
+/* ─────────── 1: CRYSTALLINE AURORA ─────────── */
+.v1 .desktop {
+  background:
+    radial-gradient(circle at 70% 20%, rgba(102, 231, 196, 0.18), transparent 50%),
+    radial-gradient(circle at 30% 80%, rgba(186, 130, 255, 0.16), transparent 55%),
+    linear-gradient(140deg, #1a1d2e, #232645 60%, #0f1430);
+}
+.v1 .popover {
+  width: 296px;
+  background: rgba(28, 30, 42, 0.62);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 18px;
+  padding: 20px;
+  font-family: 'DM Sans', sans-serif;
+  color: #eef0f5;
+  box-shadow: 0 24px 48px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.12);
+  overflow: hidden;
+}
+.v1 .popover::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 19px;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(102, 231, 196, 0.5), transparent 30%, transparent 70%, rgba(186, 130, 255, 0.5));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.6;
+}
+.v1 .pop-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.v1 .brand {
+  font-family: 'Fraunces', serif; font-weight: 500; font-size: 18px;
+  letter-spacing: -0.01em;
+}
+.v1 .brand::after {
+  content: "";
+  display: inline-block;
+  width: 6px; height: 6px;
+  background: #66e7c4;
+  border-radius: 50%;
+  margin-left: 6px;
+  box-shadow: 0 0 8px #66e7c4;
+  vertical-align: middle;
+}
+.v1 .gear { color: rgba(255,255,255,0.5); font-size: 16px; cursor: pointer; }
+.v1 .mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+  background: rgba(255,255,255,0.04);
+  padding: 3px; border-radius: 9px;
+  margin-bottom: 14px;
+}
+.v1 .mode-seg {
+  padding: 7px; text-align: center;
+  font-size: 12px; color: rgba(238,240,245,0.55);
+  border-radius: 7px;
+  letter-spacing: 0.01em;
+}
+.v1 .mode-seg.on {
+  background: rgba(255,255,255,0.08);
+  color: #eef0f5;
+  box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.18);
+}
+.v1 .lang-card {
+  background: rgba(0,0,0,0.18);
+  border: 1px solid rgba(255,255,255,0.04);
+  border-radius: 11px;
+  padding: 12px;
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px;
+}
+.v1 .lang-lbl { font-size: 10.5px; color: rgba(238,240,245,0.45); text-transform: uppercase; letter-spacing: 0.08em; }
+.v1 .lang-val { font-family: 'Fraunces', serif; font-weight: 500; font-size: 17px; letter-spacing: -0.01em; }
+.v1 .lang-arrow { color: #66e7c4; font-size: 18px; }
+.v1 .start-btn {
+  background: linear-gradient(135deg, #66e7c4, #4ec3aa);
+  color: #08231b;
+  padding: 12px;
+  border-radius: 11px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  margin-bottom: 12px;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(102, 231, 196, 0.25);
+}
+.v1 .start-hint { font-size: 11px; color: rgba(238,240,245,0.5); margin-top: 4px; font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.02em; }
+.v1 .footer {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 11px; color: rgba(238,240,245,0.45);
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 0.01em;
+}
+
+/* ─────────── 2: EDITORIAL QUIET ─────────── */
+.v2 .desktop { background: linear-gradient(135deg, #c4a37e, #8b6f5a 60%, #5d4837); }
+.v2 .popover {
+  width: 300px;
+  background: #f5efe4;
+  border-radius: 4px;
+  padding: 0;
+  color: #1c1410;
+  font-family: 'Newsreader', serif;
+  box-shadow: 0 24px 48px rgba(0,0,0,0.35);
+  overflow: hidden;
+}
+.v2 .pop-head {
+  padding: 18px 22px 12px;
+  border-bottom: 1px solid rgba(28,20,16,0.12);
+  display: flex; justify-content: space-between; align-items: baseline;
+}
+.v2 .brand {
+  font-family: 'Fraunces', serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  color: #1c1410;
+}
+.v2 .brand .dot { color: #b85c3b; font-weight: 600; }
+.v2 .gear { color: #8b7a6f; font-size: 14px; }
+.v2 .mode-toggle {
+  display: flex; gap: 24px;
+  padding: 14px 22px;
+  font-family: 'Newsreader', serif;
+  border-bottom: 1px solid rgba(28,20,16,0.08);
+}
+.v2 .mode-seg {
+  font-size: 13px; color: #8b7a6f; letter-spacing: 0.04em; text-transform: uppercase;
+  position: relative; padding-bottom: 2px;
+}
+.v2 .mode-seg.on { color: #1c1410; font-weight: 500; }
+.v2 .mode-seg.on::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
+  height: 1px; background: #b85c3b;
+}
+.v2 .lang-card { padding: 20px 22px 16px; }
+.v2 .lang-row { display: flex; justify-content: space-between; align-items: baseline; }
+.v2 .lang-lbl { font-size: 10px; color: #8b7a6f; text-transform: uppercase; letter-spacing: 0.12em; }
+.v2 .lang-val { font-family: 'Fraunces', serif; font-size: 26px; font-weight: 500; letter-spacing: -0.02em; }
+.v2 .lang-arrow { font-family: 'Fraunces', serif; font-style: italic; color: #b85c3b; font-size: 22px; }
+.v2 .start-btn {
+  margin: 0 22px 16px;
+  border: 1px solid #1c1410;
+  background: transparent;
+  color: #1c1410;
+  padding: 13px;
+  text-align: center;
+  font-family: 'Fraunces', serif;
+  font-weight: 500;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.v2 .start-btn:hover { background: #1c1410; color: #f5efe4; }
+.v2 .footer {
+  padding: 12px 22px 16px;
+  font-size: 11px;
+  color: #8b7a6f;
+  border-top: 1px solid rgba(28,20,16,0.08);
+  font-family: 'Newsreader', serif;
+  display: flex; justify-content: space-between;
+}
+
+/* ─────────── 3: TERMINAL PLAIN ─────────── */
+.v3 .desktop {
+  background:
+    repeating-linear-gradient(0deg, rgba(80, 200, 120, 0.03) 0 1px, transparent 1px 3px),
+    linear-gradient(180deg, #0a1410, #061008);
+}
+.v3 .popover {
+  width: 296px;
+  background: #0a1410;
+  border: 1px solid rgba(80, 200, 120, 0.35);
+  border-radius: 0;
+  padding: 0;
+  color: #50c878;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  box-shadow: 0 24px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(80, 200, 120, 0.12);
+}
+.v3 .pop-head {
+  padding: 8px 12px;
+  display: flex; justify-content: space-between;
+  background: rgba(80, 200, 120, 0.07);
+  border-bottom: 1px solid rgba(80, 200, 120, 0.2);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+}
+.v3 .pop-head .brand { color: #50c878; }
+.v3 .pop-head .brand::before { content: "▸ "; opacity: 0.7; }
+.v3 .pop-head .right { color: rgba(80, 200, 120, 0.6); }
+.v3 .body { padding: 14px 12px; }
+.v3 .line { margin-bottom: 6px; }
+.v3 .line .k { color: rgba(80, 200, 120, 0.55); }
+.v3 .line .v { color: #c8ffd9; }
+.v3 .ascii-sep {
+  color: rgba(80, 200, 120, 0.3);
+  margin: 10px 0;
+  font-size: 10px;
+  letter-spacing: 0.5em;
+  text-align: center;
+}
+.v3 .mode-row { display: flex; gap: 14px; margin-bottom: 10px; }
+.v3 .mode-seg {
+  font-size: 11px;
+  color: rgba(80, 200, 120, 0.45);
+  letter-spacing: 0.06em;
+}
+.v3 .mode-seg.on { color: #50c878; }
+.v3 .mode-seg.on::before { content: "["; }
+.v3 .mode-seg.on::after { content: "]"; }
+.v3 .start-btn {
+  background: #50c878;
+  color: #061008;
+  text-align: center;
+  padding: 9px;
+  margin: 14px 0 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.v3 .start-btn::before { content: "▶ "; }
+.v3 .footer {
+  font-size: 10px;
+  color: rgba(80, 200, 120, 0.5);
+  padding-top: 8px;
+  border-top: 1px dashed rgba(80, 200, 120, 0.2);
+  margin-top: 4px;
+  letter-spacing: 0.03em;
+}
+.v3 .blink {
+  display: inline-block;
+  width: 6px; height: 10px;
+  background: #50c878;
+  vertical-align: middle;
+  margin-left: 2px;
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes blink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
+
+/* ─────────── 4: BRUTALIST BLOCK ─────────── */
+.v4 .desktop {
+  background:
+    repeating-linear-gradient(45deg, #ffd400 0 24px, #f3c800 24px 48px);
+}
+.v4 .popover {
+  width: 300px;
+  background: #fff;
+  border: 3px solid #000;
+  border-radius: 0;
+  padding: 0;
+  color: #000;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  box-shadow: 8px 8px 0 #000;
+  overflow: hidden;
+}
+.v4 .pop-head {
+  padding: 12px 16px;
+  border-bottom: 3px solid #000;
+  background: #000;
+  color: #fff;
+  display: flex; justify-content: space-between; align-items: baseline;
+}
+.v4 .brand {
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: -0.04em;
+  text-transform: uppercase;
+}
+.v4 .gear { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; }
+.v4 .mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr;
+  border-bottom: 3px solid #000;
+}
+.v4 .mode-seg {
+  padding: 12px 0;
+  text-align: center;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  border-right: 3px solid #000;
+}
+.v4 .mode-seg:last-child { border-right: none; }
+.v4 .mode-seg.on { background: #ffd400; }
+.v4 .lang-card { padding: 18px 16px; border-bottom: 3px solid #000; }
+.v4 .lang-row { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; }
+.v4 .lang-lbl { font-family: 'JetBrains Mono', monospace; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; }
+.v4 .lang-val { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 800; font-size: 24px; letter-spacing: -0.03em; line-height: 1; }
+.v4 .lang-arrow { font-weight: 800; font-size: 22px; }
+.v4 .start-btn {
+  background: #000;
+  color: #ffd400;
+  padding: 16px;
+  text-align: center;
+  font-family: 'Bricolage Grotesque', sans-serif;
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.v4 .start-btn:hover { background: #ffd400; color: #000; }
+.v4 .footer {
+  padding: 10px 16px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  display: flex; justify-content: space-between;
+  border-top: 1px solid rgba(0,0,0,0.1);
+}
+
+/* ─────────── 5: SOFT SYNTHWAVE ─────────── */
+.v5 .desktop {
+  background:
+    radial-gradient(circle at 50% 100%, rgba(255, 107, 178, 0.3), transparent 55%),
+    linear-gradient(180deg, #0d0524, #1a0844 70%, #2c0c5f);
+}
+.v5 .popover {
+  width: 296px;
+  background: linear-gradient(180deg, rgba(56, 24, 105, 0.95), rgba(36, 14, 72, 0.95));
+  border: 1px solid rgba(255, 107, 178, 0.3);
+  border-radius: 14px;
+  padding: 18px;
+  color: #ffd6f0;
+  font-family: 'Outfit', sans-serif;
+  box-shadow:
+    0 24px 48px rgba(0,0,0,0.5),
+    0 0 0 1px rgba(255, 107, 178, 0.1),
+    0 0 32px rgba(255, 107, 178, 0.15);
+}
+.v5 .pop-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.v5 .brand {
+  font-family: 'Major Mono Display', monospace;
+  font-size: 16px;
+  letter-spacing: 0.04em;
+  background: linear-gradient(90deg, #ff6bb2, #ffd6f0);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.v5 .gear { color: rgba(255, 214, 240, 0.4); }
+.v5 .mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr;
+  background: rgba(0,0,0,0.25);
+  padding: 3px; border-radius: 10px; gap: 2px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(255, 107, 178, 0.15);
+}
+.v5 .mode-seg {
+  padding: 8px; text-align: center; font-size: 12px;
+  color: rgba(255, 214, 240, 0.55);
+  border-radius: 8px;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+.v5 .mode-seg.on {
+  background: linear-gradient(135deg, #ff6bb2, #c84592);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(255, 107, 178, 0.4);
+}
+.v5 .lang-card { margin-bottom: 14px; text-align: center; }
+.v5 .lang-val {
+  font-size: 22px; font-weight: 300; letter-spacing: -0.02em;
+  margin-bottom: 4px;
+}
+.v5 .lang-val .arrow { color: #ff6bb2; margin: 0 8px; font-weight: 500; }
+.v5 .lang-lbl { font-size: 10px; color: rgba(255, 214, 240, 0.5); text-transform: uppercase; letter-spacing: 0.1em; }
+.v5 .start-btn {
+  background: linear-gradient(135deg, #ff6bb2, #ff3d9a);
+  color: #fff;
+  padding: 12px;
+  border-radius: 10px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  margin-bottom: 12px;
+  box-shadow: 0 6px 16px rgba(255, 61, 154, 0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+  cursor: pointer;
+  text-transform: uppercase;
+}
+.v5 .footer {
+  display: flex; justify-content: space-between;
+  font-size: 10.5px; color: rgba(255, 214, 240, 0.5);
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 107, 178, 0.1);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ─────────── 6: NATIVE macOS REFINED ─────────── */
+.v6 .desktop {
+  background: linear-gradient(140deg, #2a3654, #1a2240 50%, #0d1530);
+}
+.v6 .popover {
+  width: 296px;
+  background: rgba(48, 48, 50, 0.78);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  border: 0.5px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  padding: 16px;
+  color: #f5f5f7;
+  font-family: -apple-system, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif;
+  box-shadow:
+    0 18px 40px rgba(0,0,0,0.45),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.v6 .pop-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.v6 .brand {
+  font-family: -apple-system, 'SF Pro Display', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.v6 .brand-dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  background: #34c759;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 1px;
+  box-shadow: 0 0 6px rgba(52, 199, 89, 0.6);
+}
+.v6 .gear {
+  color: rgba(255,255,255,0.5);
+  font-size: 13px;
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+}
+.v6 .gear:hover { background: rgba(255,255,255,0.08); }
+.v6 .mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr;
+  background: rgba(0,0,0,0.3);
+  padding: 2px; border-radius: 8px; gap: 2px;
+  margin-bottom: 12px;
+}
+.v6 .mode-seg {
+  padding: 6px 0; text-align: center; font-size: 12px;
+  color: rgba(255,255,255,0.55);
+  border-radius: 6px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.v6 .mode-seg.on {
+  background: rgba(255,255,255,0.12);
+  color: #f5f5f7;
+  box-shadow: 0 0.5px 1.5px rgba(0,0,0,0.3), inset 0 0.5px 0 rgba(255,255,255,0.06);
+}
+.v6 .lang-pair {
+  text-align: center;
+  font-size: 13px;
+  color: rgba(255,255,255,0.85);
+  margin-bottom: 12px;
+  letter-spacing: -0.01em;
+}
+.v6 .lang-pair .flag { font-size: 14px; vertical-align: -1px; margin: 0 2px; }
+.v6 .lang-pair .arrow { color: rgba(255,255,255,0.5); margin: 0 6px; }
+.v6 .start-btn {
+  background: #007aff;
+  color: #fff;
+  padding: 7px 12px;
+  border-radius: 7px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 590;
+  letter-spacing: -0.01em;
+  margin-bottom: 12px;
+  cursor: pointer;
+  box-shadow: 0 0.5px 0 rgba(255,255,255,0.2) inset;
+}
+.v6 .footer {
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  padding-top: 10px;
+  border-top: 0.5px solid rgba(255,255,255,0.08);
+  display: flex; justify-content: space-between;
+  letter-spacing: -0.01em;
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · <em>Popover</em></h1>
+<p>Главный экран приложения, вызывается из menu bar. Шесть направлений — выбери одно, дальше пройдёмся по состояниям (idle / translating / error / reconnecting).</p>
+</header>
+
+<main class="grid">
+
+<!-- 1 -->
+<div class="card">
+<div class="card-label"><span class="num">01 / Crystalline Aurora</span></div>
+<div class="frame v1">
+<div class="menubar">
+<span class="apple"></span>
+<span class="app-name">Unison</span>
+<span class="menu-item">File</span>
+<span class="menu-item">Edit</span>
+<span class="spacer"></span>
+<span class="status-icon">🌐</span>
+<span class="clock">14:38</span>
+</div>
+<div class="desktop">
+<div class="popover">
+<div class="pop-head">
+<div class="brand">Unison</div>
+<div class="gear">⌘,</div>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on">Call</div>
+<div class="mode-seg">Listen</div>
+</div>
+<div class="lang-card">
+<div>
+<div class="lang-lbl">Я говорю на</div>
+<div class="lang-val">Русский</div>
+</div>
+<div class="lang-arrow">→</div>
+<div>
+<div class="lang-lbl">Собеседник</div>
+<div class="lang-val">English</div>
+</div>
+</div>
+<div class="start-btn">Начать перевод</div>
+<div class="footer">
+<span>BlackHole · готов</span>
+<span>~$0.06/мин</span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Glass + aurora.</strong> Полупрозрачная панель поверх живых градиентов. Шрифт DM Sans + Fraunces для цифр. Подсветка периметра отражает фон, мягкий зелёный pulse-dot у логотипа.</p>
+</div>
+
+<!-- 2 -->
+<div class="card">
+<div class="card-label"><span class="num">02 / Editorial Quiet</span></div>
+<div class="frame v2">
+<div class="menubar">
+<span class="apple"></span>
+<span class="app-name">Unison</span>
+<span class="menu-item">File</span>
+<span class="menu-item">Edit</span>
+<span class="spacer"></span>
+<span class="status-icon">🌐</span>
+<span class="clock">14:38</span>
+</div>
+<div class="desktop">
+<div class="popover">
+<div class="pop-head">
+<div class="brand">Unison<span class="dot">.</span></div>
+<div class="gear">⌘,</div>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on">Call</div>
+<div class="mode-seg">Listen</div>
+</div>
+<div class="lang-card">
+<div class="lang-row">
+<div class="lang-lbl">Я говорю</div>
+</div>
+<div class="lang-row">
+<div class="lang-val">Русский</div>
+<div class="lang-arrow">— ↘ —</div>
+<div class="lang-val">English</div>
+</div>
+<div class="lang-row" style="margin-top:4px">
+<div></div>
+<div class="lang-lbl">Собеседник</div>
+</div>
+</div>
+<div class="start-btn">Начать перевод</div>
+<div class="footer">
+<span>BlackHole · готов</span>
+<span>~6¢/мин</span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Editorial &amp; quiet.</strong> Тёплая кремовая бумага, italic-Fraunces для названия, тонкие правила вместо квадратных рамок. Стиль Aldine / New York Review of Books. Никаких градиентов, никакого свечения.</p>
+</div>
+
+<!-- 3 -->
+<div class="card">
+<div class="card-label"><span class="num">03 / Terminal Plain</span></div>
+<div class="frame v3">
+<div class="menubar">
+<span class="apple"></span>
+<span class="app-name">Unison</span>
+<span class="menu-item">File</span>
+<span class="menu-item">Edit</span>
+<span class="spacer"></span>
+<span class="status-icon">🌐</span>
+<span class="clock">14:38</span>
+</div>
+<div class="desktop">
+<div class="popover">
+<div class="pop-head">
+<div class="brand">unison v1.0</div>
+<div class="right">[idle]</div>
+</div>
+<div class="body">
+<div class="mode-row">
+<div class="mode-seg on">call</div>
+<div class="mode-seg">listen</div>
+</div>
+<div class="ascii-sep">· · · · · ·</div>
+<div class="line"><span class="k">mine&nbsp;</span>: <span class="v">ru — Русский</span></div>
+<div class="line"><span class="k">peer&nbsp;</span>: <span class="v">en — English</span></div>
+<div class="line"><span class="k">device</span>: <span class="v">BlackHole 2ch ✓</span></div>
+<div class="start-btn">start translation</div>
+<div class="footer">
+<span class="k">$ cost ~$0.06/min</span>
+<span class="blink"></span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Terminal first.</strong> Моноширинный JetBrains Mono, фосфорный зелёный по тёмному фону, ASCII-разделители, мигающий курсор. Никаких иконок, ничего лишнего — только текст.</p>
+</div>
+
+<!-- 4 -->
+<div class="card">
+<div class="card-label"><span class="num">04 / Brutalist Block</span></div>
+<div class="frame v4">
+<div class="menubar">
+<span class="apple"></span>
+<span class="app-name">Unison</span>
+<span class="menu-item">File</span>
+<span class="menu-item">Edit</span>
+<span class="spacer"></span>
+<span class="status-icon">🌐</span>
+<span class="clock">14:38</span>
+</div>
+<div class="desktop">
+<div class="popover">
+<div class="pop-head">
+<div class="brand">UNISON</div>
+<div class="gear">⌘,</div>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on">CALL</div>
+<div class="mode-seg">LISTEN</div>
+</div>
+<div class="lang-card">
+<div class="lang-row">
+<div class="lang-lbl">FROM</div>
+<div class="lang-lbl">→</div>
+<div class="lang-lbl">TO</div>
+</div>
+<div class="lang-row">
+<div class="lang-val">RU</div>
+<div class="lang-arrow">/</div>
+<div class="lang-val">EN</div>
+</div>
+</div>
+<div class="start-btn">START &nbsp;▸</div>
+<div class="footer">
+<span>BlackHole · ON</span>
+<span>$0.06/M</span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Brutalist block.</strong> Тяжёлая чёрная рамка 3px, hard shadow 8px 8px, жёлтые акценты, шрифт Bricolage Grotesque ultra-bold. Постер 80-х, никакой мягкости. Для тех кто любит чтобы UI бил.</p>
+</div>
+
+<!-- 5 -->
+<div class="card">
+<div class="card-label"><span class="num">05 / Soft Synthwave</span></div>
+<div class="frame v5">
+<div class="menubar">
+<span class="apple"></span>
+<span class="app-name">Unison</span>
+<span class="menu-item">File</span>
+<span class="menu-item">Edit</span>
+<span class="spacer"></span>
+<span class="status-icon">🌐</span>
+<span class="clock">14:38</span>
+</div>
+<div class="desktop">
+<div class="popover">
+<div class="pop-head">
+<div class="brand">unison</div>
+<div class="gear">⌘,</div>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on">Call</div>
+<div class="mode-seg">Listen</div>
+</div>
+<div class="lang-card">
+<div class="lang-lbl" style="margin-bottom: 8px">Языковая пара</div>
+<div class="lang-val">Русский<span class="arrow">↦</span>English</div>
+</div>
+<div class="start-btn">Begin translation</div>
+<div class="footer">
+<span>BLACKHOLE READY</span>
+<span>~$0.06/MIN</span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Soft synthwave.</strong> Глубокий пурпур-маджента, gradient-text заголовок Major Mono Display, неон-розовая CTA с inner glow. Body на Outfit. Не агрессивный неон — а мягкий, томный, ночной.</p>
+</div>
+
+<!-- 6 -->
+<div class="card">
+<div class="card-label"><span class="num">06 / Native macOS Refined</span></div>
+<div class="frame v6">
+<div class="menubar">
+<span class="apple"></span>
+<span class="app-name">Unison</span>
+<span class="menu-item">File</span>
+<span class="menu-item">Edit</span>
+<span class="spacer"></span>
+<span class="status-icon">🌐</span>
+<span class="clock">14:38</span>
+</div>
+<div class="desktop">
+<div class="popover">
+<div class="pop-head">
+<div class="brand"><span class="brand-dot"></span>Unison</div>
+<div class="gear">⚙</div>
+</div>
+<div class="mode-toggle">
+<div class="mode-seg on">Call</div>
+<div class="mode-seg">Listen</div>
+</div>
+<div class="lang-pair">
+<span class="flag">🇷🇺</span> Русский <span class="arrow">→</span> <span class="flag">🇬🇧</span> English
+</div>
+<div class="start-btn">Начать перевод</div>
+<div class="footer">
+<span>Mic · BlackHole 2ch</span>
+<span>~$0.06/мин</span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Native macOS refined.</strong> Vibrant material поверх стандартного wallpaper, SF Pro, синяя primary CTA Apple-blue (#007aff), 7px corner radius — всё по HIG. Выглядит как «приложение из коробки», знакомо и невидимо.</p>
+</div>
+
+</main>
+
+</body>
+</html>

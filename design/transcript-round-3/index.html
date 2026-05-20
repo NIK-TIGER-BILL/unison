@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Transcript · R3</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="liquidGlass" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="2" seed="9" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="3" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <filter id="liquidGlassSubtle" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.014 0.02" numOctaves="2" seed="3" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="2.5" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="10" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <symbol id="icon-close" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <line x1="4" y1="4" x2="12" y2="12"/>
+        <line x1="12" y1="4" x2="4" y2="12"/>
+      </g>
+    </symbol>
+    <symbol id="icon-eye-on" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <path d="M2 8 Q 8 3.5 14 8 Q 8 12.5 2 8"/>
+        <circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/>
+      </g>
+    </symbol>
+    <symbol id="icon-eye-off" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <path d="M2 8 Q 8 3.5 14 8 Q 8 12.5 2 8" opacity="0.45"/>
+        <circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none" opacity="0.45"/>
+        <line x1="3" y1="3" x2="13" y2="13"/>
+      </g>
+    </symbol>
+    <symbol id="icon-plus" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <line x1="8" y1="3" x2="8" y2="13"/>
+        <line x1="3" y1="8" x2="13" y2="8"/>
+      </g>
+    </symbol>
+    <symbol id="icon-play" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M4 2.5c0-.5.5-.8.95-.55l8.5 5.05c.45.27.45.93 0 1.2l-8.5 5.05c-.45.26-.95-.05-.95-.55v-10.2z"/>
+    </symbol>
+    <symbol id="icon-pause" viewBox="0 0 16 16">
+      <g fill="currentColor">
+        <rect x="4" y="3" width="3" height="10" rx="0.6"/>
+        <rect x="9" y="3" width="3" height="10" rx="0.6"/>
+      </g>
+    </symbol>
+    <symbol id="icon-trash" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="4" x2="13" y2="4"/>
+        <path d="M5 4 L5.5 13 a 1 1 0 0 0 1 1 H 9.5 a 1 1 0 0 0 1 -1 L 11 4"/>
+        <path d="M6 4 V 2.5 a 0.5 0.5 0 0 1 0.5 -0.5 H 9.5 a 0.5 0.5 0 0 1 0.5 0.5 V 4"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --me-color: #b6e0ff;
+  --peer-color: #ffd6c0;
+  --ready: #58e09a;
+  --active: #5ac8fa;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.03em; margin-bottom: 4px;
+}
+.page-header h1 .accent { color: var(--accent); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; }
+.page-header p code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11.5px;
+  background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;
+}
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.layout {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 56px 48px 64px;
+  display: grid;
+  grid-template-columns: minmax(620px, 720px) 1fr;
+  gap: 48px;
+  align-items: flex-start;
+}
+@media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+.demo-wrap { position: sticky; top: 160px; }
+
+.frame {
+  position: relative;
+  height: 620px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 32px 64px -16px rgba(0,0,0,0.7), 0 4px 16px rgba(0,0,0,0.5);
+}
+.menubar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex; align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px;
+  z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+.desktop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+
+/* Mock window */
+.mock-window {
+  position: absolute;
+  top: 60px; left: 40px; right: 40px; bottom: 40px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #2a2a3a, #1a1a2a);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.3);
+}
+.mock-window .video-area {
+  width: 60%; height: 60%;
+  background: linear-gradient(135deg, #3a3a4a, #2a2a3a);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 36px;
+  opacity: 0.4;
+}
+
+/* ═══ Transcript area — bottom center ═══ */
+.transcript-zone {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  width: 520px;
+  z-index: 5;
+  display: flex; flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  pointer-events: none;  /* lets clicks pass through except buttons */
+}
+.transcript-zone > * { pointer-events: auto; }
+
+/* Bubbles row container — flex column where bubbles stack bottom-up */
+.bubbles-list {
+  display: flex; flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+/* Bubble base — true liquid glass */
+.bubble {
+  max-width: 72%;
+  padding: 11px 14px;
+  border-radius: 16px;
+  font-size: 13px;
+  letter-spacing: -0.005em;
+  line-height: 1.4;
+  position: relative;
+  backdrop-filter: blur(24px) saturate(180%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  box-shadow:
+    0 12px 28px rgba(0,0,0,0.35),
+    0 2px 6px rgba(0,0,0,0.18),
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    inset 0 -1px 0 rgba(0,0,0,0.18),
+    inset 1px 0 0 rgba(255,255,255,0.05),
+    inset -1px 0 0 rgba(255,255,255,0.05);
+  animation: bubbleIn 0.4s cubic-bezier(0.32, 0.94, 0.6, 1);
+  word-wrap: break-word;
+  overflow: hidden;
+}
+.bubble::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 55%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.10) 0%, transparent 60%),
+    radial-gradient(ellipse 110% 60% at 25% 0%, rgba(255,255,255,0.15), transparent 70%);
+  border-radius: 16px 16px 50% 50% / 16px 16px 30% 30%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.7;
+}
+
+.bubble .original {
+  font-weight: 500;
+  color: rgba(255,255,255,0.98);
+  text-shadow: 0 1px 1px rgba(0,0,0,0.2);
+  position: relative;
+}
+.bubble .translated {
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.62);
+  font-style: italic;
+  margin-top: 4px;
+  padding-top: 5px;
+  border-top: 0.5px solid rgba(255,255,255,0.12);
+  position: relative;
+}
+
+/* My bubbles — LEFT, blue-tinted glass */
+.bubble.me {
+  align-self: flex-start;
+  background: linear-gradient(180deg, rgba(170, 210, 255, 0.18), rgba(110, 170, 230, 0.10));
+  border: 0.5px solid rgba(180, 220, 255, 0.22);
+}
+
+/* Peer bubbles — RIGHT, neutral glass */
+.bubble.peer {
+  align-self: flex-end;
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.025));
+  border: 0.5px solid rgba(255,255,255,0.10);
+}
+
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.94); filter: blur(4px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+
+.bubble.fade-out {
+  animation: bubbleOut 0.7s cubic-bezier(0.4, 0, 0.6, 1) forwards;
+}
+@keyframes bubbleOut {
+  0% { opacity: 1; transform: translateY(0) scale(1); max-height: 200px; }
+  60% { opacity: 0.15; transform: translateY(-6px) scale(0.96); }
+  100% { opacity: 0; transform: translateY(-12px) scale(0.92); max-height: 0; padding-top: 0; padding-bottom: 0; margin: 0; border-width: 0; }
+}
+
+/* ═══ Control pill — small floating control on screen ═══ */
+.control-pill {
+  align-self: center;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 10px 6px 14px;
+  background: rgba(20, 22, 30, 0.55);
+  backdrop-filter: blur(28px) saturate(180%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 0.5px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.8);
+  letter-spacing: -0.005em;
+  box-shadow:
+    0 8px 24px rgba(0,0,0,0.4),
+    inset 0 1px 0 rgba(255,255,255,0.15);
+  cursor: grab;
+  user-select: none;
+  transition: opacity 0.3s ease;
+}
+.control-pill:active { cursor: grabbing; }
+.control-pill .dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--active);
+  box-shadow: 0 0 6px rgba(90, 200, 250, 0.7);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.control-pill .timer {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.6);
+}
+.control-pill .sep {
+  width: 0.5px; height: 12px;
+  background: rgba(255,255,255,0.12);
+  margin: 0 2px;
+}
+.control-pill .pill-btn {
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.6);
+  border-radius: 50%;
+  cursor: pointer;
+  background: none; border: none;
+  transition: background 0.15s, color 0.15s;
+}
+.control-pill .pill-btn:hover { background: rgba(255,255,255,0.10); color: #fff; }
+.control-pill .pill-btn svg { width: 12px; height: 12px; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+/* Hidden state — only pill is shown, bubbles list collapsed */
+.transcript-zone.hidden .bubbles-list {
+  display: none;
+}
+
+/* annotations */
+.annotations { padding-top: 8px; }
+.ann-title {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+}
+.ann-subtitle {
+  color: var(--page-mute);
+  font-size: 13.5px;
+  margin-bottom: 22px;
+  max-width: 460px;
+  line-height: 1.55;
+}
+.ann-section { margin-bottom: 24px; }
+.ann-section h3 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--page-mute);
+  margin-bottom: 12px;
+  font-weight: 400;
+}
+.ann-section ul { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.ann-section li {
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(245,245,247,0.85);
+  padding-left: 22px;
+  position: relative;
+}
+.ann-section li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 7px;
+  width: 12px; height: 1px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+.ann-section li strong { color: var(--page-fg); font-weight: 500; }
+.ann-section code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Demo controls */
+.demo-controls {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 16px;
+  background: rgba(255,255,255,0.03);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  border-radius: 11px;
+  margin-bottom: 22px;
+}
+.demo-controls .row {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.btn-demo {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,0.08);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  color: #fff;
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.08s;
+}
+.btn-demo:hover { background: rgba(255,255,255,0.14); }
+.btn-demo:active { transform: scale(0.97); }
+.btn-demo svg { width: 11px; height: 11px; }
+.btn-demo.me { color: var(--me-color); }
+.btn-demo.peer { color: var(--peer-color); }
+.btn-demo.auto { color: var(--ready); }
+.btn-demo.auto.active { background: rgba(88, 224, 154, 0.18); border-color: rgba(88, 224, 154, 0.4); }
+.btn-demo.clear { color: rgba(255, 130, 130, 0.85); }
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Transcript · <span class="accent">R3</span></h1>
+<p>Bubbles снизу по центру, моё слева, собеседник справа, max 3 видимых + 1 в fade-out, on-screen toggle pill.</p>
+<div class="nav">
+<a href="/popover-final/">Popover</a>
+<a href="/onboarding-final/">Onboarding</a>
+<a href="/transcript-round-1/">R1</a>
+<a href="/transcript-round-2/">R2</a>
+<a class="current" href="/transcript-round-3/">R3</a>
+</div>
+</header>
+
+<main class="layout">
+
+<div class="demo-wrap">
+<div class="frame">
+<div class="menubar"><span class="app-name">Zoom</span><span>Meeting</span><span>View</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="mock-window">
+<div class="video-area">📹</div>
+</div>
+<div class="transcript-zone" id="transcript-zone">
+<div class="bubbles-list" id="bubbles-list"></div>
+<div class="control-pill" id="control-pill">
+<span class="dot"></span>
+<span class="timer" id="timer">02:14</span>
+<span class="sep"></span>
+<button class="pill-btn" id="toggle-btn" title="Скрыть транскрипт"><svg id="toggle-icon"><use href="#icon-eye-on"/></svg></button>
+<button class="pill-btn" id="close-btn" title="Остановить перевод"><svg><use href="#icon-close"/></svg></button>
+</div>
+</div>
+</div>
+</div>
+
+<div class="annotations">
+<div class="ann-title">R3 · что внутри</div>
+<div class="ann-subtitle">Bubbles стали по-настоящему стеклянными: blur 24px + saturate 180% + SVG-displacement + specular highlight. Зона ~520px по центру.</div>
+
+<div class="ann-section">
+<h3>Демо</h3>
+<div class="demo-controls">
+<div class="row">
+<button class="btn-demo me" id="btn-add-me"><svg><use href="#icon-plus"/></svg> Моя фраза</button>
+<button class="btn-demo peer" id="btn-add-peer"><svg><use href="#icon-plus"/></svg> Фраза собеседника</button>
+</div>
+<div class="row">
+<button class="btn-demo auto" id="btn-auto"><svg><use href="#icon-play"/></svg> Авто-диалог</button>
+<button class="btn-demo clear" id="btn-clear"><svg><use href="#icon-trash"/></svg> Очистить</button>
+</div>
+</div>
+</div>
+
+<div class="ann-section">
+<h3>Дизайн</h3>
+<ul>
+<li><strong>Liquid glass восстановлен</strong> — низкая opacity background + <code>blur(24px) saturate(180%)</code> + SVG displacement + specular highlight ::before. Сквозь bubbles видно desktop</li>
+<li><strong>Bottom-center</strong> — зона 520px, по центру экрана, отступ 22px от низа</li>
+<li><strong>My слева, Peer справа</strong> — соответствует spatial audio (моя речь → outgoing, peer → incoming)</li>
+<li><strong>Max-width bubble 72%</strong> — не растягиваются на всю ширину зоны</li>
+<li><strong>Анимации</strong> — entrance 0.4s spring + blur(4px)→blur(0), exit 0.7s (медленнее для плавности)</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Поведение «3 + 1»</h3>
+<ul>
+<li>На экране одновременно: <strong>3 фразы фоном + 1 fade-out</strong></li>
+<li>Когда добавляется 4-я фраза, самая старая стартует <code>fade-out</code> (0.7s)</li>
+<li>Через 700ms старая полностью убирается из DOM</li>
+<li>В итоге в DOM ~4 элемента, в layout видны 3</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>On-screen toggle</h3>
+<ul>
+<li>Внизу под bubbles — pill с pulse-dot + timer + 👁 toggle + ⊗ close</li>
+<li>Клик 👁 — скрывает только bubbles (pill остаётся, иконка меняется на eye-off, label на «Показать транскрипт»)</li>
+<li>Клик ⊗ — останавливает сессию полностью (всё закрывается)</li>
+<li>Pill можно перетаскивать — drag handle везде кроме самих кнопок</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Попробуй</h3>
+<ul>
+<li>«+ Моя фраза» / «+ Фраза собеседника» — добавь несколько, понаблюдай fade-out на 4-й</li>
+<li>«Авто-диалог» — имитация живого общения, видно как fade plays smoothly</li>
+<li>👁 в pill — скрой транскрипт, потом покажи снова</li>
+<li>Перетащи pill в другое место экрана</li>
+</ul>
+</div>
+
+</div>
+
+</main>
+
+<script>
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+const MY_PHRASES = [
+  { o: 'Привет, как дела?', t: 'Hi, how are you?' },
+  { o: 'Давай встретимся завтра?', t: 'Let\'s meet tomorrow?' },
+  { o: 'Я готов начинать.', t: 'I\'m ready to start.' },
+  { o: 'Что насчёт пятницы?', t: 'What about Friday?' },
+  { o: 'Понял, спасибо.', t: 'Got it, thanks.' },
+  { o: 'Согласен.', t: 'Agreed.' },
+  { o: 'Давай в 10 утра.', t: 'Let\'s do 10 AM.' },
+  { o: 'Хорошо, до встречи.', t: 'Okay, see you then.' },
+  { o: 'Скинь ссылку на встречу.', t: 'Send me the meeting link.' },
+  { o: 'Я опоздаю на пять минут.', t: 'I\'ll be five minutes late.' },
+];
+const PEER_PHRASES = [
+  { o: 'I\'m good, thanks!', t: 'Хорошо, спасибо!' },
+  { o: 'Sounds good to me.', t: 'Звучит хорошо.' },
+  { o: 'Let me check my calendar.', t: 'Дай посмотрю календарь.' },
+  { o: 'Friday works for me.', t: 'Пятница подходит.' },
+  { o: 'See you then.', t: 'До встречи.' },
+  { o: 'What time exactly?', t: 'Во сколько именно?' },
+  { o: 'Perfect, sending it now.', t: 'Отлично, отправляю.' },
+  { o: 'Just got out of another call.', t: 'Только что закончил другой звонок.' },
+  { o: 'Take your time.', t: 'Не торопись.' },
+  { o: 'Talk soon.', t: 'Скоро спишемся.' },
+];
+
+const VISIBLE_LIMIT = 3;
+let myIndex = 0;
+let peerIndex = 0;
+let autoInterval = null;
+let autoLastSide = 'peer';
+let transcriptHidden = false;
+
+const list = document.getElementById('bubbles-list');
+const zone = document.getElementById('transcript-zone');
+const btnAddMe = document.getElementById('btn-add-me');
+const btnAddPeer = document.getElementById('btn-add-peer');
+const btnAuto = document.getElementById('btn-auto');
+const btnClear = document.getElementById('btn-clear');
+const closeBtn = document.getElementById('close-btn');
+const toggleBtn = document.getElementById('toggle-btn');
+const toggleIcon = document.getElementById('toggle-icon');
+
+function addBubble(side, phrase) {
+  if (transcriptHidden) return;  // skip rendering when hidden
+  const bubble = document.createElement('div');
+  bubble.className = `bubble ${side}`;
+  bubble.innerHTML = `
+    <div class="original">${escapeHtml(phrase.o)}</div>
+    <div class="translated">${escapeHtml(phrase.t)}</div>
+  `;
+  list.appendChild(bubble);
+  prune();
+}
+
+function prune() {
+  const live = list.querySelectorAll('.bubble:not(.fade-out)');
+  if (live.length > VISIBLE_LIMIT) {
+    const toFade = live.length - VISIBLE_LIMIT;
+    for (let i = 0; i < toFade; i++) {
+      live[i].classList.add('fade-out');
+      const target = live[i];
+      setTimeout(() => target.remove(), 720);
+    }
+  }
+}
+
+function clearAll() {
+  list.querySelectorAll('.bubble').forEach(b => {
+    if (!b.classList.contains('fade-out')) {
+      b.classList.add('fade-out');
+      setTimeout(() => b.remove(), 720);
+    }
+  });
+}
+
+btnAddMe.addEventListener('click', () => {
+  const phrase = MY_PHRASES[myIndex % MY_PHRASES.length];
+  myIndex++;
+  addBubble('me', phrase);
+});
+btnAddPeer.addEventListener('click', () => {
+  const phrase = PEER_PHRASES[peerIndex % PEER_PHRASES.length];
+  peerIndex++;
+  addBubble('peer', phrase);
+});
+btnClear.addEventListener('click', clearAll);
+
+btnAuto.addEventListener('click', () => {
+  if (autoInterval) {
+    clearInterval(autoInterval);
+    autoInterval = null;
+    btnAuto.classList.remove('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-play"/></svg> Авто-диалог';
+  } else {
+    btnAuto.classList.add('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-pause"/></svg> Стоп';
+    const tick = () => {
+      if (autoLastSide === 'me') {
+        const phrase = PEER_PHRASES[peerIndex++ % PEER_PHRASES.length];
+        addBubble('peer', phrase);
+        autoLastSide = 'peer';
+      } else {
+        const phrase = MY_PHRASES[myIndex++ % MY_PHRASES.length];
+        addBubble('me', phrase);
+        autoLastSide = 'me';
+      }
+    };
+    tick();
+    autoInterval = setInterval(tick, 2000);
+  }
+});
+
+// Toggle visibility of bubbles
+toggleBtn.addEventListener('click', () => {
+  transcriptHidden = !transcriptHidden;
+  if (transcriptHidden) {
+    // Smooth disappear of existing bubbles
+    list.querySelectorAll('.bubble').forEach(b => {
+      if (!b.classList.contains('fade-out')) {
+        b.classList.add('fade-out');
+        setTimeout(() => b.remove(), 720);
+      }
+    });
+    setTimeout(() => zone.classList.add('hidden'), 720);
+    toggleIcon.innerHTML = '<use href="#icon-eye-off"/>';
+    toggleBtn.title = 'Показать транскрипт';
+  } else {
+    zone.classList.remove('hidden');
+    toggleIcon.innerHTML = '<use href="#icon-eye-on"/>';
+    toggleBtn.title = 'Скрыть транскрипт';
+  }
+});
+
+closeBtn.addEventListener('click', () => {
+  if (autoInterval) {
+    clearInterval(autoInterval);
+    autoInterval = null;
+    btnAuto.classList.remove('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-play"/></svg> Авто-диалог';
+  }
+  clearAll();
+  console.log('Stop session (placeholder)');
+});
+
+// Timer simulation
+let seconds = 134;
+setInterval(() => {
+  seconds++;
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = (seconds % 60).toString().padStart(2, '0');
+  document.getElementById('timer').textContent = `${m}:${s}`;
+}, 1000);
+
+// Drag the control pill (which carries the whole zone)
+const pill = document.getElementById('control-pill');
+let dragging = false;
+let dragStart = { x: 0, y: 0, cx: 0, cy: 0, baseLeft: 0, baseBottom: 0 };
+
+pill.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.pill-btn')) return;
+  dragging = true;
+  const rect = zone.getBoundingClientRect();
+  const frame = zone.closest('.frame');
+  const fRect = frame.getBoundingClientRect();
+  dragStart = {
+    x: e.clientX, y: e.clientY,
+    rectLeft: rect.left - fRect.left,
+    rectBottom: fRect.bottom - rect.bottom,
+  };
+  e.preventDefault();
+});
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const frame = zone.closest('.frame');
+  const fRect = frame.getBoundingClientRect();
+  const dx = e.clientX - dragStart.x;
+  const dy = e.clientY - dragStart.y;
+  let newLeft = dragStart.rectLeft + dx;
+  let newBottom = dragStart.rectBottom - dy;
+  // constrain
+  newLeft = Math.max(8, Math.min(newLeft, fRect.width - 520 - 8));
+  newBottom = Math.max(8, Math.min(newBottom, fRect.height - 80));
+  zone.style.left = newLeft + 'px';
+  zone.style.right = 'auto';
+  zone.style.bottom = newBottom + 'px';
+  zone.style.transform = 'none';
+});
+window.addEventListener('mouseup', () => { dragging = false; });
+
+// Initial demo
+setTimeout(() => addBubble('me', MY_PHRASES[myIndex++]), 200);
+setTimeout(() => addBubble('peer', PEER_PHRASES[peerIndex++]), 700);
+setTimeout(() => addBubble('me', MY_PHRASES[myIndex++]), 1200);
+</script>
+
+</body>
+</html>

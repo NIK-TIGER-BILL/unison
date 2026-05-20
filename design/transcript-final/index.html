@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Transcript · FINAL</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<filter id="liquidGlass" x="-15%" y="-15%" width="130%" height="130%">
+<feTurbulence type="fractalNoise" baseFrequency="0.010 0.016" numOctaves="3" seed="11" result="noise"/>
+<feGaussianBlur in="noise" stdDeviation="3.5" result="blurredNoise"/>
+<feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="20" xChannelSelector="R" yChannelSelector="G"/>
+</filter>
+<filter id="liquidGlassSubtle" x="-10%" y="-10%" width="120%" height="120%">
+<feTurbulence type="fractalNoise" baseFrequency="0.014 0.02" numOctaves="2" seed="3" result="noise"/>
+<feGaussianBlur in="noise" stdDeviation="2.5" result="blurredNoise"/>
+<feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="12" xChannelSelector="R" yChannelSelector="G"/>
+</filter>
+
+<symbol id="icon-stop" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></symbol>
+<symbol id="icon-plus" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="8" y1="3.5" x2="8" y2="12.5"/><line x1="3.5" y1="8" x2="12.5" y2="8"/></g></symbol>
+<symbol id="icon-play" viewBox="0 0 16 16"><path fill="currentColor" d="M4 2.5c0-.5.5-.8.95-.55l8.5 5.05c.45.27.45.93 0 1.2l-8.5 5.05c-.45.26-.95-.05-.95-.55v-10.2z"/></symbol>
+<symbol id="icon-pause" viewBox="0 0 16 16"><g fill="currentColor"><rect x="4" y="3" width="3" height="10" rx="0.6"/><rect x="9" y="3" width="3" height="10" rx="0.6"/></g></symbol>
+<symbol id="icon-trash" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="4" x2="13" y2="4"/><path d="M5 4 L5.5 13 a 1 1 0 0 0 1 1 H 9.5 a 1 1 0 0 0 1 -1 L 11 4"/><path d="M6 4 V 2.5 a 0.5 0.5 0 0 1 0.5 -0.5 H 9.5 a 0.5 0.5 0 0 1 0.5 0.5 V 4"/></g></symbol>
+
+<symbol id="icon-settings" viewBox="0 0 16 16">
+  <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+    <line x1="2.5" y1="4.5" x2="6" y2="4.5"/>
+    <circle cx="8.5" cy="4.5" r="1.6" fill="currentColor" stroke="none"/>
+    <line x1="11" y1="4.5" x2="13.5" y2="4.5"/>
+    <line x1="2.5" y1="11.5" x2="9.5" y2="11.5"/>
+    <circle cx="12" cy="11.5" r="1.6" fill="currentColor" stroke="none"/>
+  </g>
+</symbol>
+</defs>
+</svg>
+
+<style>
+/* @property allows transition on custom property in CSS gradient (Chrome 85+, Safari 16.4+) */
+@property --val {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 50%;
+}
+@property --val-opacity {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0.55;
+}
+
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --me-color: #b6e0ff;
+  --peer-color: #ffd6c0;
+  --ready: #58e09a;
+  --active: #5ac8fa;
+  --stop: #ff7a8c;
+  --bubble-scale: 1;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg); color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.03em; margin-bottom: 4px;
+}
+.page-header h1 .accent { color: var(--accent); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; max-width: 760px; }
+.page-header p code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11.5px;
+  background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;
+}
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px; letter-spacing: 0.04em; flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.layout {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 40px 48px 64px;
+}
+
+.frame {
+  position: relative;
+  width: 100%; aspect-ratio: 16/9;
+  border-radius: 14px; overflow: hidden;
+  box-shadow: 0 32px 64px -16px rgba(0,0,0,0.7), 0 4px 16px rgba(0,0,0,0.5);
+}
+.menubar {
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex; align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, sans-serif; font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px; z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+.desktop {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+.mock-window {
+  position: absolute; top: 56px; left: 60px; right: 60px; bottom: 60px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #2a2a3a, #1a1a2a);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.mock-window .video-area {
+  width: 55%; height: 70%;
+  background: linear-gradient(135deg, #3a3a4a, #2a2a3a);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 48px; opacity: 0.4;
+}
+
+.transcript-zone {
+  position: absolute; left: 50%; bottom: 22px;
+  transform: translateX(-50%);
+  width: 60%; max-width: 720px; min-width: 520px;
+  z-index: 5;
+  display: flex; flex-direction: column; gap: 10px;
+  align-items: stretch;
+  pointer-events: none;
+}
+.transcript-zone > * { pointer-events: auto; }
+.bubbles-list {
+  display: flex; flex-direction: column;
+  align-items: stretch;
+}
+.bubbles-list .bubble + .bubble {
+  margin-top: calc(14px * var(--bubble-scale));
+}
+.bubbles-list .bubble + .bubble.continued {
+  margin-top: calc(3px * var(--bubble-scale));
+}
+
+/* ═══ T1 bubble — iMessage corner tail + B3 inverted hierarchy ═══ */
+.bubble {
+  max-width: 76%;
+  padding: calc(11px * var(--bubble-scale)) calc(15px * var(--bubble-scale));
+  position: relative;
+  backdrop-filter: blur(30px) saturate(190%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(30px) saturate(190%);
+  box-shadow:
+    0 14px 28px rgba(0,0,0,0.35),
+    inset 0 1.2px 0 rgba(255,255,255,0.24),
+    inset 0 -1px 0 rgba(0,0,0,0.2);
+  animation: bubbleIn 0.45s cubic-bezier(0.32, 0.94, 0.6, 1);
+  border-radius: calc(18px * var(--bubble-scale));
+}
+.bubble.me {
+  align-self: flex-start;
+  border-bottom-left-radius: calc(5px * var(--bubble-scale));
+  background: linear-gradient(180deg, rgba(160, 210, 255, 0.20), rgba(100, 160, 220, 0.09));
+  border: 0.5px solid rgba(180, 220, 255, 0.24);
+}
+.bubble.peer {
+  align-self: flex-end;
+  border-bottom-right-radius: calc(5px * var(--bubble-scale));
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.035));
+  border: 0.5px solid rgba(255,255,255,0.13);
+}
+/* Continuous group: tail только у последнего bubble группы. Промежуточные — полные радиусы. */
+.bubble.me.no-tail { border-bottom-left-radius: calc(18px * var(--bubble-scale)); }
+.bubble.peer.no-tail { border-bottom-right-radius: calc(18px * var(--bubble-scale)); }
+.bubble.me.continued { border-top-left-radius: calc(8px * var(--bubble-scale)); }
+.bubble.peer.continued { border-top-right-radius: calc(8px * var(--bubble-scale)); }
+.bubble .primary {
+  font-size: calc(14.5px * var(--bubble-scale));
+  font-weight: 500;
+  color: #fff;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+  position: relative; z-index: 1;
+}
+.bubble .secondary {
+  font-size: calc(11px * var(--bubble-scale));
+  color: rgba(255,255,255,0.52);
+  margin-top: calc(5px * var(--bubble-scale));
+  font-style: italic;
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+  position: relative; z-index: 1;
+}
+
+/* Typing dots — индикатор live state (человек ещё говорит) */
+.typing-dots {
+  display: inline-flex; gap: 3px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.typing-dots span {
+  width: calc(4px * var(--bubble-scale));
+  height: calc(4px * var(--bubble-scale));
+  background: rgba(255,255,255,0.6);
+  border-radius: 50%;
+  animation: typingPulse 1.2s ease-in-out infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typingPulse {
+  0%, 70%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.93); filter: blur(4px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.bubble.fade-out { animation: bubbleOut 0.7s cubic-bezier(0.4, 0, 0.6, 1) forwards; }
+@keyframes bubbleOut {
+  0% { opacity: 1; transform: translateY(0) scale(1); max-height: 200px; }
+  60% { opacity: 0.15; transform: translateY(-6px) scale(0.96); }
+  100% { opacity: 0; transform: translateY(-12px) scale(0.92); max-height: 0; padding-top: 0; padding-bottom: 0; margin: 0; border-width: 0; }
+}
+
+/* ═══ Shared Liquid Glass material ═══ */
+.glass {
+  position: relative;
+  background: rgba(20, 22, 30, 0.55);
+  backdrop-filter: blur(36px) saturate(200%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border: 0.5px solid rgba(255,255,255,0.13);
+  box-shadow:
+    0 16px 36px rgba(0,0,0,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.16);
+}
+.glass::after {
+  content: ""; position: absolute; inset: 0;
+  border-radius: inherit; padding: 1px;
+  background: conic-gradient(from 120deg at 50% 50%,
+    rgba(255,255,255,0.45), rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.35) 50%, rgba(255,255,255,0.05) 75%, rgba(255,255,255,0.45));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; opacity: 0.5;
+}
+
+/* ═══ Control pill (form-specific) ═══ */
+.control-pill {
+  align-self: center;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 6px 6px 14px;
+  border-radius: 999px;
+  font-size: 11.5px; color: rgba(255,255,255,0.85);
+  cursor: grab; user-select: none;
+}
+.control-pill .dot {
+  display: inline-block; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--active);
+  box-shadow: 0 0 6px rgba(90, 200, 250, 0.7);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.control-pill .timer {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px; letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.7);
+}
+.control-pill .sep {
+  width: 0.5px; height: 13px;
+  background: rgba(255,255,255,0.14); margin: 0 3px;
+}
+
+.settings-btn {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.65);
+  border-radius: 50%;
+  cursor: pointer; background: none; border: none;
+  transition: background 0.15s, color 0.15s, transform 0.1s;
+}
+.settings-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.settings-btn:active { transform: scale(0.92); }
+.settings-btn.open { background: rgba(255,255,255,0.14); color: #fff; }
+.settings-btn svg { width: 13px; height: 13px; }
+
+/* Toggle button — TEXT */
+.toggle-btn {
+  padding: 5px 11px;
+  font-size: 11.5px; font-weight: 500;
+  letter-spacing: -0.005em;
+  color: rgba(255,255,255,0.75);
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.toggle-btn:hover {
+  background: rgba(255,255,255,0.14);
+  color: #fff;
+  border-color: rgba(255,255,255,0.16);
+}
+
+/* Stop button */
+.stop-btn {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.65);
+  border-radius: 50%;
+  cursor: pointer; background: none; border: none;
+  transition: background 0.15s, color 0.15s;
+  margin-left: 2px;
+}
+.stop-btn:hover { color: var(--stop); background: rgba(255, 122, 140, 0.16); }
+.stop-btn svg { width: 12px; height: 12px; }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+.transcript-zone.collapsed .bubbles-list { display: none; }
+
+/* ═══ Settings popover (form-specific) ═══ */
+.settings-popover {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 12px;
+  width: 280px;
+  padding: 16px;
+  border-radius: 14px;
+  opacity: 0;
+  transform: translateY(6px) scale(0.96);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  z-index: 20;
+}
+.settings-popover.shown {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.settings-popover .group {
+  display: flex; flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+.settings-popover .group + .group {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 0.5px solid rgba(255,255,255,0.08);
+}
+.settings-popover .group-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12.5px; font-weight: 500;
+  color: rgba(255,255,255,0.9);
+  letter-spacing: -0.005em;
+}
+.settings-popover .group-head .value {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.04em;
+}
+
+/* T2 · Vertical handle slider */
+.slider-wrap {
+  position: relative;
+  display: flex; align-items: center;
+  gap: 10px;
+}
+.slider-wrap .side-label {
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.45);
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  --val: 50%;
+  --val-opacity: 0.55;
+  background:
+    linear-gradient(
+      to right,
+      rgba(255,255,255, var(--val-opacity)) 0%,
+      rgba(255,255,255, var(--val-opacity)) var(--val),
+      rgba(255,255,255, 0.10) var(--val),
+      rgba(255,255,255, 0.10) 100%
+    );
+  outline: none;
+  cursor: pointer;
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 4px; height: 18px;
+  background: linear-gradient(180deg, #fff, #ddd);
+  border: none;
+  border-radius: 2px;
+  cursor: grab;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  transition: height 140ms ease, box-shadow 140ms ease;
+}
+.slider:hover::-webkit-slider-thumb {
+  height: 20px;
+  box-shadow: 0 3px 9px rgba(0,0,0,0.55);
+}
+.slider:active::-webkit-slider-thumb { cursor: grabbing; }
+.slider::-moz-range-thumb {
+  width: 4px; height: 18px;
+  background: linear-gradient(180deg, #fff, #ddd);
+  border: none;
+  border-radius: 2px;
+  cursor: grab;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+}
+
+/* ═══ Stop modal ═══ */
+.modal-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.22s ease;
+}
+.modal-backdrop.shown { opacity: 1; pointer-events: auto; }
+.modal {
+  width: 340px;
+  padding: 22px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03));
+  backdrop-filter: blur(32px) saturate(180%) url(#liquidGlass);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border-radius: 18px;
+  color: #f5f5f7;
+  position: relative;
+  box-shadow: 0 32px 80px rgba(0,0,0,0.6), inset 0 1.5px 0 rgba(255,255,255,0.22), inset 0 -1.5px 0 rgba(0,0,0,0.25);
+  transform: scale(0.92) translateY(8px);
+  transition: transform 0.22s cubic-bezier(0.32, 0.94, 0.6, 1);
+}
+.modal-backdrop.shown .modal { transform: scale(1) translateY(0); }
+.modal-title { font-size: 16px; font-weight: 500; letter-spacing: -0.015em; margin-bottom: 6px; }
+.modal-subtitle { font-size: 13px; color: rgba(255,255,255,0.65); line-height: 1.45; margin-bottom: 18px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.modal-btn {
+  padding: 8px 16px;
+  border-radius: 9px;
+  font-size: 13px; font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.08s;
+}
+.modal-btn.cancel { background: rgba(255,255,255,0.08); border: 0.5px solid rgba(255,255,255,0.12); color: rgba(255,255,255,0.85); }
+.modal-btn.cancel:hover { background: rgba(255,255,255,0.14); }
+.modal-btn.destructive {
+  background: linear-gradient(180deg, rgba(255, 110, 130, 0.55), rgba(220, 60, 90, 0.40));
+  border: 0.5px solid rgba(255, 110, 130, 0.45);
+  color: #fff; font-weight: 600;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+  box-shadow: 0 4px 12px rgba(220, 60, 90, 0.32), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.modal-btn.destructive:hover { background: linear-gradient(180deg, rgba(255, 130, 150, 0.65), rgba(230, 75, 105, 0.50)); }
+.modal-btn:active { transform: scale(0.97); }
+
+/* Demo controls below frame */
+.demo-controls {
+  margin-top: 20px;
+  display: flex; gap: 8px; flex-wrap: wrap;
+  padding: 16px;
+  background: rgba(255,255,255,0.03);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  border-radius: 11px;
+}
+.btn-demo {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,0.08);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  color: #fff;
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-size: 12.5px; font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.08s;
+}
+.btn-demo:hover { background: rgba(255,255,255,0.14); }
+.btn-demo:active { transform: scale(0.97); }
+.btn-demo svg { width: 11px; height: 11px; }
+.btn-demo.me { color: var(--me-color); }
+.btn-demo.peer { color: var(--peer-color); }
+.btn-demo.auto { color: var(--ready); }
+.btn-demo.auto.active { background: rgba(88, 224, 154, 0.18); border-color: rgba(88, 224, 154, 0.4); }
+.btn-demo.clear { color: rgba(255, 130, 130, 0.85); }
+
+.notes {
+  margin-top: 22px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.notes .note {
+  padding: 14px 18px;
+  background: rgba(255,255,255,0.03);
+  border: 0.5px solid rgba(255,255,255,0.06);
+  border-radius: 11px;
+}
+.notes .note h3 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--page-mute);
+  margin-bottom: 8px;
+  font-weight: 400;
+}
+.notes .note p {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: rgba(245,245,247,0.85);
+}
+.notes .note p strong { color: #fff; font-weight: 500; }
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Transcript · <span class="accent">FINAL</span></h1>
+<p>T1 corner-tail bubbles + B3 inverted hierarchy. Settings popover в pill: <strong>размер транскрипта</strong> + <strong>громкость оригинала</strong>. Главным (большим) текстом — всегда «мой» язык. Слайдеры T2 — vertical handle, нейтральные.</p>
+<div class="nav">
+<a href="/popover-final/">Popover</a>
+<a href="/onboarding-final/">Onboarding</a>
+<a class="current" href="/transcript-final/">FINAL</a>
+</div>
+</header>
+
+<main class="layout">
+
+<div class="frame">
+<div class="menubar"><span class="app-name">Zoom</span><span>Meeting</span><span>View</span><span>Share</span><span class="spacer"></span><span>🔔</span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="mock-window"><div class="video-area">📹</div></div>
+<div class="transcript-zone" id="transcript-zone">
+<div class="bubbles-list" id="bubbles-list"></div>
+<div class="glass control-pill" id="control-pill">
+<span class="dot"></span>
+<span class="timer" id="timer">02:14</span>
+<span class="sep"></span>
+<div style="position:relative">
+<button class="settings-btn" id="settings-btn" title="Настройки"><svg><use href="#icon-settings"/></svg></button>
+<div class="glass settings-popover" id="settings-popover">
+<div class="group">
+<div class="group-head">
+<span>Размер транскрипта</span>
+<span class="value" id="size-value">M</span>
+</div>
+<div class="slider-wrap">
+<span class="side-label">A</span>
+<input type="range" class="slider" id="size-slider" min="0" max="4" step="any" value="2">
+<span class="side-label" style="font-size: 13px">A</span>
+</div>
+</div>
+<div class="group">
+<div class="group-head">
+<span>Громкость оригинала</span>
+<span class="value" id="vol-value">20%</span>
+</div>
+<div class="slider-wrap">
+<input type="range" class="slider" id="vol-slider" min="0" max="100" step="1" value="20" style="margin-left: 0">
+</div>
+</div>
+</div>
+</div>
+<button class="toggle-btn" id="toggle-btn">Скрыть</button>
+<button class="stop-btn" id="close-btn" title="Остановить"><svg><use href="#icon-stop"/></svg></button>
+</div>
+</div>
+
+<div class="modal-backdrop" id="modal">
+<div class="modal">
+<div class="modal-title">Остановить перевод?</div>
+<div class="modal-subtitle">Сессия будет закрыта и транскрипт исчезнет.</div>
+<div class="modal-actions">
+<button class="modal-btn cancel" id="modal-cancel">Отмена</button>
+<button class="modal-btn destructive" id="modal-confirm">Остановить</button>
+</div>
+</div>
+</div>
+</div>
+
+<div class="demo-controls">
+<button class="btn-demo me" id="btn-add-me"><svg><use href="#icon-plus"/></svg> Я · короткая</button>
+<button class="btn-demo me" id="btn-add-me-long">Я · 3 предложения</button>
+<button class="btn-demo me" id="btn-add-me-huge">Я · 10 предложений</button>
+<button class="btn-demo me" id="btn-add-me-live">Я · live (typing)</button>
+<button class="btn-demo peer" id="btn-add-peer"><svg><use href="#icon-plus"/></svg> Собеседник · короткая</button>
+<button class="btn-demo peer" id="btn-add-peer-long">Собеседник · 3 предл.</button>
+<button class="btn-demo auto" id="btn-auto"><svg><use href="#icon-play"/></svg> Авто-диалог</button>
+<button class="btn-demo clear" id="btn-clear"><svg><use href="#icon-trash"/></svg> Очистить</button>
+</div>
+
+<div class="notes">
+<div class="note">
+<h3>Правила группировки</h3>
+<p><strong>Один говорящий → одна группа bubble.</strong> Пока человек говорит, новые фразы добавляются continuous-стилем (gap уменьшен, верхний corner смягчён). <strong>Tail</strong> (острый угол вниз) — только у последнего bubble группы. При смене говорящего предыдущая группа финализируется, новая открывается на противоположной стороне.</p>
+</div>
+<div class="note">
+<h3>Длинные реплики</h3>
+<p>Bubble не растёт бесконечно: при <strong>240+ символах</strong> финализируется и продолжается следующим bubble той же группы (continuous). Это сохраняет читаемость, не создаёт «простыни», и максимум 3 последних bubble видны одновременно — старые плавно уходят вверх.</p>
+</div>
+<div class="note">
+<h3>Live state</h3>
+<p>Пока человек ещё говорит, в конце текущего bubble — <strong>пульсирующие точки</strong> (•••). Когда речь завершена (пауза или другой собеседник вступил) — точки исчезают, bubble переходит в финализированное состояние.</p>
+</div>
+<div class="note">
+<h3>Параллельный язык</h3>
+<p>Основной текст (большой, светлый) — <strong>«мой» язык</strong>. Курсивом снизу — перевод. Для моих реплик primary = оригинал; для собеседника primary = перевод. Я всегда читаю на родном языке, фоном вижу версию на чужом.</p>
+</div>
+</div>
+
+</main>
+
+<script>
+function escapeHtml(s) { return s.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+
+const MY_PHRASES = [
+  { o: 'Привет, как дела?', t: 'Hi, how are you?' },
+  { o: 'Давай встретимся завтра?', t: 'Let\'s meet tomorrow?' },
+  { o: 'Я готов начинать.', t: 'I\'m ready to start.' },
+  { o: 'Что насчёт пятницы?', t: 'What about Friday?' },
+  { o: 'Понял, спасибо.', t: 'Got it, thanks.' },
+  { o: 'Давай в 10 утра.', t: 'Let\'s do 10 AM.' },
+];
+const PEER_PHRASES = [
+  { o: 'I\'m good, thanks!', t: 'Хорошо, спасибо!' },
+  { o: 'Sounds good to me.', t: 'Звучит хорошо.' },
+  { o: 'Let me check my calendar.', t: 'Дай посмотрю календарь.' },
+  { o: 'Friday works for me.', t: 'Пятница подходит.' },
+  { o: 'See you then.', t: 'До встречи.' },
+];
+
+// Длинные фразы для демонстрации группировки и split
+const LONG_ME = {
+  o: 'Я думаю нам пора пересмотреть архитектуру. Сейчас слишком много спагетти-кода и это мешает масштабироваться. Давай выделим время на следующей неделе и обсудим как улучшить.',
+  t: 'I think it\'s time to reconsider the architecture. Right now there\'s too much spaghetti code and it\'s hindering scaling. Let\'s set aside time next week and discuss improvements.'
+};
+const HUGE_ME = {
+  o: 'Я долго думал и пришёл к выводу. У нас три основные проблемы. Первая — отсутствие модульности. Вторая — слабое разделение бизнес-логики и UI. Третья — нет автотестов на критические сценарии. Это создаёт постоянный риск регрессий при любых изменениях. Предлагаю начать с самого болезненного — введём unit-тесты на ключевые модули. Потом постепенно отрефакторим bottleneck-части. И только в самом конце трогнем архитектуру верхнего уровня. Думаю за квартал управимся, если выделим хотя бы двух человек full-time. Готов взять lead на этой инициативе.',
+  t: 'I\'ve been thinking for a long time and reached a conclusion. We have three main problems. First — lack of modularity. Second — weak separation of business logic and UI. Third — no automated tests for critical scenarios. This creates constant regression risk on any change. I suggest starting with the most painful one — introduce unit tests on key modules. Then gradually refactor bottleneck parts. And only at the very end touch top-level architecture. I think we\'ll manage in a quarter if we allocate at least two people full-time. Ready to take lead on this initiative.'
+};
+const LONG_PEER = {
+  o: 'Yeah I hear you, but I\'m worried about the timeline. We have the launch in six weeks and the team is already stretched. Maybe we should split this into two phases — quick wins first, then the deeper architecture work after launch?',
+  t: 'Да, понимаю, но я переживаю за сроки. У нас запуск через шесть недель и команда уже перегружена. Может, разобьём на две фазы — сначала quick wins, потом глубокая работа над архитектурой после запуска?'
+};
+
+const VISIBLE_LIMIT = 3;
+const SPLIT_THRESHOLD = 240;  // символов, после которых split на continuous bubble
+let myIndex = 0, peerIndex = 0, autoInterval = null, autoLastSide = 'peer';
+let collapsed = false;
+let liveTimer = null;
+
+const list = document.getElementById('bubbles-list');
+const zone = document.getElementById('transcript-zone');
+const btnAddMe = document.getElementById('btn-add-me');
+const btnAddPeer = document.getElementById('btn-add-peer');
+const btnAuto = document.getElementById('btn-auto');
+const btnClear = document.getElementById('btn-clear');
+const closeBtn = document.getElementById('close-btn');
+const toggleBtn = document.getElementById('toggle-btn');
+const modal = document.getElementById('modal');
+const modalCancel = document.getElementById('modal-cancel');
+const modalConfirm = document.getElementById('modal-confirm');
+const settingsBtn = document.getElementById('settings-btn');
+const settingsPop = document.getElementById('settings-popover');
+const sizeSlider = document.getElementById('size-slider');
+const sizeValue = document.getElementById('size-value');
+const volSlider = document.getElementById('vol-slider');
+const volValue = document.getElementById('vol-value');
+
+// my language = Russian (selected as "Я говорю")
+// For 'me' bubble: primary = original (.o), secondary = translation (.t)
+// For 'peer' bubble: primary = translation (.t), secondary = original (.o)
+
+function lastLiveBubble() {
+  const bubbles = list.querySelectorAll('.bubble:not(.fade-out)');
+  return bubbles.length ? bubbles[bubbles.length - 1] : null;
+}
+
+function createBubble(side, primary, secondary, opts = {}) {
+  const bubble = document.createElement('div');
+  bubble.className = `bubble ${side}`;
+  if (opts.continued) bubble.classList.add('continued');
+  if (opts.live) bubble.classList.add('live');
+  const liveDots = opts.live ? '<span class="typing-dots"><span></span><span></span><span></span></span>' : '';
+  bubble.innerHTML = `
+    <div class="primary">${escapeHtml(primary)}${liveDots}</div>
+    <div class="secondary">${escapeHtml(secondary)}</div>
+  `;
+  return bubble;
+}
+
+// Splits long string into chunks ≤ SPLIT_THRESHOLD on sentence boundaries
+function splitLongText(o, t) {
+  const splitText = (text) => {
+    if (text.length <= SPLIT_THRESHOLD) return [text];
+    const chunks = [];
+    let buf = '';
+    const sentences = text.match(/[^.!?]+[.!?]+\s*/g) || [text];
+    for (const s of sentences) {
+      if ((buf + s).length > SPLIT_THRESHOLD && buf.length > 0) {
+        chunks.push(buf.trim());
+        buf = s;
+      } else {
+        buf += s;
+      }
+    }
+    if (buf.trim()) chunks.push(buf.trim());
+    return chunks;
+  };
+  const oParts = splitText(o);
+  const tParts = splitText(t);
+  // Сопоставляем по числу чанков (берём max и распределяем propportionally)
+  const n = Math.max(oParts.length, tParts.length);
+  const result = [];
+  for (let i = 0; i < n; i++) {
+    result.push({
+      o: oParts[i] || oParts[oParts.length - 1] || o,
+      t: tParts[i] || tParts[tParts.length - 1] || t,
+    });
+  }
+  return result;
+}
+
+function finalizeAllLive() {
+  if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
+  list.querySelectorAll('.bubble.live').forEach(b => {
+    b.classList.remove('live');
+    const dots = b.querySelector('.typing-dots');
+    if (dots) dots.remove();
+  });
+}
+
+function addBubble(side, phrase, opts = {}) {
+  if (collapsed) return;
+  // Если новая фраза от другого говорящего — финализируем live state и текущая группа закрывается
+  const last = lastLiveBubble();
+  const sameSide = last && last.classList.contains(side);
+  if (!sameSide) finalizeAllLive();
+
+  const primary = side === 'me' ? phrase.o : phrase.t;
+  const secondary = side === 'me' ? phrase.t : phrase.o;
+
+  // Split длинных реплик на continuous bubbles
+  const chunks = splitLongText(primary, secondary);
+
+  chunks.forEach((chunk, idx) => {
+    const prev = lastLiveBubble();
+    const continued = prev && prev.classList.contains(side);
+    // Когда продолжаем группу — у предыдущего bubble убираем tail
+    if (continued) prev.classList.add('no-tail');
+    const isLast = idx === chunks.length - 1;
+    const bubble = createBubble(side, chunk.o, chunk.t, {
+      continued,
+      live: opts.live && isLast,  // typing dots — только на последнем bubble
+    });
+    list.appendChild(bubble);
+    // (новый bubble всегда last → у него tail сохранён, no-tail не ставим)
+    prune();
+  });
+
+  // Авто-финализация live через 2.5s (имитация паузы)
+  if (opts.live) {
+    if (liveTimer) clearTimeout(liveTimer);
+    liveTimer = setTimeout(finalizeAllLive, 2500);
+  }
+}
+function prune() {
+  // Группируем continuous-цепочки в одну логическую «реплику»
+  const live = Array.from(list.querySelectorAll('.bubble:not(.fade-out)'));
+  const groups = [];
+  for (const b of live) {
+    if (!b.classList.contains('continued') || groups.length === 0) {
+      groups.push([b]);
+    } else {
+      groups[groups.length - 1].push(b);
+    }
+  }
+  while (groups.length > VISIBLE_LIMIT) {
+    const oldest = groups.shift();
+    oldest.forEach(b => {
+      b.classList.add('fade-out');
+      const t = b;
+      setTimeout(() => t.remove(), 720);
+    });
+  }
+}
+function clearAll() {
+  list.querySelectorAll('.bubble').forEach(b => {
+    if (!b.classList.contains('fade-out')) {
+      b.classList.add('fade-out');
+      setTimeout(() => b.remove(), 720);
+    }
+  });
+}
+
+btnAddMe.addEventListener('click', () => addBubble('me', MY_PHRASES[myIndex++ % MY_PHRASES.length]));
+btnAddPeer.addEventListener('click', () => addBubble('peer', PEER_PHRASES[peerIndex++ % PEER_PHRASES.length]));
+btnClear.addEventListener('click', () => { finalizeAllLive(); clearAll(); });
+
+document.getElementById('btn-add-me-long').addEventListener('click', () => addBubble('me', LONG_ME));
+document.getElementById('btn-add-me-huge').addEventListener('click', () => addBubble('me', HUGE_ME));
+document.getElementById('btn-add-me-live').addEventListener('click', () => addBubble('me', LONG_ME, { live: true }));
+document.getElementById('btn-add-peer-long').addEventListener('click', () => addBubble('peer', LONG_PEER));
+
+btnAuto.addEventListener('click', () => {
+  if (autoInterval) {
+    clearInterval(autoInterval); autoInterval = null;
+    btnAuto.classList.remove('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-play"/></svg> Авто-диалог';
+  } else {
+    btnAuto.classList.add('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-pause"/></svg> Стоп';
+    const tick = () => {
+      if (autoLastSide === 'me') {
+        addBubble('peer', PEER_PHRASES[peerIndex++ % PEER_PHRASES.length]);
+        autoLastSide = 'peer';
+      } else {
+        addBubble('me', MY_PHRASES[myIndex++ % MY_PHRASES.length]);
+        autoLastSide = 'me';
+      }
+    };
+    tick();
+    autoInterval = setInterval(tick, 2000);
+  }
+});
+
+toggleBtn.addEventListener('click', () => {
+  collapsed = !collapsed;
+  if (collapsed) {
+    list.querySelectorAll('.bubble').forEach(b => {
+      if (!b.classList.contains('fade-out')) {
+        b.classList.add('fade-out');
+        setTimeout(() => b.remove(), 720);
+      }
+    });
+    setTimeout(() => zone.classList.add('collapsed'), 720);
+    toggleBtn.textContent = 'Показать';
+  } else {
+    zone.classList.remove('collapsed');
+    toggleBtn.textContent = 'Скрыть';
+  }
+});
+
+closeBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  modal.classList.add('shown');
+});
+modalCancel.addEventListener('click', () => modal.classList.remove('shown'));
+modalConfirm.addEventListener('click', () => {
+  modal.classList.remove('shown');
+  if (autoInterval) {
+    clearInterval(autoInterval); autoInterval = null;
+    btnAuto.classList.remove('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-play"/></svg> Авто-диалог';
+  }
+  clearAll();
+});
+modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('shown'); });
+
+// Settings popup
+settingsBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const open = settingsPop.classList.toggle('shown');
+  settingsBtn.classList.toggle('open', open);
+});
+settingsPop.addEventListener('click', (e) => e.stopPropagation());
+document.addEventListener('click', () => {
+  settingsPop.classList.remove('shown');
+  settingsBtn.classList.remove('open');
+});
+
+// Fill update for T2 slider — CSS vars driven by JS
+// pct (0..1) controls both --val (fill width) and --val-opacity (brightness 0.12..0.85)
+function updateSliderFill(el) {
+  const min = +el.min, max = +el.max, val = +el.value;
+  const pct = (val - min) / (max - min);
+  el.style.setProperty('--val', (pct * 100) + '%');
+  const opacity = 0.12 + pct * 0.73;
+  el.style.setProperty('--val-opacity', opacity.toFixed(3));
+}
+
+// Size slider — step=any для плавного движения thumb, label дискретный
+const sizeLabels = ['XS', 'S', 'M', 'L', 'XL'];
+const SIZE_MIN = 0.75, SIZE_MAX = 1.3;
+sizeSlider.addEventListener('input', () => {
+  const v = parseFloat(sizeSlider.value);
+  // bubble scale интерполируется плавно (0.75 → 1.3)
+  const scale = SIZE_MIN + (v / 4) * (SIZE_MAX - SIZE_MIN);
+  document.documentElement.style.setProperty('--bubble-scale', scale.toFixed(3));
+  // label — ближайший дискретный пресет
+  const idx = Math.min(4, Math.max(0, Math.round(v)));
+  sizeValue.textContent = sizeLabels[idx];
+  updateSliderFill(sizeSlider);
+});
+
+// Volume slider
+volSlider.addEventListener('input', () => {
+  volValue.textContent = `${volSlider.value}%`;
+  updateSliderFill(volSlider);
+});
+
+// Initial fill state
+updateSliderFill(sizeSlider);
+updateSliderFill(volSlider);
+
+let seconds = 134;
+setInterval(() => {
+  seconds++;
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = (seconds % 60).toString().padStart(2, '0');
+  document.getElementById('timer').textContent = `${m}:${s}`;
+}, 1000);
+
+const pill = document.getElementById('control-pill');
+let dragging = false, dragStart = {};
+pill.addEventListener('mousedown', (e) => {
+  if (e.target.closest('button') || e.target.closest('.settings-popover')) return;
+  dragging = true;
+  const rect = zone.getBoundingClientRect();
+  const frame = zone.closest('.frame');
+  const fRect = frame.getBoundingClientRect();
+  dragStart = { x: e.clientX, y: e.clientY, rectLeft: rect.left - fRect.left, rectBottom: fRect.bottom - rect.bottom };
+  e.preventDefault();
+});
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const frame = zone.closest('.frame');
+  const fRect = frame.getBoundingClientRect();
+  const dx = e.clientX - dragStart.x; const dy = e.clientY - dragStart.y;
+  const w = zone.offsetWidth;
+  let newLeft = dragStart.rectLeft + dx; let newBottom = dragStart.rectBottom - dy;
+  newLeft = Math.max(8, Math.min(newLeft, fRect.width - w - 8));
+  newBottom = Math.max(8, Math.min(newBottom, fRect.height - 80));
+  zone.style.left = newLeft + 'px'; zone.style.right = 'auto';
+  zone.style.bottom = newBottom + 'px'; zone.style.transform = 'none';
+});
+window.addEventListener('mouseup', () => { dragging = false; });
+
+setTimeout(() => addBubble('me', MY_PHRASES[myIndex++]), 200);
+setTimeout(() => addBubble('peer', PEER_PHRASES[peerIndex++]), 700);
+setTimeout(() => addBubble('me', MY_PHRASES[myIndex++]), 1200);
+</script>
+
+</body>
+</html>
