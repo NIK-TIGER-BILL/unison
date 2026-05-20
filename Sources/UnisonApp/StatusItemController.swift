@@ -8,19 +8,29 @@ public final class StatusItemController {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let popoverVM: PopoverViewModel
+    private let onOpenSettings: () -> Void
 
-    public init(popoverVM: PopoverViewModel) {
+    public init(
+        popoverVM: PopoverViewModel,
+        onOpenSettings: @escaping () -> Void = {}
+    ) {
         self.popoverVM = popoverVM
+        self.onOpenSettings = onOpenSettings
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.popover = NSPopover()
         popover.behavior = .transient
         // 340pt width matches the redesigned PopoverView (DESIGN §4.3).
         // Height comes from the SwiftUI ideal size — we enable
         // `preferredContentSize` so the popover grows when the dropdown
-        // overlay expands the SwiftUI hierarchy. Wiring `onOpenSettings`
-        // is deferred to Phase 5.
+        // overlay expands the SwiftUI hierarchy.
+        let popoverRef = popover
         let host = NSHostingController(
-            rootView: PopoverView(vm: popoverVM, onOpenSettings: { })
+            rootView: PopoverView(vm: popoverVM, onOpenSettings: { [popoverRef] in
+                // Dismiss the popover before opening Settings so it
+                // doesn't sit on top of the new window.
+                popoverRef.performClose(nil)
+                onOpenSettings()
+            })
         )
         host.sizingOptions = [.preferredContentSize]
         popover.contentSize = NSSize(width: 340, height: 320)

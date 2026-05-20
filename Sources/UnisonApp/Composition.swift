@@ -68,7 +68,11 @@ public final class Composition {
             onChange: { s in
                 store.save(s)
                 popVM.settings = s
-            }
+            },
+            keychain: keychain,
+            installer: installer,
+            hotkeyStore: UserDefaultsHotkeyStorage(),
+            togglesStore: UserDefaultsToggleStorage()
         )
         self.transcriptVM = TranscriptViewModel(store: orchestrator.transcript)
     }
@@ -101,5 +105,57 @@ final class OpenAIRealtimeStreamFactory: TranslationStreamFactory, @unchecked Se
 
     func make(speaker: Speaker) -> any TranslationStream {
         OpenAIRealtimeStream(apiKey: apiKeyProvider(), client: URLSessionWSClient(), clock: clock, speaker: speaker)
+    }
+}
+
+/// UserDefaults-backed persistence for the two hotkeys configured in
+/// Settings. Stored as JSON so the encoding stays stable across version
+/// bumps to `Hotkey` (the value type is Codable).
+final class UserDefaultsHotkeyStorage: HotkeyStorage, @unchecked Sendable {
+    private let defaults: UserDefaults
+    private let prefix = "com.unison.hotkey.v1."
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    private func key(for kind: HotkeyKind) -> String { prefix + kind.rawValue }
+
+    func loadHotkey(_ kind: HotkeyKind) -> Hotkey? {
+        guard let data = defaults.data(forKey: key(for: kind)) else { return nil }
+        return try? JSONDecoder().decode(Hotkey.self, from: data)
+    }
+
+    func saveHotkey(_ kind: HotkeyKind, _ hotkey: Hotkey?) {
+        let k = key(for: kind)
+        guard let hotkey else {
+            defaults.removeObject(forKey: k)
+            return
+        }
+        if let data = try? JSONEncoder().encode(hotkey) {
+            defaults.set(data, forKey: k)
+        }
+    }
+}
+
+/// UserDefaults-backed persistence for the behaviour toggles.
+final class UserDefaultsToggleStorage: ToggleStorage, @unchecked Sendable {
+    private let defaults: UserDefaults
+    private let prefix = "com.unison.toggle.v1."
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    private func key(for kind: BehaviorToggle) -> String { prefix + kind.rawValue }
+
+    func loadToggle(_ kind: BehaviorToggle, default fallback: Bool) -> Bool {
+        let k = key(for: kind)
+        if defaults.object(forKey: k) == nil { return fallback }
+        return defaults.bool(forKey: k)
+    }
+
+    func saveToggle(_ kind: BehaviorToggle, _ value: Bool) {
+        defaults.set(value, forKey: key(for: kind))
     }
 }
