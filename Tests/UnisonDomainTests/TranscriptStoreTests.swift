@@ -46,3 +46,17 @@ import Testing
     #expect(text.contains("Hi"))
     #expect(text.contains("Hello"))
 }
+
+@Test @MainActor func transcriptStore_targetLanguageFollowsSpeakerDirection() {
+    let store = TranscriptStore()
+    store.currentLanguagePair = LanguagePair(mine: .ru, peer: .en)
+    store.apply(TranscriptDelta(entryId: freshUUID(), speaker: .me, kind: .translated, text: "Hello", isFinal: true))
+    store.apply(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated, text: "Привет", isFinal: true))
+    #expect(store.entries.count == 2)
+    // .me speaks .ru, translated to .en
+    #expect(store.entries[0].speaker == .me)
+    #expect(store.entries[0].targetLanguage == .en)
+    // .peer speaks .en, translated to .ru
+    #expect(store.entries[1].speaker == .peer)
+    #expect(store.entries[1].targetLanguage == .ru)
+}

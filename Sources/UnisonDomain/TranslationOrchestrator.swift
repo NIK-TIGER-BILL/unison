@@ -52,6 +52,7 @@ public final class TranslationOrchestrator {
         currentLanguages = languages
         currentSettings = settings
         transcript.clear()
+        transcript.currentLanguagePair = languages
 
         if mode == .call {
             let status = permissions.currentStatus(.microphone)

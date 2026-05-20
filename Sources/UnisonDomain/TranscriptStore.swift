@@ -5,6 +5,7 @@ import Observation
 @Observable
 public final class TranscriptStore {
     public private(set) var entries: [TranscriptEntry] = []
+    public var currentLanguagePair: LanguagePair?
 
     public init() {}
 
@@ -17,13 +18,17 @@ public final class TranscriptStore {
                 entries[idx].translatedText = entries[idx].translatedText + delta.text
             }
         } else {
+            let targetLang: Language = {
+                guard let pair = currentLanguagePair else { return .en }
+                return delta.speaker == .me ? pair.peer : pair.mine
+            }()
             let entry = TranscriptEntry(
                 id: delta.entryId,
                 speaker: delta.speaker,
                 originalText: delta.kind == .original ? delta.text : nil,
                 translatedText: delta.kind == .translated ? delta.text : "",
                 sourceLanguage: nil,
-                targetLanguage: .en,
+                targetLanguage: targetLang,
                 timestamp: Date()
             )
             entries.append(entry)
