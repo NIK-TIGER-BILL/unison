@@ -17,6 +17,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
     public nonisolated let connectionState: AsyncStream<ConnectionState>
 
     private var receiveTask: Task<Void, Never>?
+    private var closeReasonTask: Task<Void, Never>?
     private var currentEntryId = UUID()
 
     public init(
@@ -69,6 +70,13 @@ public actor OpenAIRealtimeStream: TranslationStream {
             }
         }
 
+        let closeSource = client.closeStream()
+        closeReasonTask = Task { [weak self] in
+            for await reason in closeSource {
+                await self?.handleClose(reason: reason)
+            }
+        }
+
         let evt = RealtimeClientEvent.sessionUpdate(.init(targetLanguage: target.rawValue))
         let data = try JSONEncoder().encode(evt)
         try await client.send(.text(String(data: data, encoding: .utf8) ?? ""))
@@ -89,11 +97,24 @@ public actor OpenAIRealtimeStream: TranslationStream {
             try? await client.send(.text(str))
         }
         receiveTask?.cancel()
+        closeReasonTask?.cancel()
         await client.close()
         connectionContinuation?.yield(.disconnected)
         transcriptContinuation?.finish()
         outputContinuation?.finish()
         connectionContinuation?.finish()
+    }
+
+    private func handleClose(reason: WSCloseReason) {
+        // Treat any close that arrives via this channel as a non-graceful failure.
+        // Graceful closes (initiated by our close()) finish the receive stream
+        // before this fires; the closeReasonTask is cancelled in close().
+        switch reason {
+        case .normal:
+            connectionContinuation?.yield(.disconnected)
+        case .abnormal, .error:
+            connectionContinuation?.yield(.failed(.networkLost))
+        }
     }
 
     private func handle(message: WSMessage) async {

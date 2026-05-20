@@ -100,6 +100,27 @@ import Testing
     }
 }
 
+@Test func stream_wsCloseAbnormal_emitsFailedState() async throws {
+    let ws = FakeWSClient()
+    let stream = OpenAIRealtimeStream(apiKey: "sk-test", client: ws, clock: SystemClock())
+    try await stream.connect(target: .en)
+
+    let collector = Task { () -> ConnectionState? in
+        for await s in stream.connectionState where s != .connected && s != .connecting {
+            return s
+        }
+        return nil
+    }
+
+    ws.pushClose(.abnormal(code: 1006))
+    let state = await collector.value
+    if case .failed(let e) = state {
+        #expect(e == .networkLost)
+    } else {
+        Issue.record("Expected .failed(.networkLost), got \(String(describing: state))")
+    }
+}
+
 @Test func stream_closeSendsSessionCloseAndShutsDown() async throws {
     let ws = FakeWSClient()
     let stream = OpenAIRealtimeStream(apiKey: "sk-test", client: ws, clock: SystemClock())
