@@ -253,6 +253,28 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
     }
 }
 
+@Test @MainActor func orchestrator_reconnect_closesPreviousStream() async throws {
+    // When a stream fails, the orchestrator must close the stale stream as part
+    // of the reconnect flow — otherwise the old WebSocket and its receive task
+    // leak across repeated reconnects.
+    let fakeClock = FakeClock(now: epochDate(0))
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: fakeClock)
+    await o.start(mode: .call, languages: .default)
+
+    let originalPeer = factory.streams[.peer]!
+    originalPeer.emitConnectionState(.failed(.networkLost))
+
+    // Wait until the orchestrator has entered .reconnecting (which happens
+    // synchronously after cancelling old tasks + closing the stale stream).
+    for _ in 0..<20 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .reconnecting = o.state { break }
+    }
+
+    #expect(originalPeer.closeCalls >= 1, "Original peer stream should have been closed during reconnect")
+}
+
 @Test @MainActor func orchestrator_terminalErrorMidSession_setsErrorWithoutReconnect() async throws {
     // apiKeyInvalid is terminal — orchestrator should transition straight to .error.
     let fakeClock = FakeClock(now: epochDate(0))

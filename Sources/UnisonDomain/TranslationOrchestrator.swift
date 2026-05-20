@@ -19,7 +19,11 @@ public final class TranslationOrchestrator {
 
     private var meStream: (any TranslationStream)?
     private var peerStream: (any TranslationStream)?
-    private var pipelineTasks: [Task<Void, Never>] = []
+    // Pipeline tasks bucketed per speaker so a reconnect cancels exactly the
+    // tasks bound to the failed stream and leaves the healthy side untouched.
+    private var pipelineTasksBySpeaker: [Speaker: [Task<Void, Never>]] = [:]
+    // Tasks not bound to a single stream (device observer, etc).
+    private var globalTasks: [Task<Void, Never>] = []
     private var currentLanguages: LanguagePair = .default
     private var currentSettings: Settings = .default
 
@@ -107,7 +111,7 @@ public final class TranslationOrchestrator {
                 self.handleDeviceChange()
             }
         }
-        pipelineTasks.append(task)
+        globalTasks.append(task)
     }
 
     private func handleDeviceChange() {
@@ -169,7 +173,7 @@ public final class TranslationOrchestrator {
                 }
             }
         }
-        pipelineTasks.append(task)
+        pipelineTasksBySpeaker[speaker, default: []].append(task)
     }
 
     private func handleStreamFailure(
@@ -186,6 +190,20 @@ public final class TranslationOrchestrator {
         default:
             break
         }
+
+        // Cancel the failed speaker's tasks and close the stale stream so we
+        // don't leak Tasks or orphan a still-open WebSocket on repeated reconnects.
+        for t in pipelineTasksBySpeaker[speaker] ?? [] { t.cancel() }
+        pipelineTasksBySpeaker[speaker] = []
+        switch speaker {
+        case .me:
+            await meStream?.close()
+            meStream = nil
+        case .peer:
+            await peerStream?.close()
+            peerStream = nil
+        }
+
         state = .reconnecting(mode: mode, since: clock.now())
         var backoff = BackoffPolicy(initial: 1, cap: 30)
         // Re-create the stream and try again, up to 5 attempts then give up
@@ -221,8 +239,12 @@ public final class TranslationOrchestrator {
     }
 
     public func stop() async {
-        for t in pipelineTasks { t.cancel() }
-        pipelineTasks.removeAll()
+        for t in globalTasks { t.cancel() }
+        for (_, tasks) in pipelineTasksBySpeaker {
+            for t in tasks { t.cancel() }
+        }
+        globalTasks.removeAll()
+        pipelineTasksBySpeaker.removeAll()
         micCapture.stop()
         peerCapture.stop()
         outputMixer.stop()
@@ -273,7 +295,7 @@ public final class TranslationOrchestrator {
                 transcript.apply(d)
             }
         }
-        pipelineTasks.append(contentsOf: [task1, task2, task3])
+        pipelineTasksBySpeaker[.me, default: []].append(contentsOf: [task1, task2, task3])
     }
 
     private func wireIncomingPipeline(stream: any TranslationStream) {
@@ -325,6 +347,6 @@ public final class TranslationOrchestrator {
                 transcript.apply(d)
             }
         }
-        pipelineTasks.append(contentsOf: [splitter, sender, translatedPlay, originalPlay, transcripts])
+        pipelineTasksBySpeaker[.peer, default: []].append(contentsOf: [splitter, sender, translatedPlay, originalPlay, transcripts])
     }
 }
