@@ -16,10 +16,10 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     public func start(deviceUID: String?) async throws {
         engine.attach(translatedPlayer)
         engine.attach(originalPlayer)
-        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false)!
-        engine.connect(translatedPlayer, to: mixer, format: format)
-        engine.connect(originalPlayer, to: mixer, format: format)
 
+        // Assign the requested output device before resolving formats so
+        // AVAudioEngine can negotiate the mixer→output connection at the
+        // device's native sample rate.
         if let uid = deviceUID, let deviceID = audioDeviceID(forUID: uid) {
             var id = deviceID
             AudioUnitSetProperty(
@@ -30,10 +30,25 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
             )
         }
 
+        // Players feed 48 kHz F32 mono (the resampler pipeline target).
+        // AVAudioEngine inserts a rate converter between the mixer and the
+        // output node automatically when the device's hardware rate differs.
+        let playerInput = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false)!
+        engine.connect(translatedPlayer, to: mixer, format: playerInput)
+        engine.connect(originalPlayer, to: mixer, format: playerInput)
+
         translatedPlayer.volume = 1.0
         originalPlayer.volume = 0.2
 
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            throw NSError(
+                domain: "AVAudioOutputMixer",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to start audio engine: \(error.localizedDescription)"]
+            )
+        }
         translatedPlayer.play()
         originalPlayer.play()
     }
