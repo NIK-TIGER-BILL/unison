@@ -74,7 +74,16 @@ public final class Composition {
             hotkeyStore: UserDefaultsHotkeyStorage(),
             togglesStore: UserDefaultsToggleStorage()
         )
-        self.transcriptVM = TranscriptViewModel(store: orchestrator.transcript)
+        self.transcriptVM = TranscriptViewModel(
+            store: orchestrator.transcript,
+            orchestrator: orchestrator
+        )
+        // Project the persisted original-mix volume into the transcript VM
+        // so the popover slider opens at the saved value. The VM stores it
+        // as an Int 0-100; settings hold a 0.0-1.0 Float.
+        self.transcriptVM.originalVolume = Int(
+            (initialSettings.originalMixVolume * 100).rounded()
+        )
     }
 }
 
