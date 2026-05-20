@@ -95,6 +95,50 @@ public final class TranslationOrchestrator {
         }
 
         state = .translating(mode: mode, startedAt: clock.now())
+        observeDeviceChanges()
+    }
+
+    private func observeDeviceChanges() {
+        let changes = deviceRegistry.deviceChanges
+        let task = Task { @MainActor [weak self] in
+            for await _ in changes {
+                if Task.isCancelled { return }
+                guard let self else { return }
+                self.handleDeviceChange()
+            }
+        }
+        pipelineTasks.append(task)
+    }
+
+    private func handleDeviceChange() {
+        guard case .translating(let mode, _) = state else { return }
+
+        // BlackHole 16ch is required in both modes — losing it is fatal.
+        if deviceRegistry.findBlackHole16ch() == nil {
+            Task { @MainActor in
+                await self.stop()
+                self.state = .error(.blackHole16chMissing)
+            }
+            return
+        }
+        // BlackHole 2ch is required only in Call mode — losing it is fatal there.
+        if mode == .call, deviceRegistry.findBlackHole2ch() == nil {
+            Task { @MainActor in
+                await self.stop()
+                self.state = .error(.blackHole2chMissing)
+            }
+            return
+        }
+        // Soft fallback: selected mic disappeared → revert to system default.
+        if let uid = currentSettings.inputDeviceUID,
+           !deviceRegistry.availableInputDevices().contains(where: { $0.uid == uid }) {
+            currentSettings.inputDeviceUID = nil
+        }
+        // Soft fallback: selected output disappeared → revert to system default.
+        if let uid = currentSettings.outputDeviceUID,
+           !deviceRegistry.availableOutputDevices().contains(where: { $0.uid == uid }) {
+            currentSettings.outputDeviceUID = nil
+        }
     }
 
     private func mapConnectError(_ error: Error) -> TranslationError {

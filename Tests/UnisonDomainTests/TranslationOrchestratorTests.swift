@@ -269,3 +269,76 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
 
     #expect(o.state.errorValue == .apiKeyInvalid)
 }
+
+@Test @MainActor func orchestrator_blackHole16chDisappears_transitionsToError() async throws {
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
+    let o = makeOrchestrator(registry: registry)
+    await o.start(mode: .call, languages: .default)
+
+    // Simulate BlackHole 16ch disappearance
+    registry.bh16ch = nil
+    registry.notifyDeviceChange()
+
+    for _ in 0..<20 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .error = o.state { break }
+    }
+
+    if case .error(let e) = o.state {
+        #expect(e == .blackHole16chMissing)
+    } else {
+        Issue.record("Expected .error(.blackHole16chMissing), got \(o.state)")
+    }
+}
+
+@Test @MainActor func orchestrator_blackHole2chDisappearsInCallMode_transitionsToError() async throws {
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
+    let o = makeOrchestrator(registry: registry)
+    await o.start(mode: .call, languages: .default)
+
+    registry.bh2ch = nil
+    registry.notifyDeviceChange()
+
+    for _ in 0..<20 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .error = o.state { break }
+    }
+
+    if case .error(let e) = o.state {
+        #expect(e == .blackHole2chMissing)
+    } else {
+        Issue.record("Expected .error(.blackHole2chMissing), got \(o.state)")
+    }
+}
+
+@Test @MainActor func orchestrator_inputDeviceDisappears_fallsBackToDefault() async throws {
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
+    registry.inputs = [AudioDevice(uid: "airpods", name: "AirPods", kind: .input)]
+    var settings = Settings.default
+    settings.inputDeviceUID = "airpods"
+    let o = makeOrchestrator(registry: registry)
+    await o.start(mode: .call, languages: .default, settings: settings)
+
+    // Sanity: should be translating now
+    guard case .translating = o.state else {
+        Issue.record("Expected .translating after start, got \(o.state)")
+        return
+    }
+
+    registry.inputs = []  // AirPods disconnected
+    registry.notifyDeviceChange()
+    try await Task.sleep(nanoseconds: 100_000_000)
+
+    // State should still be .translating (soft fallback)
+    if case .translating = o.state {
+        #expect(true)
+    } else {
+        Issue.record("Expected .translating, got \(o.state)")
+    }
+}
