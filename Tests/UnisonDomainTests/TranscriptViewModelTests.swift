@@ -132,6 +132,21 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     #expect(vm.originalVolume == 0)
 }
 
+@MainActor
+@Test func transcriptVM_updateOriginalVolume_firesOnOriginalVolumeChanged() {
+    // The composition layer uses `onOriginalVolumeChanged` to mirror
+    // volume drags back into `SettingsViewModel` for persistence.
+    let vm = TranscriptViewModel(store: TranscriptStore())
+    var captured: [Float] = []
+    vm.onOriginalVolumeChanged = { v in captured.append(v) }
+    vm.updateOriginalVolume(50)
+    vm.updateOriginalVolume(100)
+    vm.updateOriginalVolume(0)
+    // Clamped values still fire the callback.
+    vm.updateOriginalVolume(150)
+    #expect(captured == [0.5, 1.0, 0.0, 1.0])
+}
+
 // MARK: - Hidden / stop modal
 
 @MainActor

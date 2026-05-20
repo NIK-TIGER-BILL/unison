@@ -66,6 +66,13 @@ public final class TranscriptViewModel {
     /// `await orchestrator.stop()` so the session actually ends.
     public var onStopRequested: @MainActor () -> Void = {}
 
+    /// Optional callback fired whenever the user drags the volume slider in
+    /// the transcript settings popover. Composition wires this to the
+    /// `SettingsViewModel` so the value persists across launches. Float in
+    /// `0.0 ... 1.0` to match the storage encoding.
+    @ObservationIgnored
+    public var onOriginalVolumeChanged: ((Float) -> Void)?
+
     /// Delay before a live (typing-dots) bubble auto-finalises. Mirrors the
     /// JS `liveTimer` constant (`2500ms`).
     public static let liveFinalizeDelaySeconds: TimeInterval = 2.5
@@ -133,11 +140,15 @@ public final class TranscriptViewModel {
     }
 
     /// Update the original-track volume (0-100). Propagates the change to
-    /// the orchestrator's mixer as `Float` in `0.0 ... 1.0`.
+    /// the orchestrator's mixer as `Float` in `0.0 ... 1.0`, and forwards
+    /// the same value to `onOriginalVolumeChanged` so the host can persist
+    /// it in `Settings`.
     public func updateOriginalVolume(_ value: Int) {
         let clamped = max(0, min(100, value))
         originalVolume = clamped
-        orchestrator?.updateOriginalMixVolume(Float(clamped) / 100.0)
+        let floatValue = Float(clamped) / 100.0
+        orchestrator?.updateOriginalMixVolume(floatValue)
+        onOriginalVolumeChanged?(floatValue)
     }
 
     public func toggleHidden() {

@@ -84,6 +84,14 @@ public final class Composition {
         self.transcriptVM.originalVolume = Int(
             (initialSettings.originalMixVolume * 100).rounded()
         )
+        // Persist volume changes back to Settings whenever the user moves
+        // the slider in the transcript settings popover. The settings VM
+        // exposes the canonical mutation — calling it triggers `onChange`
+        // which writes to the SettingsStore.
+        let settingsVMRef = self.settingsVM
+        self.transcriptVM.onOriginalVolumeChanged = { volume in
+            settingsVMRef.setOriginalMixVolume(volume)
+        }
     }
 }
 

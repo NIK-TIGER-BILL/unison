@@ -14,7 +14,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public var settingsWindow: SettingsWindowController!
     public var hotkeyService: HotkeyService!
 
-    private var lastActive = false
+    /// The last `MenubarState` we pushed to the status item. Cached so
+    /// the observer doesn't reapply the same image on every change of
+    /// some other observable property in the orchestrator.
+    private var lastMenubarState: MenubarState = .idle
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         let hotkeys = HotkeyService()
@@ -36,8 +39,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             popoverVM: composition.popoverVM,
             onOpenSettings: { [weak self] in
                 self?.settingsWindow.show()
+            },
+            onStartStop: { [weak self] in
+                self?.toggleSession()
+            },
+            onShowTranscript: { [weak self] in
+                self?.transcriptWindow.show()
+            },
+            onShowAbout: { [weak self] in
+                self?.showAbout()
+            },
+            onQuit: {
+                NSApp.terminate(nil)
             }
         )
+
         transcriptWindow = TranscriptWindowController(viewModel: composition.transcriptVM)
         onboardingWindow = OnboardingWindowController(viewModel: composition.onboardingVM)
 
@@ -70,30 +86,61 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in await orch.stop() }
     }
 
+    // MARK: - Orchestrator → menubar state
+
+    /// Re-entrant tracker for `withObservationTracking`. Re-arms itself
+    /// after each emission so the menubar icon + transcript window stay
+    /// in sync with `SessionState` transitions.
     private func observeOrchestratorState() {
         withObservationTracking {
-            applyActiveState(composition.orchestrator.state.isActive)
+            let state = composition.orchestrator.state
+            applyOrchestratorState(state)
         } onChange: { [weak self] in
             Task { @MainActor in self?.observeOrchestratorState() }
         }
     }
 
-    private func applyActiveState(_ isActive: Bool) {
-        guard isActive != lastActive else { return }
-        lastActive = isActive
-        if isActive {
-            transcriptWindow.show()
-            statusItem.setActiveIcon(true)
-        } else {
-            transcriptWindow.hide()
-            statusItem.setActiveIcon(false)
+    /// Map `SessionState` → `MenubarState` and side-effects (show/hide
+    /// the transcript window when starting/stopping).
+    private func applyOrchestratorState(_ state: SessionState) {
+        let target: MenubarState
+        switch state {
+        case .idle:
+            target = .idle
+        case .connecting, .translating:
+            target = .active
+        case .reconnecting:
+            // Treat reconnect as a degraded active for v1 — the design
+            // doesn't define a distinct "warn" status icon and the
+            // pulsing logo communicates the right "still working" vibe.
+            target = .active
+        case .error:
+            target = .error
         }
+
+        // Transcript visibility tracks `isActive`. Only act on
+        // transitions to avoid flickering when other observed state
+        // changes without flipping active.
+        let wasActive = lastMenubarState == .active
+        let isActive = state.isActive
+        if isActive != wasActive {
+            if isActive {
+                transcriptWindow.show()
+            } else {
+                transcriptWindow.hide()
+            }
+        }
+
+        // Push the icon update (the controller diffs internally).
+        statusItem.state = target
+        lastMenubarState = target
     }
 
-    // MARK: - Hotkey actions
+    // MARK: - Context menu callbacks
 
     /// Toggles the translation session globally. Bound to the
-    /// configurable "Старт / стоп" hotkey (default `⌃⌥U`).
+    /// configurable "Старт / стоп" hotkey (default `⌃⌥U`) and to the
+    /// context-menu "Начать перевод" / "Остановить перевод" item.
     private func toggleSession() {
         let vm = composition.popoverVM
         Task { @MainActor in
@@ -103,6 +150,31 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 await vm.start()
             }
         }
+    }
+
+    /// Minimal "About" sheet. Uses a stock `NSAlert` rather than a
+    /// custom NSWindow — the design ships an About mock but it's listed
+    /// as out-of-scope in `docs/superpowers/plans/2026-05-20-ui-integration.md`
+    /// §4 "Out of Scope". We still want a working entry point from the
+    /// context menu, so this gives users version info and a stable
+    /// fallback. Replace with a glass About window when scope allows.
+    private func showAbout() {
+        let alert = NSAlert()
+        alert.messageText = "Unison"
+        let info = Bundle.main.infoDictionary
+        let shortVersion = info?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let build = info?["CFBundleVersion"] as? String ?? "1"
+        alert.informativeText = """
+        Версия \(shortVersion) · сборка \(build)
+
+        Перевод речи в реальном времени для звонков и встреч.
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Готово")
+        // Bring app forward so the modal isn't lost behind a meeting
+        // window when launched from the menubar.
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     /// Entry point invoked by `SettingsView` (via the controller's
