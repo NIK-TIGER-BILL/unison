@@ -22,6 +22,24 @@ private func makeOrchestratorForVM(perms: MockPermissionsService = .init()) -> T
 }
 
 @MainActor
+private func makeReadyVM(
+    settings: Settings = .default,
+    perms: MockPermissionsService = .init()
+) -> PopoverViewModel {
+    if perms.statuses[.microphone] == nil { perms.statuses[.microphone] = .granted }
+    let orch = makeOrchestratorForVM(perms: perms)
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
+    return PopoverViewModel(
+        orchestrator: orch,
+        permissions: perms,
+        deviceRegistry: registry,
+        settings: settings
+    )
+}
+
+@MainActor
 @Test func popoverVM_initialIsIdle() {
     let perms = MockPermissionsService()
     let orch = makeOrchestratorForVM(perms: perms)
@@ -77,4 +95,92 @@ private func makeOrchestratorForVM(perms: MockPermissionsService = .init()) -> T
         settings: Settings(languagePair: LanguagePair(mine: .ru, peer: .en))
     )
     #expect(vm.languagePairDisplay == "🇷🇺 Русский → 🇬🇧 English")
+}
+
+// MARK: - Phase 3a additions
+
+@Test
+func popoverVM_formatElapsed_padsMinutesAndSeconds() {
+    #expect(PopoverViewModel.formatElapsed(0) == "00:00")
+    #expect(PopoverViewModel.formatElapsed(2.5) == "00:02")
+    #expect(PopoverViewModel.formatElapsed(59) == "00:59")
+    #expect(PopoverViewModel.formatElapsed(60) == "01:00")
+    #expect(PopoverViewModel.formatElapsed(125) == "02:05")
+    // Negative inputs (clock skew) clamp to "00:00".
+    #expect(PopoverViewModel.formatElapsed(-3) == "00:00")
+}
+
+@MainActor
+@Test
+func popoverVM_elapsedSecondsString_isZeroWhenIdle() {
+    let vm = makeReadyVM()
+    #expect(vm.elapsedSecondsString == "00:00")
+}
+
+@MainActor
+@Test
+func popoverVM_isLanguagePairValid_falseWhenSame() {
+    let vm = makeReadyVM(
+        settings: Settings(languagePair: LanguagePair(mine: .ru, peer: .ru))
+    )
+    #expect(vm.isLanguagePairValid == false)
+    #expect(vm.canStartStrict == false)
+}
+
+@MainActor
+@Test
+func popoverVM_isLanguagePairValid_trueWhenDifferent() {
+    let vm = makeReadyVM(
+        settings: Settings(languagePair: LanguagePair(mine: .ru, peer: .en))
+    )
+    #expect(vm.isLanguagePairValid)
+    #expect(vm.canStartStrict)
+}
+
+@MainActor
+@Test
+func popoverVM_statusKind_readyWhenIdleAndValid() {
+    let vm = makeReadyVM(
+        settings: Settings(languagePair: LanguagePair(mine: .ru, peer: .en))
+    )
+    #expect(vm.statusKind == .ready)
+}
+
+@MainActor
+@Test
+func popoverVM_statusKind_warnWhenSameLanguage() {
+    let vm = makeReadyVM(
+        settings: Settings(languagePair: LanguagePair(mine: .ja, peer: .ja))
+    )
+    #expect(vm.statusKind == .warn)
+}
+
+@MainActor
+@Test
+func popoverVM_primaryButton_idleLabelsAndIcon() {
+    let vm = makeReadyVM()
+    #expect(vm.primaryButtonTitle == "Начать перевод")
+    #expect(vm.primaryButtonIcon == .play)
+}
+
+@MainActor
+@Test
+func popoverVM_toggleSessionMode_swapsCallAndListen() {
+    var settings = Settings.default
+    settings.sessionMode = .call
+    let vm = makeReadyVM(settings: settings)
+    vm.toggleSessionMode()
+    #expect(vm.settings.sessionMode == .listen)
+    vm.toggleSessionMode()
+    #expect(vm.settings.sessionMode == .call)
+}
+
+@MainActor
+@Test
+func popoverVM_updateLanguagePair_replacesPair() {
+    let vm = makeReadyVM(
+        settings: Settings(languagePair: LanguagePair(mine: .ru, peer: .en))
+    )
+    vm.updateLanguagePair(LanguagePair(mine: .ja, peer: .ko))
+    #expect(vm.settings.languagePair == LanguagePair(mine: .ja, peer: .ko))
 }

@@ -14,8 +14,17 @@ public final class StatusItemController {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.popover = NSPopover()
         popover.behavior = .transient
-        popover.contentSize = NSSize(width: 280, height: 240)
-        popover.contentViewController = NSHostingController(rootView: PopoverView(vm: popoverVM))
+        // 340pt width matches the redesigned PopoverView (DESIGN §4.3).
+        // Height comes from the SwiftUI ideal size — we enable
+        // `preferredContentSize` so the popover grows when the dropdown
+        // overlay expands the SwiftUI hierarchy. Wiring `onOpenSettings`
+        // is deferred to Phase 5.
+        let host = NSHostingController(
+            rootView: PopoverView(vm: popoverVM, onOpenSettings: { })
+        )
+        host.sizingOptions = [.preferredContentSize]
+        popover.contentSize = NSSize(width: 340, height: 320)
+        popover.contentViewController = host
 
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Unison")

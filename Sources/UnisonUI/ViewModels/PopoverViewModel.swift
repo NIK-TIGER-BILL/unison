@@ -8,6 +8,13 @@ public enum StartBlockedReason: Equatable, Sendable {
     case blackHole16chMissing
 }
 
+/// Tiny enum for the popover's primary button icon. Mapped at the view
+/// layer to an SF Symbol (`play.fill` / `stop.fill`).
+public enum PopoverPrimaryIcon: Sendable {
+    case play
+    case stop
+}
+
 @MainActor
 @Observable
 public final class PopoverViewModel {
@@ -33,7 +40,7 @@ public final class PopoverViewModel {
     public var languagePairDisplay: String {
         let mine = settings.languagePair.mine
         let peer = settings.languagePair.peer
-        return "\(flag(mine)) \(mine.displayName) → \(flag(peer)) \(peer.displayName)"
+        return "\(mine.flagEmoji) \(mine.displayName) → \(peer.flagEmoji) \(peer.displayName)"
     }
 
     public var runningTimeSeconds: TimeInterval {
@@ -43,7 +50,64 @@ public final class PopoverViewModel {
         return 0
     }
 
+    /// `mm:ss` formatted version of `runningTimeSeconds`.
+    /// Returns `"00:00"` when no session is running.
+    public var elapsedSecondsString: String {
+        Self.formatElapsed(runningTimeSeconds)
+    }
+
+    /// Pure formatter — exposed `nonisolated` so tests can call without an
+    /// actor hop.
+    public nonisolated static func formatElapsed(_ seconds: TimeInterval) -> String {
+        let s = max(0, Int(seconds))
+        let mm = s / 60
+        let ss = s % 60
+        return String(format: "%02d:%02d", mm, ss)
+    }
+
     public var canStart: Bool { startBlockedReason == nil }
+
+    /// `true` when the two languages differ. Same-language is the only
+    /// content-level validation the popover surfaces; everything else
+    /// (permissions, BlackHole) is folded into `startBlockedReason`.
+    public var isLanguagePairValid: Bool {
+        settings.languagePair.mine != settings.languagePair.peer
+    }
+
+    /// Strict gate for the Start button — combines the environment check
+    /// (`canStart`) with content validation (`isLanguagePairValid`).
+    public var canStartStrict: Bool { canStart && isLanguagePairValid }
+
+    /// Visual status for the header dot.
+    /// - `.error` while the orchestrator is in `.error`
+    /// - `.active` while connecting / translating / reconnecting
+    /// - `.warn` when the language pair is invalid
+    /// - `.ready` otherwise
+    public var statusKind: StatusKind {
+        if case .error = orchestrator.state { return .error }
+        if orchestrator.state.isActive { return .active }
+        if !isLanguagePairValid { return .warn }
+        return .ready
+    }
+
+    /// Status-dot kind, decoupled from `StatusDot.State` so consumers
+    /// (and tests) don't pull in SwiftUI.
+    public enum StatusKind: Equatable, Sendable {
+        case ready
+        case active
+        case warn
+        case error
+    }
+
+    /// Title for the primary action button.
+    public var primaryButtonTitle: String {
+        orchestrator.state.isActive ? "Остановить" : "Начать перевод"
+    }
+
+    /// Icon for the primary action button.
+    public var primaryButtonIcon: PopoverPrimaryIcon {
+        orchestrator.state.isActive ? .stop : .play
+    }
 
     public var startBlockedReason: StartBlockedReason? {
         if settings.sessionMode == .call,
@@ -67,11 +131,14 @@ public final class PopoverViewModel {
         await orchestrator.stop()
     }
 
-    private func flag(_ lang: Language) -> String {
-        switch lang {
-        case .ru: "🇷🇺"; case .en: "🇬🇧"; case .es: "🇪🇸"; case .fr: "🇫🇷"
-        case .de: "🇩🇪"; case .it: "🇮🇹"; case .pt: "🇵🇹"; case .zh: "🇨🇳"
-        case .ja: "🇯🇵"; case .ko: "🇰🇷"
-        }
+    /// Toggle between Call and Listen modes. Convenience for the view.
+    public func toggleSessionMode() {
+        settings.sessionMode = settings.sessionMode == .call ? .listen : .call
+    }
+
+    /// Replace the current language pair. Centralising the write keeps
+    /// the view layer from poking at `settings.languagePair` directly.
+    public func updateLanguagePair(_ pair: LanguagePair) {
+        settings.languagePair = pair
     }
 }
