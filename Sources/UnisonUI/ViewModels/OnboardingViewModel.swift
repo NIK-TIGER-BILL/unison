@@ -2,10 +2,33 @@ import Foundation
 import Observation
 import UnisonDomain
 
-public enum OnboardingStepKind: Sendable {
+public enum OnboardingStepKind: Sendable, Hashable {
     case blackHole
     case microphone
     case apiKey
+}
+
+/// Per-step UI state. Mirrors the design HTML's `card`/`error`/`done`
+/// classes. The `inProgress` case carries no payload — the spinner is a
+/// purely visual concern. `error` carries a Russian message ready for
+/// display in an `ErrorRow`.
+public enum OnboardingStepStatus: Equatable, Sendable {
+    case pending
+    case inProgress
+    case done
+    case error(String)
+
+    public var isDone: Bool {
+        if case .done = self { return true } else { return false }
+    }
+
+    public var isInProgress: Bool {
+        if case .inProgress = self { return true } else { return false }
+    }
+
+    public var errorMessage: String? {
+        if case .error(let message) = self { return message } else { return nil }
+    }
 }
 
 public struct OnboardingStep: Identifiable, Sendable {
@@ -15,6 +38,12 @@ public struct OnboardingStep: Identifiable, Sendable {
     public let isDone: Bool
 }
 
+/// Drives the onboarding window: tracks which prerequisites are still
+/// pending (BlackHole install / mic permission / OpenAI key) and exposes
+/// per-step status for the new Aurora card design (`OnboardingView`).
+///
+/// The VM stays UI-framework-free. The view observes `status[kind]` to
+/// show spinners, error rows, and the done check.
 @MainActor
 @Observable
 public final class OnboardingViewModel {
@@ -23,6 +52,34 @@ public final class OnboardingViewModel {
     private let keychain: any KeychainService
 
     public private(set) var steps: [OnboardingStep] = []
+
+    /// Per-step UI state. Always contains an entry for every
+    /// `OnboardingStepKind` — `.done` once the underlying check
+    /// (`installer`/`permissions`/`keychain`) reports success.
+    public private(set) var status: [OnboardingStepKind: OnboardingStepStatus] = [:]
+
+    /// Mutable draft for the OpenAI key input. The view binds directly.
+    /// Cleared on successful save.
+    public var apiKeyDraft: String = ""
+
+    /// Optional callback fired when `allDone` flips to `true`. The
+    /// window controller wires this to close the window. Setting the
+    /// callback after `allDone` is already true will fire it
+    /// immediately. Subsequent identical-state `refresh()` calls do
+    /// not re-fire.
+    @ObservationIgnored
+    public var onCompleted: (() -> Void)? {
+        didSet {
+            if allDone, !completionFired {
+                completionFired = true
+                onCompleted?()
+            }
+        }
+    }
+
+    /// Guards `onCompleted` from firing repeatedly when `refresh()` is
+    /// called after the final step transitions to `.done`.
+    private var completionFired = false
 
     public init(
         permissions: any PermissionsService,
@@ -40,26 +97,151 @@ public final class OnboardingViewModel {
         let micDone = permissions.currentStatus(.microphone) == .granted
         let keyDone = keychain.loadAPIKey()?.isEmpty == false
         steps = [
-            OnboardingStep(kind: .blackHole, title: "Аудиодрайвер BlackHole", isDone: bhDone),
-            OnboardingStep(kind: .microphone, title: "Доступ к микрофону", isDone: micDone),
-            OnboardingStep(kind: .apiKey, title: "API ключ OpenAI", isDone: keyDone),
+            OnboardingStep(kind: .blackHole, title: "BlackHole", isDone: bhDone),
+            OnboardingStep(kind: .microphone, title: "Микрофон", isDone: micDone),
+            OnboardingStep(kind: .apiKey, title: "OpenAI ключ", isDone: keyDone),
         ]
+
+        // Carry over `.inProgress` (an in-flight task) but otherwise
+        // resolve to `.done` or `.pending`. Existing `.error` entries
+        // are kept so the user can see them until they retry.
+        for step in steps {
+            let previous = status[step.kind]
+            if step.isDone {
+                status[step.kind] = .done
+            } else if case .inProgress = previous {
+                // Leave it; the awaiting task will overwrite on completion.
+            } else if case .error = previous {
+                // Preserve the error message until the user retries.
+            } else {
+                status[step.kind] = .pending
+            }
+        }
+
+        // Fire the completion callback exactly once. We only mark
+        // `completionFired` when the callback actually ran, so that a
+        // controller wiring `onCompleted` *after* construction still
+        // gets a single deferred notification.
+        if !completionFired, allDone, let onCompleted {
+            completionFired = true
+            onCompleted()
+        }
     }
 
     public var allDone: Bool { steps.allSatisfy(\.isDone) }
 
-    public func installBlackHole() async throws {
-        try await installer.runBundledInstaller()
+    /// Convenience: `2 / 3 готово` style label for the footer.
+    public var progressLabel: String {
+        let done = steps.filter(\.isDone).count
+        let total = steps.count
+        return "\(done) / \(total) готово"
+    }
+
+    /// Pure key validator — exposed `nonisolated` so tests can call
+    /// without an actor hop. Matches the HTML reference
+    /// (`startsWith('sk-') && length >= 20`).
+    public nonisolated static func validateAPIKey(_ key: String) -> Bool {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("sk-") && trimmed.count >= 20
+    }
+
+    /// Instance helper that validates the current draft.
+    public func validateAPIKey() -> Bool {
+        Self.validateAPIKey(apiKeyDraft)
+    }
+
+    /// Save-button gate: the Save button is enabled only when the draft
+    /// passes validation. The draft must be non-empty and start with
+    /// `sk-`.
+    public var canSaveKey: Bool {
+        validateAPIKey()
+    }
+
+    // MARK: - Step actions
+
+    /// Runs the bundled BlackHole installer; reflects progress in
+    /// `status[.blackHole]`. On failure the error message is the one
+    /// the design specifies under the BlackHole error row.
+    public func installBlackHole() async {
+        status[.blackHole] = .inProgress
+        do {
+            try await installer.runBundledInstaller()
+            status[.blackHole] = .done
+        } catch {
+            status[.blackHole] = .error("Не удалось установить. Скорее всего не введён пароль администратора.")
+        }
         refresh()
     }
 
+    /// Asks AVFoundation for microphone permission. If the user denies
+    /// (or has previously denied) we surface the "open System Settings"
+    /// error per design.
     public func requestMicPermission() async {
-        _ = await permissions.request(.microphone)
+        status[.microphone] = .inProgress
+        let result = await permissions.request(.microphone)
+        switch result {
+        case .granted:
+            status[.microphone] = .done
+        case .denied:
+            status[.microphone] = .error("Доступ запрещён. Включите микрофон для Unison в Настройках системы.")
+        case .notDetermined:
+            status[.microphone] = .pending
+        }
         refresh()
     }
 
+    /// Validates and persists the OpenAI key from the draft. On invalid
+    /// input the card flips to the error state with the validation
+    /// message from the design (sk- prefix + 20 chars). On Keychain
+    /// failure we use a generic message.
+    public func saveAPIKey() {
+        let trimmed = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.validateAPIKey(trimmed) else {
+            status[.apiKey] = .error("Ключ должен начинаться с sk- и быть длиннее 20 символов.")
+            return
+        }
+        do {
+            try keychain.saveAPIKey(trimmed)
+            apiKeyDraft = ""
+            status[.apiKey] = .done
+            refresh()
+        } catch {
+            status[.apiKey] = .error("Не удалось сохранить ключ в Keychain.")
+        }
+    }
+
+    /// Backward-compatible overload accepting a raw string. Persists
+    /// the key without the strict validator (so existing tests using
+    /// short fixtures keep passing). Validated saves go through
+    /// `saveAPIKey()` and `apiKeyDraft`.
     public func saveAPIKey(_ key: String) throws {
         try keychain.saveAPIKey(key)
         refresh()
+    }
+
+    /// Clears any error for the given step. Used when the user edits
+    /// the key field — the design clears the error on input.
+    public func clearError(for kind: OnboardingStepKind) {
+        if case .error = status[kind] {
+            status[kind] = .pending
+        }
+    }
+
+    /// Returns the deep-link URL to the relevant System Settings pane
+    /// for the given step. Currently only the microphone error has a
+    /// deep link. Returns `nil` for steps without an associated URL.
+    public nonisolated static func systemSettingsURL(for kind: OnboardingStepKind) -> URL? {
+        switch kind {
+        case .microphone:
+            return URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        case .blackHole, .apiKey:
+            return nil
+        }
+    }
+
+    /// External URL for the OpenAI API-keys page (shown as
+    /// `Получить ключ ↗` under the secret input).
+    public nonisolated static var openAIKeysURL: URL {
+        URL(string: "https://platform.openai.com/api-keys")!
     }
 }

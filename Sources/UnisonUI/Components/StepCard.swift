@@ -1,15 +1,21 @@
 import SwiftUI
 
+/// Status of a single onboarding step. Hoisted out of `StepCard` so the
+/// view's generic `Content` parameter doesn't cascade into call-site
+/// type signatures (`StepCard<A>.Status` vs. `StepCard<B>.Status`).
+public enum StepCardStatus: Equatable, Sendable {
+    case pending
+    case inProgress
+    case done
+    case error
+}
+
 /// Onboarding step card. Shows an icon plaque, title, status check (when
 /// done), an optional `body` slot for inputs / hints, and an optional
 /// `ErrorRow` underneath. DESIGN.md §5.20.
 public struct StepCard<Content: View>: View {
-    public enum Status: Equatable, Sendable {
-        case pending
-        case inProgress
-        case done
-        case error
-    }
+    /// Re-exported for source-compatibility with earlier call sites.
+    public typealias Status = StepCardStatus
 
     public let title: String
     public let icon: Image
