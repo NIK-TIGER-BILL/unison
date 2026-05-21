@@ -33,14 +33,24 @@ public final class OnboardingWindowController {
 
     public func show() {
         if window == nil {
-            // Borderless + transparent so the SwiftUI panel (which has
-            // its own rounded corners, shadow, and Aurora background)
-            // is the only chrome the user sees. The design ships a
-            // close button inside the header — there's no macOS-drawn
-            // titlebar to dismiss.
+            // Borderless + transparent so Apple's Liquid Glass (applied
+            // by the SwiftUI panel via `.liquidGlass(cornerRadius:)`)
+            // can refract the real desktop wallpaper through the host
+            // NSWindow. The design ships a close button inside the
+            // header — there's no macOS-drawn titlebar to dismiss.
+            //
+            // Critical for the macOS 26 glass to work correctly:
+            // - `isOpaque = false` + `backgroundColor = .clear` lets the
+            //   compositor see through the window to the desktop.
+            // - `hasShadow = true` keeps the floating-card depth that
+            //   real macOS 26 windows have (drawn by the compositor,
+            //   not by SwiftUI).
+            // - `isMovableByWindowBackground = true` so the user can
+            //   drag the glass card from anywhere on its surface — a
+            //   borderless window has no titlebar to grab.
             let w = KeyableBorderlessWindow(
                 contentRect: NSRect(x: 200, y: 200, width: 440, height: 620),
-                styleMask: [.borderless, .resizable, .fullSizeContentView],
+                styleMask: [.borderless, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
@@ -50,7 +60,7 @@ public final class OnboardingWindowController {
             w.isReleasedWhenClosed = false
             w.backgroundColor = .clear
             w.isOpaque = false
-            w.hasShadow = false // SwiftUI panel already paints a shadow.
+            w.hasShadow = true // System compositor draws the glass-card shadow.
             // Borderless windows need explicit hints to accept key/main.
             w.acceptsMouseMovedEvents = true
 

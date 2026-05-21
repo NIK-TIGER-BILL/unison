@@ -1,11 +1,10 @@
 import SwiftUI
 import UnisonDomain
 
-/// Aurora-glass onboarding window — the first thing the user sees when
+/// Liquid-glass onboarding window — the first thing the user sees when
 /// they launch Unison without all three prerequisites in place.
 ///
 /// Strictly mirrors `design/onboarding-final/index.html`:
-/// - Outer Aurora gradient (`auroraBackground()`).
 /// - Centred Unison-logo plate (56×56 glass) + "Установка" title.
 /// - Three stacked `StepCard`s (BlackHole / Microphone / OpenAI key).
 /// - Per-card check badge appears once the step is done; the action
@@ -13,6 +12,13 @@ import UnisonDomain
 /// - Coral `ErrorRow` underneath the action when the step fails.
 /// - Footer with `X / 3 готово` progress and a disabled "Готово" button
 ///   that becomes enabled only when every step is done.
+///
+/// The outer panel uses Apple's native Liquid Glass material
+/// (`.liquidGlass(cornerRadius:)`), which automatically refracts the
+/// real desktop wallpaper behind the transparent host NSWindow on
+/// macOS 26+. We deliberately do NOT paint our own background fill —
+/// any solid layer here blocks the glass material from picking up the
+/// desktop and produces a "window in window" effect.
 ///
 /// `UnisonUI` cannot import `AppKit`, so anything that must reach into
 /// `NSWorkspace` (opening Settings deep links, the OpenAI keys URL) is
@@ -41,14 +47,11 @@ public struct OnboardingView: View {
     }
 
     public var body: some View {
-        ZStack {
-            AuroraBackground()
-            panel
-                .padding(16)
-        }
-        .frame(width: OnboardingLayout.windowWidth, height: OnboardingLayout.windowHeight)
-        // ESC closes the window. v1 just closes (per spec).
-        .onExitCommand(perform: onClose)
+        panel
+            .padding(16)
+            .frame(width: OnboardingLayout.windowWidth, height: OnboardingLayout.windowHeight)
+            // ESC closes the window. v1 just closes (per spec).
+            .onExitCommand(perform: onClose)
     }
 
     // MARK: - Panel
@@ -71,6 +74,8 @@ public struct OnboardingView: View {
         .padding(20)
         // Outer window: Apple's native Liquid Glass. Inner cards stay
         // flat (content layer) so we don't nest glass-on-glass.
+        // The host NSWindow is transparent (no own background) so the
+        // glass material refracts the real desktop wallpaper.
         .liquidGlass(cornerRadius: 22)
     }
 
@@ -81,7 +86,7 @@ public struct OnboardingView: View {
             logoPlate
             // HIG Materials: vibrant `.primary` for the onboarding
             // title — the system handles contrast against the
-            // aurora-glass background.
+            // liquid-glass background.
             Text("Установка")
                 .font(.system(size: 22, weight: .light))
                 .tracking(-0.66)

@@ -1,7 +1,18 @@
 import SwiftUI
 
-/// Aurora gradient background used behind onboarding, settings, and the
-/// transcript window. DESIGN.md §1.1.
+/// Aurora gradient background. DESIGN.md §1.1.
+///
+/// **Production policy**: do NOT place this behind any of the app's
+/// real windows. The actual NSWindows are transparent so Apple's
+/// Liquid Glass material refracts the live desktop wallpaper. Painting
+/// our own gradient underneath blocks that refraction and creates a
+/// visible "window in window" effect.
+///
+/// **Where this still lives**: snapshot tests render in an offscreen
+/// `NSHostingView` with no real desktop behind the glass — stacking on
+/// top of `Color.black` (current default) or this aurora produces a
+/// readable backdrop for visual diffing. SwiftUI previews can also opt
+/// in for the same reason.
 ///
 /// Layers (back → front):
 /// 1. Vertical linear gradient `#0a0820 → #100c2e → #1a1142`
@@ -12,8 +23,7 @@ import SwiftUI
 /// Coordinates of the radial centres and approximate "ellipse" sizing
 /// are reproduced via `UnitPoint` and width/height fractions; SwiftUI's
 /// `RadialGradient` is circular, so each ellipse is faked with a tightly
-/// scaled wrapper. The visual result matches the design closely enough
-/// for production.
+/// scaled wrapper.
 public struct AuroraBackground: View {
     public init() {}
 

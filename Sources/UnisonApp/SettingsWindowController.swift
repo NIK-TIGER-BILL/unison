@@ -39,6 +39,16 @@ public final class SettingsWindowController {
 
     public func show() {
         if window == nil {
+            // `.titled + .fullSizeContentView + titlebarAppearsTransparent`
+            // hides the titlebar bar while keeping the traffic lights
+            // visible (Settings windows need them per HIG). The SwiftUI
+            // content extends beneath the titlebar so the whole window
+            // reads as one continuous glass card.
+            //
+            // Transparency is critical so the macOS 26 Liquid Glass
+            // surfaces inside (Form.grouped sections) can refract the
+            // real desktop wallpaper instead of sitting on an opaque
+            // NSWindow fill.
             let w = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 560, height: 540),
                 styleMask: [.titled, .closable, .fullSizeContentView],
@@ -52,6 +62,7 @@ public final class SettingsWindowController {
             w.isReleasedWhenClosed = false
             w.backgroundColor = .clear
             w.isOpaque = false
+            w.hasShadow = true // Compositor-drawn shadow for the floating window.
 
             // Traffic lights stay visible (close button works).
             w.standardWindowButton(.miniaturizeButton)?.isHidden = true

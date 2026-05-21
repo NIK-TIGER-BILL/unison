@@ -43,7 +43,13 @@ import Foundation
 ///   wrapper around Apple's native `glassEffect(.regular, in:)` (macOS 26+).
 ///   Respects `\.accessibilityReduceTransparency`.
 /// - **`AuroraBackground`** + `View.auroraBackground()` — three-layer aurora
-///   gradient used behind onboarding/settings/transcript windows.
+///   gradient. **Test/preview-only**: snapshot tests render in a headless
+///   ImageRenderer where Liquid Glass has no real desktop to refract, so
+///   tests stack views on top of `Color.black` (or this aurora) for a
+///   pleasing backdrop. Do NOT use in production view trees — the real
+///   NSWindow is transparent and Apple's Liquid Glass pulls in the
+///   actual desktop wallpaper; any opaque fill underneath blocks that
+///   and produces a "window in window" artefact.
 /// - **`UnisonLogoShape`** — `Shape` rendering the parametric Unison logo.
 ///
 /// ## Components

@@ -71,11 +71,13 @@ public struct SettingsView: View {
 
     public var body: some View {
         ZStack(alignment: .topLeading) {
-            // Aurora glass floor — visible through the window's
-            // transparent chrome (the controller sets the NSWindow's
-            // background to clear). Matches `design/settings-final/`.
-            AuroraBackground()
-
+            // The host NSWindow is fully transparent (controller sets
+            // `backgroundColor = .clear` + `isOpaque = false`), so the
+            // native `Form.grouped` surface below picks up real desktop
+            // wallpaper. We deliberately avoid painting our own
+            // background fill — anything solid here would block the
+            // glass material from refracting the desktop and produce a
+            // "window in window" artefact.
             window
                 .frame(width: SettingsLayout.windowWidth)
 
@@ -135,7 +137,7 @@ public struct SettingsView: View {
             Color.clear.frame(width: 64, height: 1)
             // HIG Materials: vibrant `.primary` lets the system tune
             // contrast across light/dark, Increase Contrast, and Reduce
-            // Transparency on top of the aurora-glass titlebar.
+            // Transparency on top of the liquid-glass titlebar.
             Text("Unison · Настройки")
                 .font(.system(size: 12.5, weight: .medium))
                 .tracking(-0.06)
