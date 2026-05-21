@@ -38,11 +38,18 @@ public struct StepCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 12) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    // Inner icon plaque uses `ConcentricRectangle`, which
+                    // picks its radius concentrically from the enclosing
+                    // `containerShape(...)` per Apple's Liquid Glass
+                    // guidance ("Applying Liquid Glass to custom views"):
+                    //   "Help maintain a sense of visual continuity in
+                    //    your interface by using rounded shapes that are
+                    //    concentric to their containers."
+                    ConcentricRectangle()
                         .fill(iconBackground)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .strokeBorder(iconBorder, lineWidth: 0.5)
+                            ConcentricRectangle()
+                                .stroke(iconBorder, lineWidth: 0.5)
                         )
                         .frame(width: 36, height: 36)
                     icon
@@ -68,10 +75,14 @@ public struct StepCard<Content: View>: View {
         .padding(.vertical, 14)
         .background(cardBackground)
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(cardBorder, lineWidth: 0.5)
+            ConcentricRectangle()
+                .stroke(cardBorder, lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        // Declare the card's container shape so nested
+        // `ConcentricRectangle`s (icon plaque, inner buttons) can
+        // pick their radius from the parent automatically.
+        .containerShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var iconBackground: Color {

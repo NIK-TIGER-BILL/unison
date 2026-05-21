@@ -1,25 +1,27 @@
 import SwiftUI
 import UnisonDomain
 
-/// Settings window — single-column scrollable, auto-saving, glass-on-aurora.
+/// Settings window — single-column, auto-saving, native macOS Form.
 ///
-/// Strictly mirrors `design/settings-final/index.html`:
-/// - 560pt wide, 32pt title bar, `.content-scroll` 540pt max height.
-/// - Sections: Аудио / Языки / OpenAI / Hotkeys / BlackHole / Поведение /
-///   О приложении. `SectionHeader` separates them.
-/// - Each row uses `SettingsRow` (`.row` in CSS) — label/icon on the left,
-///   trailing value control on the right, optional `row-hint` underneath.
-/// - Dropdowns (mic / speaker / lang-mine / lang-peer) open as portal-style
-///   pickers anchored beneath the trigger button.
-/// - All edits auto-save via `vm.update…(_:)` setters; the title bar's
-///   `SaveIndicator` flashes whenever `lastSavedAt` advances.
-/// - BlackHole "Переустановить" delegates to `vm.reinstallBlackHole()` which
-///   flips both status dots to warn while installing, then resyncs from the
-///   device registry.
+/// Uses Apple's native `Form` + `.formStyle(.grouped)` per the official
+/// Liquid Glass guidance ("Adopting Liquid Glass"):
+///   "Use SwiftUI forms with the FormStyle.grouped form style to
+///    automatically update your form layouts."
 ///
-/// `UnisonUI` cannot import `AppKit`, so any system action (opening a URL,
-/// starting a global hotkey monitor) goes through the closures the host
-/// supplies:
+/// `Form.grouped` supplies:
+/// - title-case `Section` headers (no more uppercase caps),
+/// - the increased corner radius and surface treatment for sections,
+/// - row heights and spacing matching system Settings.
+///
+/// Most rows are expressed with native `LabeledContent` — leading title,
+/// trailing custom control. The picker triggers and language-picker
+/// dropdowns still render as our own overlays anchored via
+/// `PreferenceKey`, since the menu placement needs to work over the
+/// form's grouped sections.
+///
+/// `UnisonUI` cannot import `AppKit`, so any system action (opening a
+/// URL, starting a global hotkey monitor) goes through the closures the
+/// host supplies:
 /// - `onOpenURL: (URL) -> Void`
 /// - `onRecordHotkey: (HotkeyKind) -> Void`
 public struct SettingsView: View {
@@ -102,23 +104,21 @@ public struct SettingsView: View {
     private var window: some View {
         VStack(spacing: 0) {
             titlebar
-            ScrollView {
-                VStack(spacing: 0) {
-                    audioSection
-                    languagesSection
-                    openAISection
-                    hotkeysSection
-                    blackHoleSection
-                    behaviorSection
-                    aboutSection
-                }
-                .padding(.bottom, 6)
+            // Native macOS 26 Form with grouped style. Section headers,
+            // row heights, corner radius and surface treatment all come
+            // from the system per Apple's Liquid Glass spec.
+            Form {
+                audioSection
+                languagesSection
+                openAISection
+                hotkeysSection
+                blackHoleSection
+                behaviorSection
+                aboutSection
             }
+            .formStyle(.grouped)
             .scrollIndicators(.hidden)
         }
-        // Native Liquid Glass — the system handles tint, specular
-        // highlight, border, and shadow. Rows inside stay flat.
-        .liquidGlass(cornerRadius: 14)
     }
 
     /// Custom title bar — the real `NSWindow` traffic lights live in
@@ -151,30 +151,20 @@ public struct SettingsView: View {
     // MARK: - Section: Audio
 
     private var audioSection: some View {
-        Group {
-            SectionHeader("Аудио")
-            SettingsRow(
-                "Микрофон",
-                icon: Image(systemName: "mic")
-            ) {
+        Section("Аудио") {
+            LabeledContent("Микрофон") {
                 dropdownTrigger(
                     kind: .microphone,
                     label: currentMicLabel
                 )
             }
-            SettingsRow(
-                "Динамик",
-                icon: Image(systemName: "speaker.wave.2.fill")
-            ) {
+            LabeledContent("Динамик") {
                 dropdownTrigger(
                     kind: .speaker,
                     label: currentSpeakerLabel
                 )
             }
-            SettingsRow(
-                "Громкость оригинала",
-                hint: "Тихий фон под переводом во время звонка."
-            ) {
+            LabeledContent {
                 HStack(spacing: 8) {
                     NeutralSlider(
                         value: Binding(
@@ -191,6 +181,13 @@ public struct SettingsView: View {
                         .frame(width: 36, alignment: .trailing)
                         .monospacedDigit()
                 }
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Громкость оригинала")
+                    Text("Тихий фон под переводом во время звонка.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(UnisonColors.whiteAlpha(0.45))
+                }
             }
         }
     }
@@ -198,15 +195,14 @@ public struct SettingsView: View {
     // MARK: - Section: Languages
 
     private var languagesSection: some View {
-        Group {
-            SectionHeader("Языки по умолчанию")
-            SettingsRow("Я говорю") {
+        Section("Языки по умолчанию") {
+            LabeledContent("Я говорю") {
                 dropdownTrigger(
                     kind: .langMine,
                     label: vm.settings.languagePair.mine.displayName
                 )
             }
-            SettingsRow("Слушаю") {
+            LabeledContent("Слушаю") {
                 dropdownTrigger(
                     kind: .langPeer,
                     label: vm.settings.languagePair.peer.displayName
@@ -218,13 +214,8 @@ public struct SettingsView: View {
     // MARK: - Section: OpenAI
 
     private var openAISection: some View {
-        Group {
-            SectionHeader("OpenAI")
-            SettingsRow(
-                "API ключ",
-                icon: Image(systemName: "key.fill"),
-                hint: nil
-            ) {
+        Section("OpenAI") {
+            LabeledContent("API ключ") {
                 SecretInputBound(
                     text: Binding(
                         get: { vm.apiKey },
@@ -234,9 +225,7 @@ public struct SettingsView: View {
                 )
                 .frame(width: 220)
             }
-            // The "Получить ключ ↗" link is part of the hint slot per design.
-            HStack(spacing: 0) {
-                Spacer().frame(width: 16)
+            HStack(spacing: 6) {
                 Text("Хранится в Keychain.")
                     .font(.system(size: 11))
                     .foregroundStyle(UnisonColors.whiteAlpha(0.45))
@@ -246,20 +235,14 @@ public struct SettingsView: View {
                 .accessibilityLabel("Получить ключ OpenAI")
                 Spacer(minLength: 0)
             }
-            .padding(.bottom, 8)
-            .padding(.top, -6)
         }
     }
 
     // MARK: - Section: Hotkeys
 
     private var hotkeysSection: some View {
-        Group {
-            SectionHeader("Hotkeys")
-            SettingsRow(
-                "Старт / стоп",
-                icon: Image(systemName: "command")
-            ) {
+        Section("Hotkeys") {
+            LabeledContent("Старт / стоп") {
                 HotkeyRecorder(
                     hotkey: Binding(
                         get: { vm.hotkeyStartStop },
@@ -278,10 +261,7 @@ public struct SettingsView: View {
                     onStartRecording: { onRecordHotkey(.startStop) }
                 )
             }
-            SettingsRow(
-                "Показать транскрипт",
-                icon: Image(systemName: "command")
-            ) {
+            LabeledContent("Показать транскрипт") {
                 HotkeyRecorder(
                     hotkey: Binding(
                         get: { vm.hotkeyShowTranscript },
@@ -306,18 +286,14 @@ public struct SettingsView: View {
     // MARK: - Section: BlackHole
 
     private var blackHoleSection: some View {
-        Group {
-            SectionHeader("BlackHole")
-            SettingsRow("BlackHole 2ch") {
+        Section("BlackHole") {
+            LabeledContent("BlackHole 2ch") {
                 blackHoleStatusRow(status: vm.blackHole2chStatus)
             }
-            SettingsRow("BlackHole 16ch") {
+            LabeledContent("BlackHole 16ch") {
                 blackHoleStatusRow(status: vm.blackHole16chStatus)
             }
-            SettingsRow(
-                "Виртуальные аудио-устройства",
-                hint: "Нужны для перехвата звука с приложений и подачи перевода обратно."
-            ) {
+            LabeledContent {
                 InlineButton(
                     vm.isReinstallingBlackHole ? "Установка…" : "Переустановить",
                     icon: Image(systemName: "arrow.clockwise"),
@@ -328,6 +304,13 @@ public struct SettingsView: View {
                     }
                 )
                 .disabled(vm.isReinstallingBlackHole)
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Виртуальные аудио-устройства")
+                    Text("Нужны для перехвата звука с приложений и подачи перевода обратно.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(UnisonColors.whiteAlpha(0.45))
+                }
             }
         }
     }
@@ -362,35 +345,23 @@ public struct SettingsView: View {
     // MARK: - Section: Behavior
 
     private var behaviorSection: some View {
-        Group {
-            SectionHeader("Поведение")
-            SettingsRow("Запускать при логине") {
-                Toggle("", isOn: Binding(
-                    get: { vm.autostart },
-                    set: { vm.updateAutostart($0) }
-                ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-            }
-            SettingsRow("Скрывать меню при старте сессии") {
-                Toggle("", isOn: Binding(
-                    get: { vm.hideMenuOnSession },
-                    set: { vm.updateHideMenuOnSession($0) }
-                ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-            }
+        Section("Поведение") {
+            Toggle("Запускать при логине", isOn: Binding(
+                get: { vm.autostart },
+                set: { vm.updateAutostart($0) }
+            ))
+            Toggle("Скрывать меню при старте сессии", isOn: Binding(
+                get: { vm.hideMenuOnSession },
+                set: { vm.updateHideMenuOnSession($0) }
+            ))
         }
     }
 
     // MARK: - Section: About
 
     private var aboutSection: some View {
-        Group {
-            SectionHeader("О приложении")
-            SettingsRow("Версия") {
+        Section("О приложении") {
+            LabeledContent("Версия") {
                 HStack(spacing: 4) {
                     Text("1.0.0")
                         .font(.system(size: 11.5, weight: .medium))
@@ -400,10 +371,10 @@ public struct SettingsView: View {
                         .foregroundStyle(UnisonColors.whiteAlpha(0.55))
                 }
             }
-            SettingsRow("Лицензия") {
+            LabeledContent("Лицензия") {
                 aboutLink("MIT", url: SettingsLinks.license)
             }
-            SettingsRow("Исходный код") {
+            LabeledContent("Исходный код") {
                 aboutLink("github.com/unison", url: SettingsLinks.source)
             }
         }

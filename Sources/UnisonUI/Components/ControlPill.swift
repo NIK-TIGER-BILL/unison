@@ -6,8 +6,14 @@ import SwiftUI
 /// DESIGN.md §5.18.
 ///
 /// Single Liquid Glass capsule — all internal controls sit on top
-/// of one glass surface (no nested glass). The pill itself uses
-/// Apple's native `.glassEffect(.regular, in: Capsule())`.
+/// of one glass surface (no nested glass). Uses Apple's native
+/// `.glassEffect(.regular.interactive(), in: Capsule())` per the
+/// official Liquid Glass guidance ("Applying Liquid Glass to custom
+/// views"):
+///   "Add `Glass.interactive(_:)` to custom components to make them
+///    react to touch and pointer interactions. This applies the same
+///    responsive and fluid reactions that the `glass` button style
+///    provides."
 public struct ControlPill: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     public let isActive: Bool
@@ -83,7 +89,10 @@ public struct ControlPill: View {
             .padding(.trailing, 4)
         }
         .padding(.vertical, 6)
-        .glassEffect(reduceTransparency ? .identity : .regular, in: Capsule())
+        .glassEffect(
+            reduceTransparency ? .identity : .regular.interactive(),
+            in: Capsule()
+        )
     }
 
     private var sep: some View {

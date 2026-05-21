@@ -28,7 +28,8 @@ import Foundation
 /// - `uiTitle(_:)` — DM Sans light, default 18pt.
 /// - `uiBody(_:)` — DM Sans regular, default 13pt.
 /// - `mono(_:)` — IBM Plex Mono caption, default 11pt.
-/// - `sectionHead()` — caps section label, 10pt monospaced.
+/// - `sectionHead()` — title-case section label, 13pt semibold (per
+///   Apple's Liquid Glass title-style capitalization guidance).
 ///
 /// **`UnisonSpacing`** (`Design/Spacing.swift`) — 4-base grid.
 /// - `xs=4`, `s=8`, `m=12`, `l=16`, `xl=24`.
@@ -126,11 +127,17 @@ import Foundation
 ///
 /// ### Layout & structure
 ///
-/// - **`SectionHeader`** — uppercase caps section title (mono, 10pt).
+/// - **`SectionHeader`** — title-case section title (13pt semibold,
+///   per Apple's Liquid Glass guidance). Prefer native `Form` +
+///   `Section("Title")` where possible; this view is for hand-rolled
+///   sections that can't sit in a `Form`.
 ///   `init(_ text: String)`
 ///   `// SectionHeader("Аудио")`
 ///
 /// - **`SettingsRow`** — label/icon row with trailing control + optional hint.
+///   Settings now prefers native `LabeledContent` inside a `Form` with
+///   `.formStyle(.grouped)`; this view is kept for callers that need a
+///   custom row layout outside a Form.
 ///   `init(_ title: String, icon: Image? = nil, hint: String? = nil, @ViewBuilder trailing: @escaping () -> Trailing)`
 ///   `// SettingsRow("Микрофон", icon: Image(systemName: "mic")) { dropdownTrigger() }`
 ///
@@ -167,6 +174,8 @@ import Foundation
 ///   `// BubbleGroupView(groups: vm.bubbleGroups, scale: vm.bubbleScale)`
 ///
 /// - **`ControlPill`** — transcript-window pill (dot + timer + gear + hide + stop).
+///   Uses `.glassEffect(.regular.interactive(), in: Capsule())` per
+///   Apple's guidance on interactive custom glass surfaces.
 ///   `init(isActive: Bool, elapsedLabel: String, isHidden: Bool, isSettingsOpen: Bool, onToggleSettings: @escaping () -> Void, onToggleHidden: @escaping () -> Void, onStop: @escaping () -> Void)`
 ///   `// ControlPill(isActive: true, elapsedLabel: "00:42", isHidden: false, isSettingsOpen: false, onToggleSettings: …, onToggleHidden: …, onStop: …)`
 ///
@@ -180,5 +189,21 @@ import Foundation
 /// - For panels with the canonical glass material, use `.liquidGlass(cornerRadius:)`.
 ///   Use 22–26 for main panels, 12–14 for inner blocks.
 /// - Aurora gradients live in `auroraBackground()` — do not re-implement.
+/// - For settings/forms, prefer native `Form` + `.formStyle(.grouped)`
+///   with `Section("Title")` headers. Use `LabeledContent` for rows.
+/// - For interactive custom glass surfaces (draggable pills, etc.),
+///   pass `.regular.interactive()` to `glassEffect(_:in:)` so the
+///   material responds to pointer/touch.
+/// - When multiple `glassEffect`s appear as siblings in the same
+///   layout, wrap them in `GlassEffectContainer` for best rendering
+///   performance (and so SwiftUI can compose lensing across surfaces).
+/// - For rounded shapes nested inside a container, use
+///   `ConcentricRectangle` so the inner radius matches the outer's
+///   concentrically; declare the outer's radius via `containerShape(_:)`.
+/// - For ScrollViews under floating controls, apply
+///   `.scrollEdgeEffectStyle(.soft, for: .all)` and pin the floating
+///   bar with `.safeAreaBar(edge: .bottom)`.
+/// - Section headers use title-case capitalization (per Apple's
+///   official Liquid Glass guidance), not UPPERCASE.
 /// - The kit must never import `AppKit`; host integrations belong in `UnisonApp`.
 public enum UnisonUIKit {}

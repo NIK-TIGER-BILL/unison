@@ -30,10 +30,13 @@ public enum UnisonFonts {
         .system(size: size, weight: .regular, design: .monospaced)
     }
 
-    /// Caps section header (e.g. `АУДИО`, `OPENAI`). Uses mono at 10pt;
-    /// pair with `.tracking(1.4)` and `.textCase(.uppercase)` at the call
-    /// site for the 0.14em letter-spacing the design specifies.
+    /// Title-case section header for lists/forms (e.g. `Аудио`, `OpenAI`).
+    ///
+    /// Per Apple's Liquid Glass guidance, lists/tables/forms adopt
+    /// title-style capitalization at this size/weight for legibility.
+    /// Used by `SectionHeader`; native `Form.grouped` styles its own
+    /// `Section("Title")` headers the same way automatically.
     public static func sectionHead() -> Font {
-        .system(size: 10, weight: .regular, design: .monospaced)
+        .system(size: 13, weight: .semibold, design: .default)
     }
 }

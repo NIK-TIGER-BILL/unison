@@ -27,17 +27,36 @@ public struct TranscriptView: View {
 
     public var body: some View {
         ZStack {
-            VStack(alignment: .leading, spacing: 10) {
-                Spacer(minLength: 0)
+            // Per Apple's Liquid Glass guidance ("Adopting Liquid Glass"):
+            //   "Optimize for legibility when content scrolls beneath
+            //    controls. Scroll views offer a scroll edge effect that
+            //    helps maintain sufficient legibility and contrast for
+            //    controls by obscuring content that scrolls beneath them."
+            //
+            // The bubbles live inside a ScrollView with `.scrollEdgeEffectStyle(.soft, for: .all)`
+            // so the top/bottom edges fade as bubbles scroll past the pill.
+            // The pill itself is pinned via `.safeAreaBar(edge: .bottom)`,
+            // which keeps it in view without overlapping the content.
+            ScrollView {
                 if !vm.isHidden {
                     bubbles
                         .transition(.opacity)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 8)
                 }
+            }
+            .scrollIndicators(.hidden)
+            // Keep the most recent bubbles pinned near the pill — the
+            // transcript reads bottom-up, with older entries scrolling
+            // off the top under the soft scroll-edge effect.
+            .defaultScrollAnchor(.bottom)
+            .scrollEdgeEffectStyle(.soft, for: .all)
+            .safeAreaBar(edge: .bottom) {
                 controlPillWithPopover
                     .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.bottom, 22)
+                    .padding(.horizontal, 8)
             }
-            .padding(.bottom, 22)
-            .padding(.horizontal, 8)
 
             if vm.showStopConfirmation {
                 stopModal
@@ -65,30 +84,38 @@ public struct TranscriptView: View {
         // The pill is centered; the popover is anchored above it, aligned
         // to the pill's leading edge — matching the CSS `bottom: 100%;
         // left: 0;` rule in the HTML mock.
-        ZStack(alignment: .bottomLeading) {
-            controlPill
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: PillFrameKey.self,
-                            value: proxy.frame(in: .local)
-                        )
-                    }
-                )
-            if isSettingsOpen {
-                TranscriptSettingsPopover(
-                    sizeIndex: Binding(
-                        get: { vm.sizeIndex },
-                        set: { vm.updateSizeIndex($0) }
-                    ),
-                    volume: Binding(
-                        get: { Double(vm.originalVolume) / 100.0 },
-                        set: { vm.updateOriginalVolume(Int(($0 * 100).rounded())) }
+        //
+        // Per Apple's Liquid Glass guidance, multiple adjacent glass
+        // surfaces should be wrapped in a `GlassEffectContainer` for
+        // best rendering performance. The pill (capsule glass) and
+        // settings popover (rounded-rectangle glass) are visible at the
+        // same time when the gear is open, so we container them.
+        GlassEffectContainer {
+            ZStack(alignment: .bottomLeading) {
+                controlPill
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: PillFrameKey.self,
+                                value: proxy.frame(in: .local)
+                            )
+                        }
                     )
-                )
-                .alignmentGuide(.bottom) { d in d[.top] + 12 }
-                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
-                .zIndex(20)
+                if isSettingsOpen {
+                    TranscriptSettingsPopover(
+                        sizeIndex: Binding(
+                            get: { vm.sizeIndex },
+                            set: { vm.updateSizeIndex($0) }
+                        ),
+                        volume: Binding(
+                            get: { Double(vm.originalVolume) / 100.0 },
+                            set: { vm.updateOriginalVolume(Int(($0 * 100).rounded())) }
+                        )
+                    )
+                    .alignmentGuide(.bottom) { d in d[.top] + 12 }
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
+                    .zIndex(20)
+                }
             }
         }
     }
