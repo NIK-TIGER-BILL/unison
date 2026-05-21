@@ -7,19 +7,14 @@ import UnisonDomain
 /// - 340pt wide, 16pt padding, `.liquidGlass(cornerRadius: 24)` background.
 /// - Top row: `StatusDot` + brand text + gear `IconButton`.
 /// - `SegmentedToggle` for Call/Listen, bound to `vm.settings.sessionMode`.
-/// - `LanguageBar` driving two `LanguagePickerDropdown`s (mine/peer), each
-///   anchored beneath its side.
+/// - Two native `Picker`s with `.pickerStyle(.menu)` for "Я говорю" and
+///   "Слушаю". The opened menu is an `NSMenu` rendered above the
+///   popover by AppKit, so it can never be clipped by the popover
+///   bounds — the previous custom overlay-based dropdown had exactly
+///   that bug.
 /// - `WarnRow` when the same language is selected on both sides.
 /// - `PrimaryGlassButton` toggling start/stop; coral while translating.
 /// - `mm:ss` timer (mono) below the button while translating.
-///
-/// The dropdown is rendered as an `.overlay(alignment: .topLeading)` on
-/// the `LanguageBar` itself. SwiftUI lays the overlay out relative to
-/// the bar's own bounds, so the dropdown automatically tracks the bar's
-/// position without us needing to translate frames through a parent
-/// coordinate space. A local `GeometryReader` inside the overlay reads
-/// the bar's size; we shift the dropdown down by that height + 6pt so
-/// it appears right below the bar.
 public struct PopoverView: View {
     @Bindable var vm: PopoverViewModel
     let onOpenSettings: () -> Void
@@ -32,17 +27,11 @@ public struct PopoverView: View {
         self.onOpenSettings = onOpenSettings
     }
 
-    /// Which language-picker dropdown (if any) is currently open.
-    @SwiftUI.State private var openSide: LanguageBar.Side? = nil
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     public var body: some View {
         content
             .frame(width: PopoverLayout.width)
             .liquidGlass(cornerRadius: 24)
             .frame(width: PopoverLayout.width)
-            .animation(UnisonAnimations.dropdown.reduceMotion(reduceMotion), value: openSide)
     }
 
     // MARK: - Content
@@ -103,28 +92,76 @@ public struct PopoverView: View {
         )
     }
 
+    /// "Я говорю / Слушаю" — two native menu pickers separated by the
+    /// directional swap arrow. Each `Picker(.menu)` renders as a
+    /// macOS pop-up button; the opened menu is a system `NSMenu`
+    /// drawn over the popover, so it never gets clipped (which is the
+    /// whole point of replacing the previous overlay-based dropdown).
     private var languageBar: some View {
-        LanguageBar(
-            pair: vm.settings.languagePair,
-            openSide: openSide,
-            isWarning: !vm.isLanguagePairValid,
-            onOpenDropdown: { side in
-                toggleSide(side)
-            }
-        )
-        // Anchor the dropdown directly on the language bar so we
-        // never have to translate frames through a parent coordinate
-        // space. SwiftUI lays the overlay out relative to the bar's
-        // bounds; we just shift it down by the bar's own height so
-        // it appears right beneath it.
-        .overlay(alignment: .topLeading) {
-            if let side = openSide {
-                dropdownOverlay(for: side)
-                    .transition(reduceMotion
-                        ? .identity
-                        : .opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
-            }
+        HStack(alignment: .center, spacing: 0) {
+            languagePicker(
+                caption: "Я говорю",
+                alignment: .leading,
+                selection: Binding(
+                    get: { vm.settings.languagePair.mine },
+                    set: { lang in pick(lang, for: .mine) }
+                )
+            )
+            Image(systemName: "arrow.left.arrow.right")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+            languagePicker(
+                caption: "Слушаю",
+                alignment: .trailing,
+                selection: Binding(
+                    get: { vm.settings.languagePair.peer },
+                    set: { lang in pick(lang, for: .peer) }
+                )
+            )
         }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .fill(vm.isLanguagePairValid
+                      ? Color.black.opacity(0.16)
+                      : UnisonColors.warn.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .strokeBorder(
+                            vm.isLanguagePairValid ? .clear : UnisonColors.warn.opacity(0.30),
+                            lineWidth: 0.5
+                        )
+                )
+        )
+        .animation(UnisonAnimations.state, value: vm.isLanguagePairValid)
+    }
+
+    /// One side of the language bar — a small caption ("Я ГОВОРЮ" /
+    /// "СЛУШАЮ") above a native `Picker(.menu)`. The picker is
+    /// `labelsHidden()` so SwiftUI uses our caption as the only label,
+    /// and `.tint(.primary)` keeps it neutral on the glass background.
+    private func languagePicker(
+        caption: String,
+        alignment: HorizontalAlignment,
+        selection: Binding<Language>
+    ) -> some View {
+        VStack(alignment: alignment, spacing: 4) {
+            Text(caption)
+                .font(.system(size: 9.5, weight: .medium))
+                .tracking(1.2)
+                .textCase(.uppercase)
+                .foregroundStyle(.tertiary)
+            Picker("", selection: selection) {
+                ForEach(Language.allCases, id: \.self) { lang in
+                    Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .tint(.primary)
+        }
+        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
     }
 
     private var primaryButton: some View {
@@ -151,78 +188,23 @@ public struct PopoverView: View {
             Text(vm.elapsedSecondsString)
                 .font(UnisonFonts.mono(11.5))
                 .tracking(0.92)
-                // HIG Materials: vibrant `.secondary` keeps the mono
-                // timer subdued but legible over the glass panel.
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .frame(maxWidth: .infinity)
         }
     }
 
-    // MARK: - Dropdown overlay
-
-    /// The dropdown is rendered as an `.overlay(alignment: .topLeading)`
-    /// on the `LanguageBar`, so its layout origin (0, 0) is the
-    /// bar's top-leading corner. We measure the bar via a local
-    /// `GeometryReader` and offset the dropdown by the bar's own
-    /// height + 6pt so it appears right below the bar — left-aligned
-    /// for the "mine" side, right-aligned for the "peer" side.
-    @ViewBuilder
-    private func dropdownOverlay(for side: LanguageBar.Side) -> some View {
-        GeometryReader { proxy in
-            let dropdownWidth: CGFloat = 220
-            let barSize = proxy.size
-            let originX: CGFloat = {
-                switch side {
-                case .mine: return 0
-                case .peer: return barSize.width - dropdownWidth
-                }
-            }()
-            let originY: CGFloat = barSize.height + 6
-
-            LanguagePickerDropdown(
-                selection: Binding(
-                    get: {
-                        switch side {
-                        case .mine: vm.settings.languagePair.mine
-                        case .peer: vm.settings.languagePair.peer
-                        }
-                    },
-                    set: { newLang in
-                        pick(newLang, for: side)
-                    }
-                ),
-                onPick: { lang in pick(lang, for: side) },
-                onCancel: { closeDropdown() }
-            )
-            .offset(x: originX, y: originY)
-        }
-    }
-
     // MARK: - Actions
 
-    private func toggleSide(_ side: LanguageBar.Side) {
-        withAnimation(UnisonAnimations.dropdown.reduceMotion(reduceMotion)) {
-            openSide = (openSide == side) ? nil : side
-        }
-    }
+    private enum Side { case mine, peer }
 
-    private func closeDropdown() {
-        if openSide != nil {
-            withAnimation(UnisonAnimations.dropdown.reduceMotion(reduceMotion)) {
-                openSide = nil
-            }
-        }
-    }
-
-    private func pick(_ lang: Language, for side: LanguageBar.Side) {
+    private func pick(_ lang: Language, for side: Side) {
         let current = vm.settings.languagePair
         let pair: LanguagePair = switch side {
         case .mine: LanguagePair(mine: lang, peer: current.peer)
         case .peer: LanguagePair(mine: current.mine, peer: lang)
         }
         vm.updateLanguagePair(pair)
-        closeDropdown()
     }
 
     private func togglePrimary() async {

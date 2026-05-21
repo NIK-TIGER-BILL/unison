@@ -158,13 +158,14 @@ import Foundation
 ///
 /// ### Pickers & dropdowns
 ///
-/// - **`LanguageBar`** + **`LanguageSideButton`** — "Я говорю / Слушаю" popover bar.
-///   `init(pair: LanguagePair, openSide: Side?, isWarning: Bool, onOpenDropdown: @escaping (Side) -> Void)`
-///   `// LanguageBar(pair: pair, openSide: openSide, isWarning: false) { side in toggle(side) }`
-///
-/// - **`LanguagePickerDropdown`** — portal-style language picker with search + keyboard nav.
-///   `init(languages: [Language] = Language.allCases, selection: Binding<Language>, onPick: @escaping (Language) -> Void, onCancel: @escaping () -> Void = {})`
-///   `// LanguagePickerDropdown(selection: $lang, onPick: pick)`
+/// - Native **`Picker`** with `.pickerStyle(.menu)` for every dropdown
+///   in Settings and the popover (mic / speaker / language pair). The
+///   opened menu is a system `NSMenu` rendered above the parent window,
+///   so it can never be clipped by an `NSPopover` or `Form` container.
+///   We deliberately avoid hand-rolled overlays for these — Apple's
+///   `Picker(.menu)` already has keyboard navigation, accessibility,
+///   and Liquid Glass styling on macOS 26.
+///   `// Picker("Я говорю", selection: $lang) { ForEach(Language.allCases) { Text("\($0.flagEmoji) \($0.displayName)").tag($0) } }.pickerStyle(.menu)`
 ///
 /// - **`FlagText`** — fixed-size flag emoji that ignores parent foreground tint.
 ///   Pass `accessibilityName:` to expose the language name to VoiceOver

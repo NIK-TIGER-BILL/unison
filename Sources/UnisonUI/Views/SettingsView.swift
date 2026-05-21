@@ -3,21 +3,22 @@ import UnisonDomain
 
 /// Settings window — single-column, auto-saving, native macOS Form.
 ///
-/// Uses Apple's native `Form` + `.formStyle(.grouped)` per the official
-/// Liquid Glass guidance ("Adopting Liquid Glass"):
-///   "Use SwiftUI forms with the FormStyle.grouped form style to
-///    automatically update your form layouts."
+/// We follow Apple's official "Adopting Liquid Glass" guidance for
+/// Settings-style surfaces:
 ///
-/// `Form.grouped` supplies:
-/// - title-case `Section` headers (no more uppercase caps),
-/// - the increased corner radius and surface treatment for sections,
-/// - row heights and spacing matching system Settings.
-///
-/// Most rows are expressed with native `LabeledContent` — leading title,
-/// trailing custom control. The picker triggers and language-picker
-/// dropdowns still render as our own overlays anchored via
-/// `PreferenceKey`, since the menu placement needs to work over the
-/// form's grouped sections.
+/// - Native `Form` + `.formStyle(.grouped)` supplies the title-case
+///   `Section` headers, rounded section cards with subtle background,
+///   row heights, and the macOS 26 translucent material backing.
+/// - Native `Picker` with `.pickerStyle(.menu)` for every dropdown
+///   (mic / speaker / mine language / peer language). The opened menu
+///   is an `NSMenu` rendered above the window — it never gets clipped
+///   by the form bounds and includes keyboard navigation, search, and
+///   accessibility for free.
+/// - The host `NSWindow` sets `backgroundColor = NSColor.windowBackgroundColor`
+///   so the window itself supplies the Liquid Glass material; we do
+///   **not** wrap the form in `.glassEffect` and we do not hide its
+///   default scroll content background. The native form draws on the
+///   system window material exactly like System Settings does.
 ///
 /// `UnisonUI` cannot import `AppKit`, so any system action (opening a
 /// URL, starting a global hotkey monitor) goes through the closures the
@@ -46,136 +47,50 @@ public struct SettingsView: View {
         self.onRecordHotkey = onRecordHotkey
     }
 
-    // MARK: - Local state
-
-    /// Which dropdown is currently open (mic / speaker / langMine /
-    /// langPeer). Only one can be open at a time. `nil` means none.
-    @SwiftUI.State private var openDropdown: DropdownKind? = nil
-
-    /// Anchors for each dropdown trigger, captured via `PreferenceKey`
-    /// so the floating panel knows where to render itself.
-    @SwiftUI.State private var triggerAnchors: [DropdownKind: CGRect] = [:]
+    /// Sentinel used by `Picker` for "system default" device. `Picker`
+    /// requires a non-optional tag value, so we reserve the empty
+    /// string as the "default" UID and map back to `nil` in the
+    /// binding's setter.
+    private static let defaultDeviceTag = ""
 
     /// Save-indicator controller — flashes "✓ сохранено" for ~1.6s
     /// whenever the VM bumps `lastSavedAt`.
     @SwiftUI.State private var saveIndicator = SaveIndicatorController()
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    enum DropdownKind: Hashable {
-        case microphone
-        case speaker
-        case langMine
-        case langPeer
-    }
-
     public var body: some View {
-        ZStack(alignment: .topLeading) {
-            // The host NSWindow is fully transparent (controller sets
-            // `backgroundColor = .clear` + `isOpaque = false`), so the
-            // native `Form.grouped` surface below picks up real desktop
-            // wallpaper. We deliberately avoid painting our own
-            // background fill — anything solid here would block the
-            // glass material from refracting the desktop and produce a
-            // "window in window" artefact.
-            window
-                .frame(width: SettingsLayout.windowWidth)
-
-            if let kind = openDropdown {
-                dropdownOverlay(for: kind)
-                    .zIndex(20)
-                    .transition(reduceMotion
-                        ? .identity
-                        : .opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+        Form {
+            audioSection
+            languagesSection
+            openAISection
+            hotkeysSection
+            blackHoleSection
+            behaviorSection
+            aboutSection
+        }
+        .formStyle(.grouped)
+        .frame(width: SettingsLayout.windowWidth, height: SettingsLayout.windowHeight)
+        // The native form supplies its own translucent background and
+        // grouped-section cards on macOS 26 — we don't override
+        // `.scrollContentBackground` or layer custom glass on top.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            // Right-aligned SaveIndicator tucked under the titlebar.
+            // Empty zero-height row when nothing is saving so it never
+            // takes vertical space; visible row carries 24pt of inset.
+            if saveIndicator.isShown {
+                HStack {
+                    Spacer()
+                    SaveIndicator(isShown: Binding(
+                        get: { saveIndicator.isShown },
+                        set: { saveIndicator.isShown = $0 }
+                    ))
+                    .padding(.trailing, 16)
+                }
+                .padding(.top, 6)
+                .background(.clear)
             }
         }
-        .frame(width: SettingsLayout.windowWidth, height: SettingsLayout.windowHeight)
-        .coordinateSpace(name: SettingsLayout.coordinateSpace)
-        .onPreferenceChange(TriggerAnchorKey.self) { dict in
-            triggerAnchors = dict
-        }
-        .background(
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { closeDropdown() }
-        )
         .onChange(of: vm.lastSavedAt) { _, _ in
             saveIndicator.markSaved()
-        }
-        .animation(UnisonAnimations.dropdown.reduceMotion(reduceMotion), value: openDropdown)
-    }
-
-    // MARK: - Window chrome
-
-    private var window: some View {
-        VStack(spacing: 0) {
-            titlebar
-            // Native macOS 26 Form with grouped style. Section headers,
-            // row heights, corner radius and surface treatment all come
-            // from the system per Apple's Liquid Glass spec.
-            //
-            // `scrollContentBackground(.hidden)` hides the system's
-            // default form fill (an opaque settings-window grey).
-            // Without it the form paints on top of the transparent
-            // NSWindow and blocks the desktop from refracting through
-            // — which is what was making the Settings window look flat
-            // and non-glassy in macOS 26 builds. With it hidden, the
-            // system's grouped sections still draw their own glass
-            // cards inside; the transparent NSWindow background lets
-            // the real desktop show through the gaps between sections.
-            Form {
-                audioSection
-                languagesSection
-                openAISection
-                hotkeysSection
-                blackHoleSection
-                behaviorSection
-                aboutSection
-            }
-            .formStyle(.grouped)
-            .scrollContentBackground(.hidden)
-            .scrollIndicators(.hidden)
-        }
-    }
-
-    /// Custom title bar — the real `NSWindow` traffic lights live in
-    /// the controller layer (`SettingsWindowController` makes them
-    /// visible and functional). We render the title text and the
-    /// `SaveIndicator` here to match the design's full-width 32pt bar.
-    ///
-    /// The traffic-light region (left ~74pt) must NOT intercept
-    /// pointer events — even `Color.clear` would catch clicks and
-    /// block the close button. We carve out a hit-test-disabled
-    /// leading region so the system traffic lights stay clickable.
-    private var titlebar: some View {
-        HStack(spacing: 8) {
-            // Hit-test-disabled spacer over the traffic-light region.
-            // SwiftUI's `Color.clear` is otherwise a real view that
-            // catches clicks; `.allowsHitTesting(false)` lets the
-            // close / minimize / zoom buttons receive their events.
-            Color.clear
-                .frame(width: 64, height: 1)
-                .allowsHitTesting(false)
-            // HIG Materials: vibrant `.primary` lets the system tune
-            // contrast across light/dark, Increase Contrast, and Reduce
-            // Transparency on top of the liquid-glass titlebar.
-            Text("Unison · Настройки")
-                .font(.system(size: 12.5, weight: .medium))
-                .tracking(-0.06)
-                .foregroundStyle(.primary)
-            Spacer()
-            SaveIndicator(isShown: Binding(
-                get: { saveIndicator.isShown },
-                set: { saveIndicator.isShown = $0 }
-            ))
-            .padding(.trailing, 14)
-        }
-        .frame(height: 32)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(UnisonColors.whiteAlpha(0.07))
-                .frame(height: 0.5)
-                .allowsHitTesting(false)
         }
     }
 
@@ -183,18 +98,32 @@ public struct SettingsView: View {
 
     private var audioSection: some View {
         Section("Аудио") {
-            LabeledContent("Микрофон") {
-                dropdownTrigger(
-                    kind: .microphone,
-                    label: currentMicLabel
-                )
+            Picker("Микрофон", selection: Binding(
+                get: { vm.settings.inputDeviceUID ?? Self.defaultDeviceTag },
+                set: { uid in
+                    vm.setInputDeviceUID(uid == Self.defaultDeviceTag ? nil : uid)
+                }
+            )) {
+                Text("По умолчанию").tag(Self.defaultDeviceTag)
+                ForEach(vm.availableMics, id: \.uid) { device in
+                    Text(device.name).tag(device.uid)
+                }
             }
-            LabeledContent("Динамик") {
-                dropdownTrigger(
-                    kind: .speaker,
-                    label: currentSpeakerLabel
-                )
+            .pickerStyle(.menu)
+
+            Picker("Динамик", selection: Binding(
+                get: { vm.settings.outputDeviceUID ?? Self.defaultDeviceTag },
+                set: { uid in
+                    vm.setOutputDeviceUID(uid == Self.defaultDeviceTag ? nil : uid)
+                }
+            )) {
+                Text("По умолчанию").tag(Self.defaultDeviceTag)
+                ForEach(vm.availableSpeakers, id: \.uid) { device in
+                    Text(device.name).tag(device.uid)
+                }
             }
+            .pickerStyle(.menu)
+
             LabeledContent {
                 HStack(spacing: 8) {
                     NeutralSlider(
@@ -208,8 +137,6 @@ public struct SettingsView: View {
                     Text("\(Int(vm.settings.originalMixVolume * 100))%")
                         .font(UnisonFonts.mono(11))
                         .tracking(0.44)
-                        // HIG Materials: vibrant `.secondary` for the
-                        // mono percentage trailing the slider.
                         .foregroundStyle(.secondary)
                         .frame(width: 36, alignment: .trailing)
                         .monospacedDigit()
@@ -217,8 +144,6 @@ public struct SettingsView: View {
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Громкость оригинала")
-                    // HIG Materials: vibrant `.secondary` for hint copy
-                    // beneath a `LabeledContent` row.
                     Text("Тихий фон под переводом во время звонка.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -231,18 +156,31 @@ public struct SettingsView: View {
 
     private var languagesSection: some View {
         Section("Языки по умолчанию") {
-            LabeledContent("Я говорю") {
-                dropdownTrigger(
-                    kind: .langMine,
-                    label: vm.settings.languagePair.mine.displayName
-                )
+            Picker("Я говорю", selection: Binding(
+                get: { vm.settings.languagePair.mine },
+                set: { newLang in
+                    let pair = LanguagePair(mine: newLang, peer: vm.settings.languagePair.peer)
+                    vm.setLanguagePair(pair)
+                }
+            )) {
+                ForEach(Language.allCases, id: \.self) { lang in
+                    Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
+                }
             }
-            LabeledContent("Слушаю") {
-                dropdownTrigger(
-                    kind: .langPeer,
-                    label: vm.settings.languagePair.peer.displayName
-                )
+            .pickerStyle(.menu)
+
+            Picker("Слушаю", selection: Binding(
+                get: { vm.settings.languagePair.peer },
+                set: { newLang in
+                    let pair = LanguagePair(mine: vm.settings.languagePair.mine, peer: newLang)
+                    vm.setLanguagePair(pair)
+                }
+            )) {
+                ForEach(Language.allCases, id: \.self) { lang in
+                    Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
+                }
             }
+            .pickerStyle(.menu)
         }
     }
 
@@ -261,7 +199,6 @@ public struct SettingsView: View {
                 .frame(width: 220)
             }
             HStack(spacing: 6) {
-                // HIG Materials: vibrant `.secondary` for hint copy.
                 Text("Хранится в Keychain.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -343,8 +280,6 @@ public struct SettingsView: View {
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Виртуальные аудио-устройства")
-                    // HIG Materials: vibrant `.secondary` for hint copy
-                    // beneath a `LabeledContent` row.
                     Text("Нужны для перехвата звука с приложений и подачи перевода обратно.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -356,9 +291,6 @@ public struct SettingsView: View {
     private func blackHoleStatusRow(status: BlackHoleStatus) -> some View {
         HStack(spacing: 6) {
             StatusDot(state: statusDotState(for: status), size: 6)
-            // The StatusDot already encodes semantic state in colour;
-            // the trailing label is plain descriptive text, so vibrant
-            // `.secondary` is appropriate per HIG Materials.
             Text(statusLabel(for: status))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
@@ -406,9 +338,6 @@ public struct SettingsView: View {
         Section("О приложении") {
             LabeledContent("Версия") {
                 HStack(spacing: 4) {
-                    // HIG Materials: vibrant `.primary` for the version
-                    // number (full-strength value text) and `.secondary`
-                    // for the trailing build suffix.
                     Text("1.0.0")
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(.primary)
@@ -430,280 +359,6 @@ public struct SettingsView: View {
         MutedLink(text) {
             onOpenURL(url)
         }
-    }
-
-    // MARK: - Dropdown trigger (chip)
-
-    @ViewBuilder
-    private func dropdownTrigger(kind: DropdownKind, label: String) -> some View {
-        let isOpen = (openDropdown == kind)
-        Button {
-            withAnimation(UnisonAnimations.dropdown.reduceMotion(reduceMotion)) {
-                openDropdown = isOpen ? nil : kind
-            }
-        } label: {
-            HStack(spacing: 6) {
-                // HIG Materials: vibrant `.primary` keeps the trigger
-                // label legible whether the dropdown is open or closed;
-                // the chevron drops to `.secondary` for a softer accent.
-                Text(label)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(isOpen ? .primary : .secondary)
-                    .rotationEffect(.degrees(isOpen ? 180 : 0))
-            }
-            .padding(.vertical, 5)
-            .padding(.horizontal, 9)
-            .frame(maxWidth: 200, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(UnisonColors.whiteAlpha(isOpen ? 0.10 : 0.06))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(
-                        UnisonColors.whiteAlpha(isOpen ? 0.22 : 0.10),
-                        lineWidth: 0.5
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: TriggerAnchorKey.self,
-                    value: [kind: proxy.frame(in: .named(SettingsLayout.coordinateSpace))]
-                )
-            }
-        )
-    }
-
-    // MARK: - Dropdown overlay
-
-    @ViewBuilder
-    private func dropdownOverlay(for kind: DropdownKind) -> some View {
-        let anchor = triggerAnchors[kind] ?? .zero
-        let dropdownWidth: CGFloat = 220
-        let originX = min(
-            max(8, anchor.maxX - dropdownWidth),
-            SettingsLayout.windowWidth - dropdownWidth - 8
-        )
-        let originY = anchor.maxY + 6
-
-        Group {
-            switch kind {
-            case .microphone:
-                deviceDropdown(
-                    devices: vm.availableMics,
-                    selectedUID: vm.settings.inputDeviceUID,
-                    onPick: { uid in
-                        vm.setInputDeviceUID(uid)
-                        closeDropdown()
-                    },
-                    onCancel: { closeDropdown() }
-                )
-            case .speaker:
-                deviceDropdown(
-                    devices: vm.availableSpeakers,
-                    selectedUID: vm.settings.outputDeviceUID,
-                    onPick: { uid in
-                        vm.setOutputDeviceUID(uid)
-                        closeDropdown()
-                    },
-                    onCancel: { closeDropdown() }
-                )
-            case .langMine:
-                LanguagePickerDropdown(
-                    selection: Binding(
-                        get: { vm.settings.languagePair.mine },
-                        set: { newLang in
-                            let pair = LanguagePair(mine: newLang, peer: vm.settings.languagePair.peer)
-                            vm.setLanguagePair(pair)
-                        }
-                    ),
-                    onPick: { newLang in
-                        let pair = LanguagePair(mine: newLang, peer: vm.settings.languagePair.peer)
-                        vm.setLanguagePair(pair)
-                        closeDropdown()
-                    },
-                    onCancel: { closeDropdown() }
-                )
-            case .langPeer:
-                LanguagePickerDropdown(
-                    selection: Binding(
-                        get: { vm.settings.languagePair.peer },
-                        set: { newLang in
-                            let pair = LanguagePair(mine: vm.settings.languagePair.mine, peer: newLang)
-                            vm.setLanguagePair(pair)
-                        }
-                    ),
-                    onPick: { newLang in
-                        let pair = LanguagePair(mine: vm.settings.languagePair.mine, peer: newLang)
-                        vm.setLanguagePair(pair)
-                        closeDropdown()
-                    },
-                    onCancel: { closeDropdown() }
-                )
-            }
-        }
-        .offset(x: originX, y: originY)
-    }
-
-    private func deviceDropdown(
-        devices: [AudioDevice],
-        selectedUID: String?,
-        onPick: @escaping (String?) -> Void,
-        onCancel: @escaping () -> Void
-    ) -> some View {
-        DeviceDropdown(
-            devices: devices,
-            selectedUID: selectedUID,
-            onPick: onPick,
-            onCancel: onCancel
-        )
-    }
-
-    // MARK: - Helpers
-
-    private func closeDropdown() {
-        if openDropdown != nil {
-            withAnimation(UnisonAnimations.dropdown.reduceMotion(reduceMotion)) {
-                openDropdown = nil
-            }
-        }
-    }
-
-    private var currentMicLabel: String {
-        guard let uid = vm.settings.inputDeviceUID,
-              let match = vm.availableMics.first(where: { $0.uid == uid }) else {
-            return "По умолчанию"
-        }
-        return match.name
-    }
-
-    private var currentSpeakerLabel: String {
-        guard let uid = vm.settings.outputDeviceUID,
-              let match = vm.availableSpeakers.first(where: { $0.uid == uid }) else {
-            return "По умолчанию"
-        }
-        return match.name
-    }
-}
-
-// MARK: - Device dropdown
-
-/// Audio-device picker — same visual language as `LanguagePickerDropdown`,
-/// but operates on `[AudioDevice]` and exposes the "По умолчанию" item
-/// that maps to a `nil` UID. Lives in this file because no other view
-/// needs it.
-private struct DeviceDropdown: View {
-    let devices: [AudioDevice]
-    let selectedUID: String?
-    let onPick: (String?) -> Void
-    let onCancel: () -> Void
-
-    @SwiftUI.State private var query: String = ""
-
-    private var filtered: [AudioDevice] {
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return devices }
-        let needle = trimmed.lowercased()
-        return devices.filter { $0.name.lowercased().contains(needle) }
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if devices.count > 6 {
-                SearchField(text: $query)
-                    .padding(.bottom, 6)
-            }
-            ScrollView {
-                LazyVStack(spacing: 1) {
-                    defaultRow
-                    if filtered.isEmpty && !query.isEmpty {
-                        // HIG Materials: vibrant `.tertiary` for the
-                        // empty-state placeholder on the dropdown glass.
-                        Text("Ничего не найдено")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.tertiary)
-                            .padding(.vertical, 14)
-                    } else {
-                        ForEach(filtered, id: \.uid) { device in
-                            row(for: device)
-                                .onTapGesture { onPick(device.uid) }
-                        }
-                    }
-                }
-            }
-            .frame(maxHeight: 220)
-        }
-        .padding(5)
-        .liquidGlass(cornerRadius: 13)
-        .frame(width: 220)
-        .onKeyPress(.escape) {
-            onCancel()
-            return .handled
-        }
-    }
-
-    private var defaultRow: some View {
-        let isSelected = (selectedUID == nil)
-        // HIG Materials: dropdown rows sit on `.liquidGlass` — vibrant
-        // `.primary` for the active/selected row keeps the leading
-        // glyph and checkmark consistent with row text; `.secondary`
-        // for unselected reads as softer on the same surface.
-        return HStack(spacing: 9) {
-            Image(systemName: "circle.dotted")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-            Text("По умолчанию")
-                .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? .primary : .secondary)
-            Spacer(minLength: 0)
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.primary)
-            }
-        }
-        .padding(.vertical, 7)
-        .padding(.horizontal, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.clear)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture { onPick(nil) }
-    }
-
-    private func row(for device: AudioDevice) -> some View {
-        let isSelected = device.uid == selectedUID
-        // HIG Materials: `.primary` for the selected row, `.secondary`
-        // for the rest — vibrancy adapts contrast on the glass surface.
-        return HStack(spacing: 9) {
-            Text(device.name)
-                .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? .primary : .secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 0)
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.primary)
-            }
-        }
-        .padding(.vertical, 7)
-        .padding(.horizontal, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.clear)
-        )
-        .contentShape(Rectangle())
     }
 }
 
@@ -733,7 +388,6 @@ private struct SecretInputBound: View {
 private enum SettingsLayout {
     static let windowWidth: CGFloat = 560
     static let windowHeight: CGFloat = 540
-    static let coordinateSpace: String = "settings"
 }
 
 // MARK: - External URLs
@@ -742,20 +396,4 @@ private enum SettingsLinks {
     static let openAIKeys = URL(string: "https://platform.openai.com/api-keys")!
     static let license = URL(string: "https://opensource.org/licenses/MIT")!
     static let source = URL(string: "https://github.com")!
-}
-
-// MARK: - PreferenceKey
-
-/// Captures the screen-space frame of each dropdown trigger so the
-/// floating dropdown overlay can position itself. Multiple triggers
-/// emit values keyed by `DropdownKind`; the reducer merges them.
-private struct TriggerAnchorKey: PreferenceKey {
-    static let defaultValue: [SettingsView.DropdownKind: CGRect] = [:]
-    static func reduce(
-        value: inout [SettingsView.DropdownKind: CGRect],
-        nextValue: () -> [SettingsView.DropdownKind: CGRect]
-    ) {
-        let next = nextValue()
-        for (k, v) in next { value[k] = v }
-    }
 }

@@ -3,16 +3,27 @@ import SwiftUI
 import UnisonUI
 
 /// Hosts the Settings `NSWindow`. Bridges `SettingsView` from `UnisonUI`
-/// (which cannot reach AppKit) into a real native window with traffic
-/// lights, transparent titlebar, and a hosting controller.
+/// (which cannot reach AppKit) into a real native window with the
+/// standard macOS Settings chrome — titled window, system titlebar,
+/// translucent material background.
 ///
-/// Plan §5.3:
-/// - 560×540 fixed window size (matches `design/settings-final/index.html`).
-/// - `titlebarAppearsTransparent = true`, `titleVisibility = .hidden` —
-///   the SwiftUI titlebar provides the "Unison · Настройки" text and
-///   the SaveIndicator. We just keep the native traffic lights.
-/// - The window is non-modal, can be closed with the red button or
-///   ESC. Re-opening reuses the same instance.
+/// We deliberately fall back on Apple's defaults for window styling
+/// instead of a hand-rolled glass container:
+///
+/// - `styleMask` includes `.titled`, `.closable`, `.miniaturizable`,
+///   `.fullSizeContentView`. All three traffic lights are visible and
+///   functional, matching every other System Settings-style window.
+/// - `title = "Unison · Настройки"` and `titleVisibility = .visible`
+///   so the native titlebar renders the document title — no custom
+///   `Text("Unison · Настройки")` inside SwiftUI.
+/// - `backgroundColor = NSColor.windowBackgroundColor` is a system
+///   dynamic colour that on macOS 26 picks up the Liquid Glass window
+///   material; it adapts automatically to light/dark mode and to
+///   `Reduce Transparency`. We just have to ask for it.
+/// - `isOpaque = false` lets that material refract the desktop wallpaper.
+///
+/// `Form { … }.formStyle(.grouped)` inside `SettingsView` then renders
+/// the rounded section cards on top, matching native System Settings.
 ///
 /// `onRecordHotkey` wiring:
 /// AppDelegate creates one `HotkeyService`; when the user taps a
@@ -39,34 +50,29 @@ public final class SettingsWindowController {
 
     public func show() {
         if window == nil {
-            // `.titled + .fullSizeContentView + titlebarAppearsTransparent`
-            // hides the titlebar bar while keeping the traffic lights
-            // visible (Settings windows need them per HIG). The SwiftUI
-            // content extends beneath the titlebar so the whole window
-            // reads as one continuous glass card.
-            //
-            // Transparency is critical so the macOS 26 Liquid Glass
-            // surfaces inside (Form.grouped sections) can refract the
-            // real desktop wallpaper instead of sitting on an opaque
-            // NSWindow fill.
+            // Standard macOS Settings-style window:
+            // - `.titled`: native titlebar with the document title.
+            // - `.closable` / `.miniaturizable`: all three traffic lights.
+            // - `.fullSizeContentView`: lets the SwiftUI content extend
+            //   beneath the titlebar so scroll edges blur through it.
             let w = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 560, height: 540),
-                styleMask: [.titled, .closable, .fullSizeContentView],
+                styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
-            w.title = ""
-            w.titleVisibility = .hidden
+            w.title = "Unison · Настройки"
+            w.titleVisibility = .visible
             w.titlebarAppearsTransparent = true
-            w.isMovableByWindowBackground = true
             w.isReleasedWhenClosed = false
-            w.backgroundColor = .clear
+            // `NSColor.windowBackgroundColor` is a system dynamic colour
+            // that supplies the macOS 26 Tahoe window material — glass
+            // with adaptive translucency that reacts to Reduce
+            // Transparency and Increase Contrast automatically. We rely
+            // on this instead of a custom `.glassEffect` wrapper.
+            w.backgroundColor = NSColor.windowBackgroundColor
             w.isOpaque = false
-            w.hasShadow = true // Compositor-drawn shadow for the floating window.
-
-            // Traffic lights stay visible (close button works).
-            w.standardWindowButton(.miniaturizeButton)?.isHidden = true
-            w.standardWindowButton(.zoomButton)?.isHidden = true
+            w.hasShadow = true
 
             let root = SettingsView(
                 vm: viewModel,

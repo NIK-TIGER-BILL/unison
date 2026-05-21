@@ -62,31 +62,6 @@ import Testing
     #expect(o == 0.85)
 }
 
-// MARK: - LanguagePickerDropdown filter helper
-
-@Test func languagePickerFilter_emptyQueryReturnsAll() {
-    let all = LanguagePickerDropdown.filter([.ru, .en, .ja], query: "")
-    #expect(all == [.ru, .en, .ja])
-}
-
-@Test func languagePickerFilter_matchesByDisplayName() {
-    // "русск" matches the Russian display name "Русский" (case-insensitive
-    // substring), but not English's "English".
-    let found = LanguagePickerDropdown.filter(Array(Language.allCases), query: "русск")
-    #expect(found.contains(.ru))
-    #expect(found.contains(.en) == false)
-}
-
-@Test func languagePickerFilter_matchesByCode() {
-    let found = LanguagePickerDropdown.filter(Array(Language.allCases), query: "ja")
-    #expect(found.contains(.ja))
-}
-
-@Test func languagePickerFilter_caseInsensitive() {
-    let found = LanguagePickerDropdown.filter(Array(Language.allCases), query: "ENGLISH")
-    #expect(found.contains(.en))
-}
-
 // MARK: - TranscriptSettingsPopover size mapping
 
 @Test func transcriptSettings_sizeLabel_atKnownIndexes() {
