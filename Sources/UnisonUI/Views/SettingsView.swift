@@ -72,22 +72,26 @@ public struct SettingsView: View {
         // The native form supplies its own translucent background and
         // grouped-section cards on macOS 26 — we don't override
         // `.scrollContentBackground` or layer custom glass on top.
-        .safeAreaInset(edge: .top, spacing: 0) {
-            // Right-aligned SaveIndicator tucked under the titlebar.
-            // Empty zero-height row when nothing is saving so it never
-            // takes vertical space; visible row carries 24pt of inset.
-            if saveIndicator.isShown {
-                HStack {
-                    Spacer()
-                    SaveIndicator(isShown: Binding(
-                        get: { saveIndicator.isShown },
-                        set: { saveIndicator.isShown = $0 }
-                    ))
-                    .padding(.trailing, 16)
-                }
-                .padding(.top, 6)
-                .background(.clear)
-            }
+        //
+        // `.overlay` puts the SaveIndicator *above* the content rather
+        // than inserting it into the layout flow. Two consequences:
+        //   1. Showing/hiding the indicator never shifts the form rows
+        //      (the user reported "весь текст сдвигается вниз и
+        //      прыгает" with the old `.safeAreaInset` placement).
+        //   2. The indicator floats over the form regardless of scroll
+        //      position, so it stays visible even when the user has
+        //      scrolled to the bottom of Settings (the user reported
+        //      "Когда ты снизу настроек, не видно текста сохранено").
+        // Bottom-trailing placement matches the System Settings save
+        // convention on Tahoe.
+        .overlay(alignment: .bottomTrailing) {
+            SaveIndicator(isShown: Binding(
+                get: { saveIndicator.isShown },
+                set: { saveIndicator.isShown = $0 }
+            ))
+            .padding(.trailing, 16)
+            .padding(.bottom, 12)
+            .allowsHitTesting(false)
         }
         .onChange(of: vm.lastSavedAt) { _, _ in
             saveIndicator.markSaved()

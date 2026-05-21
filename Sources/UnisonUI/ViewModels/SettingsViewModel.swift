@@ -177,10 +177,20 @@ public final class SettingsViewModel {
     /// Persist a recorded hotkey for the given kind. Re-broadcasts via
     /// `onHotkeysChanged` so the host can re-register the global combo.
     /// Passing `nil` clears the hotkey.
+    ///
+    /// Clears `recordingHotkey` as a side-effect: the host's
+    /// `HotkeyService` calls this from its capture monitor, and the UI
+    /// must drop out of "нажмите…" state as soon as the new combo
+    /// lands. Without this reset the `HotkeyRecorder` label stays
+    /// stuck on "нажмите…" forever (recording flag never flips off),
+    /// which is the user-visible "hotkey recorder doesn't work" bug.
     public func updateHotkey(_ kind: HotkeyKind, _ hotkey: Hotkey?) {
         switch kind {
         case .startStop:       hotkeyStartStop = hotkey
         case .showTranscript:  hotkeyShowTranscript = hotkey
+        }
+        if recordingHotkey == kind {
+            recordingHotkey = nil
         }
         hotkeyStore?.saveHotkey(kind, hotkey)
         onHotkeysChanged?(hotkeyStartStop, hotkeyShowTranscript)

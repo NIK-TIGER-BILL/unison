@@ -10,9 +10,11 @@ import UnisonUI
 /// We deliberately fall back on Apple's defaults for window styling
 /// instead of a hand-rolled glass container:
 ///
-/// - `styleMask` includes `.titled`, `.closable`, `.miniaturizable`,
-///   `.fullSizeContentView`. All three traffic lights are visible and
-///   functional, matching every other System Settings-style window.
+/// - `styleMask` is `.titled | .closable | .miniaturizable`. We do
+///   **not** opt into `.fullSizeContentView`: the native titlebar
+///   reserves its own layout band (so SwiftUI content can never
+///   draw under it) and renders with the system Liquid Glass
+///   material exactly like System Settings.
 /// - `title = "Unison · Настройки"` and `titleVisibility = .visible`
 ///   so the native titlebar renders the document title — no custom
 ///   `Text("Unison · Настройки")` inside SwiftUI.
@@ -20,7 +22,6 @@ import UnisonUI
 ///   dynamic colour that on macOS 26 picks up the Liquid Glass window
 ///   material; it adapts automatically to light/dark mode and to
 ///   `Reduce Transparency`. We just have to ask for it.
-/// - `isOpaque = false` lets that material refract the desktop wallpaper.
 ///
 /// `Form { … }.formStyle(.grouped)` inside `SettingsView` then renders
 /// the rounded section cards on top, matching native System Settings.
@@ -53,25 +54,40 @@ public final class SettingsWindowController {
             // Standard macOS Settings-style window:
             // - `.titled`: native titlebar with the document title.
             // - `.closable` / `.miniaturizable`: all three traffic lights.
-            // - `.fullSizeContentView`: lets the SwiftUI content extend
-            //   beneath the titlebar so scroll edges blur through it.
+            //
+            // We deliberately omit `.fullSizeContentView`: with that flag
+            // SwiftUI content extends under the titlebar and the system
+            // does not auto-inset, so the first row of the Form covers
+            // the title text and the traffic lights (the user's bug
+            // report). Without the flag, AppKit reserves the titlebar
+            // band on its own and the form starts directly below it,
+            // matching every other System Settings-style window on
+            // Tahoe.
             let w = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 560, height: 540),
-                styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+                styleMask: [.titled, .closable, .miniaturizable],
                 backing: .buffered,
                 defer: false
             )
             w.title = "Unison · Настройки"
             w.titleVisibility = .visible
-            w.titlebarAppearsTransparent = true
+            // Standard titlebar (not transparent): on macOS 26 the
+            // titlebar renders with the system Liquid Glass material
+            // and a faint divider beneath it, the same chrome System
+            // Settings uses. Making it transparent breaks that
+            // composition.
+            w.titlebarAppearsTransparent = false
             w.isReleasedWhenClosed = false
             // `NSColor.windowBackgroundColor` is a system dynamic colour
             // that supplies the macOS 26 Tahoe window material — glass
             // with adaptive translucency that reacts to Reduce
-            // Transparency and Increase Contrast automatically. We rely
-            // on this instead of a custom `.glassEffect` wrapper.
+            // Transparency and Increase Contrast automatically. With
+            // `isOpaque = true` the system composites this material
+            // for us; we get refraction of the desktop wallpaper /
+            // sibling windows for free without manually layering
+            // `NSVisualEffectView` or `.glassEffect` on top.
             w.backgroundColor = NSColor.windowBackgroundColor
-            w.isOpaque = false
+            w.isOpaque = true
             w.hasShadow = true
 
             let root = SettingsView(
