@@ -13,10 +13,13 @@ import UnisonDomain
 /// - `PrimaryGlassButton` toggling start/stop; coral while translating.
 /// - `mm:ss` timer (mono) below the button while translating.
 ///
-/// The dropdown is rendered as an overlay outside the clipped glass panel
-/// so it can extend past the panel's rounded edges. Its position is
-/// measured via a `PreferenceKey` capturing the `LanguageBar`'s frame in
-/// a named coordinate space, so the dropdown follows layout changes.
+/// The dropdown is rendered as an `.overlay(alignment: .topLeading)` on
+/// the `LanguageBar` itself. SwiftUI lays the overlay out relative to
+/// the bar's own bounds, so the dropdown automatically tracks the bar's
+/// position without us needing to translate frames through a parent
+/// coordinate space. A local `GeometryReader` inside the overlay reads
+/// the bar's size; we shift the dropdown down by that height + 6pt so
+/// it appears right below the bar.
 public struct PopoverView: View {
     @Bindable var vm: PopoverViewModel
     let onOpenSettings: () -> Void
@@ -32,40 +35,14 @@ public struct PopoverView: View {
     /// Which language-picker dropdown (if any) is currently open.
     @SwiftUI.State private var openSide: LanguageBar.Side? = nil
 
-    /// Frame of the language bar, captured in the "popover" coordinate
-    /// space. Used to anchor the dropdown overlay below the bar.
-    @SwiftUI.State private var langBarFrame: CGRect = .zero
-
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public var body: some View {
-        ZStack(alignment: .topLeading) {
-            content
-                .frame(width: PopoverLayout.width)
-                .liquidGlass(cornerRadius: 24)
-
-            if let side = openSide {
-                dropdownOverlay(for: side)
-                    .zIndex(10)
-                    .transition(reduceMotion
-                        ? .identity
-                        : .opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
-            }
-        }
-        .frame(width: PopoverLayout.width)
-        .coordinateSpace(name: PopoverLayout.coordinateSpace)
-        .onPreferenceChange(LangBarFrameKey.self) { newFrame in
-            langBarFrame = newFrame
-        }
-        // Tap outside dismisses any open dropdown.
-        .background(
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    closeDropdown()
-                }
-        )
-        .animation(UnisonAnimations.dropdown.reduceMotion(reduceMotion), value: openSide)
+        content
+            .frame(width: PopoverLayout.width)
+            .liquidGlass(cornerRadius: 24)
+            .frame(width: PopoverLayout.width)
+            .animation(UnisonAnimations.dropdown.reduceMotion(reduceMotion), value: openSide)
     }
 
     // MARK: - Content
@@ -135,14 +112,19 @@ public struct PopoverView: View {
                 toggleSide(side)
             }
         )
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: LangBarFrameKey.self,
-                    value: proxy.frame(in: .named(PopoverLayout.coordinateSpace))
-                )
+        // Anchor the dropdown directly on the language bar so we
+        // never have to translate frames through a parent coordinate
+        // space. SwiftUI lays the overlay out relative to the bar's
+        // bounds; we just shift it down by the bar's own height so
+        // it appears right beneath it.
+        .overlay(alignment: .topLeading) {
+            if let side = openSide {
+                dropdownOverlay(for: side)
+                    .transition(reduceMotion
+                        ? .identity
+                        : .opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             }
-        )
+        }
     }
 
     private var primaryButton: some View {
@@ -179,33 +161,42 @@ public struct PopoverView: View {
 
     // MARK: - Dropdown overlay
 
+    /// The dropdown is rendered as an `.overlay(alignment: .topLeading)`
+    /// on the `LanguageBar`, so its layout origin (0, 0) is the
+    /// bar's top-leading corner. We measure the bar via a local
+    /// `GeometryReader` and offset the dropdown by the bar's own
+    /// height + 6pt so it appears right below the bar — left-aligned
+    /// for the "mine" side, right-aligned for the "peer" side.
     @ViewBuilder
     private func dropdownOverlay(for side: LanguageBar.Side) -> some View {
-        let dropdownWidth: CGFloat = 220
-        let originX: CGFloat = {
-            switch side {
-            case .mine: return langBarFrame.minX
-            case .peer: return langBarFrame.maxX - dropdownWidth
-            }
-        }()
-        let originY: CGFloat = langBarFrame.maxY + 6
-
-        LanguagePickerDropdown(
-            selection: Binding(
-                get: {
-                    switch side {
-                    case .mine: vm.settings.languagePair.mine
-                    case .peer: vm.settings.languagePair.peer
-                    }
-                },
-                set: { newLang in
-                    pick(newLang, for: side)
+        GeometryReader { proxy in
+            let dropdownWidth: CGFloat = 220
+            let barSize = proxy.size
+            let originX: CGFloat = {
+                switch side {
+                case .mine: return 0
+                case .peer: return barSize.width - dropdownWidth
                 }
-            ),
-            onPick: { lang in pick(lang, for: side) },
-            onCancel: { closeDropdown() }
-        )
-        .offset(x: originX, y: originY)
+            }()
+            let originY: CGFloat = barSize.height + 6
+
+            LanguagePickerDropdown(
+                selection: Binding(
+                    get: {
+                        switch side {
+                        case .mine: vm.settings.languagePair.mine
+                        case .peer: vm.settings.languagePair.peer
+                        }
+                    },
+                    set: { newLang in
+                        pick(newLang, for: side)
+                    }
+                ),
+                onPick: { lang in pick(lang, for: side) },
+                onCancel: { closeDropdown() }
+            )
+            .offset(x: originX, y: originY)
+        }
     }
 
     // MARK: - Actions
@@ -248,17 +239,6 @@ public struct PopoverView: View {
 private enum PopoverLayout {
     /// DESIGN §4.3: total popover width is exactly 340pt.
     static let width: CGFloat = 340
-    /// Coordinate-space name used to anchor the dropdown overlay.
-    static let coordinateSpace: String = "popover"
-}
-
-// MARK: - PreferenceKey
-
-private struct LangBarFrameKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
-    }
 }
 
 // MARK: - StatusKind → StatusDot.State

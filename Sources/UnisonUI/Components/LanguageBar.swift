@@ -96,6 +96,7 @@ public struct LanguageSideButton: View {
     }
 
     @SwiftUI.State private var pressed = false
+    @SwiftUI.State private var isHovered = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -134,15 +135,17 @@ public struct LanguageSideButton: View {
             .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
             .padding(.vertical, 4)
             .padding(.horizontal, 6)
+            .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(pressed ? UnisonColors.whiteAlpha(0.06) : Color.clear)
+                    .fill(backgroundFill)
             )
             .scaleEffect(pressed ? 0.98 : 1.0)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(label): \(language.displayName)")
         .help("\(label): \(language.displayName)")
+        .onHover { isHovered = $0 }
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in pressed = true }
@@ -150,6 +153,21 @@ public struct LanguageSideButton: View {
         )
         .animation(UnisonAnimations.press.reduceMotion(reduceMotion), value: pressed)
         .animation(UnisonAnimations.dropdown.reduceMotion(reduceMotion), value: isOpen)
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+    }
+
+    /// Three-way background: pressed > hovered > rest.
+    /// The press tint is brighter than the hover tint so the active
+    /// state is still distinguishable when the pointer is already on
+    /// the button.
+    private var backgroundFill: Color {
+        if pressed {
+            return UnisonColors.whiteAlpha(0.10)
+        }
+        if isHovered {
+            return UnisonColors.whiteAlpha(0.06)
+        }
+        return Color.clear
     }
 }
 

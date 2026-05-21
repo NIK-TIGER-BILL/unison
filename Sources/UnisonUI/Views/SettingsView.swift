@@ -113,6 +113,16 @@ public struct SettingsView: View {
             // Native macOS 26 Form with grouped style. Section headers,
             // row heights, corner radius and surface treatment all come
             // from the system per Apple's Liquid Glass spec.
+            //
+            // `scrollContentBackground(.hidden)` hides the system's
+            // default form fill (an opaque settings-window grey).
+            // Without it the form paints on top of the transparent
+            // NSWindow and blocks the desktop from refracting through
+            // — which is what was making the Settings window look flat
+            // and non-glassy in macOS 26 builds. With it hidden, the
+            // system's grouped sections still draw their own glass
+            // cards inside; the transparent NSWindow background lets
+            // the real desktop show through the gaps between sections.
             Form {
                 audioSection
                 languagesSection
@@ -123,6 +133,7 @@ public struct SettingsView: View {
                 aboutSection
             }
             .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
             .scrollIndicators(.hidden)
         }
     }
@@ -131,10 +142,20 @@ public struct SettingsView: View {
     /// the controller layer (`SettingsWindowController` makes them
     /// visible and functional). We render the title text and the
     /// `SaveIndicator` here to match the design's full-width 32pt bar.
+    ///
+    /// The traffic-light region (left ~74pt) must NOT intercept
+    /// pointer events — even `Color.clear` would catch clicks and
+    /// block the close button. We carve out a hit-test-disabled
+    /// leading region so the system traffic lights stay clickable.
     private var titlebar: some View {
         HStack(spacing: 8) {
-            // Spacer to clear the native traffic lights (left ~74pt).
-            Color.clear.frame(width: 64, height: 1)
+            // Hit-test-disabled spacer over the traffic-light region.
+            // SwiftUI's `Color.clear` is otherwise a real view that
+            // catches clicks; `.allowsHitTesting(false)` lets the
+            // close / minimize / zoom buttons receive their events.
+            Color.clear
+                .frame(width: 64, height: 1)
+                .allowsHitTesting(false)
             // HIG Materials: vibrant `.primary` lets the system tune
             // contrast across light/dark, Increase Contrast, and Reduce
             // Transparency on top of the liquid-glass titlebar.
@@ -154,6 +175,7 @@ public struct SettingsView: View {
             Rectangle()
                 .fill(UnisonColors.whiteAlpha(0.07))
                 .frame(height: 0.5)
+                .allowsHitTesting(false)
         }
     }
 

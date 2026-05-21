@@ -18,6 +18,16 @@ public struct SecretInput: View {
         // HIG Materials: vibrant `.primary` for the typed mono key
         // text and `.secondary` for the inline "Показать / Скрыть"
         // toggle label.
+        //
+        // The `Group { TextField | SecureField }` swap is what visually
+        // toggles the dots vs. plaintext rendering. Both controls have
+        // slightly different intrinsic heights and baseline metrics, so
+        // without an explicit container height the placeholder
+        // `sk-proj-…` jumps up/down a couple of points when the user
+        // taps "Показать / Скрыть". Pinning the field group to a fixed
+        // 18pt height (the natural rendered height of the mono 11.5
+        // glyphs at our padding) keeps the input row visually stable
+        // across both modes.
         HStack(spacing: 8) {
             Group {
                 if isVisible {
@@ -31,6 +41,7 @@ public struct SecretInput: View {
             .tracking(0.4)
             .foregroundStyle(.primary)
             .focused($fieldFocused)
+            .frame(height: 18)
 
             Button {
                 isVisible.toggle()
@@ -51,6 +62,11 @@ public struct SecretInput: View {
         .padding(.vertical, 4)
         .padding(.leading, 9)
         .padding(.trailing, 6)
+        // Stable container height — guards against intrinsic-size
+        // differences between `TextField` and `SecureField` shifting
+        // the row vertically on toggle. 26pt = 18pt field + 4pt × 2
+        // vertical padding.
+        .frame(height: 26)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(UnisonColors.whiteAlpha(0.06))

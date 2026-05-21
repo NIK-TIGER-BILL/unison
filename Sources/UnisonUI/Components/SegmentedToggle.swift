@@ -70,6 +70,8 @@ private struct SegmentButton: View {
     let isSelected: Bool
     let onTap: () -> Void
 
+    @SwiftUI.State private var isHovered = false
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 6) {
@@ -84,25 +86,39 @@ private struct SegmentButton: View {
             // and `.secondary` for the inactive one — the system handles
             // contrast across light/dark and Increase Contrast.
             .foregroundStyle(isSelected ? .primary : .secondary)
-            .background(selectedBackground)
+            .background(segmentBackground)
             .overlay(selectedBorder)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            // Without this the inactive segment's `Color.clear`
+            // background defeats hit testing for most of the segment
+            // rect — only the icon + label glyphs themselves were
+            // clickable. `.contentShape` claims the full rounded-rect
+            // as the tap surface, so the entire 50% column of the
+            // toggle responds to clicks.
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .shadow(
                 color: isSelected ? Color.black.opacity(0.2) : .clear,
                 radius: 1, x: 0, y: 1
             )
         }
         .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
     }
 
+    /// Three-way background fade: selected gradient > hovered tint >
+    /// idle clear. Hovering an inactive segment gives a subtle preview
+    /// so the pointer feels alive.
     @ViewBuilder
-    private var selectedBackground: some View {
+    private var segmentBackground: some View {
         if isSelected {
             LinearGradient(
                 colors: [UnisonColors.whiteAlpha(0.18), UnisonColors.whiteAlpha(0.06)],
                 startPoint: .top,
                 endPoint: .bottom
             )
+        } else if isHovered {
+            UnisonColors.whiteAlpha(0.06)
         } else {
             Color.clear
         }
