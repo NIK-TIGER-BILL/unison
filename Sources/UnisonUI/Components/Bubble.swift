@@ -113,29 +113,36 @@ public struct Bubble: View {
     }
 
     private var background: some View {
+        // Two layers: `.regularMaterial` provides the backdrop blur
+        // (HTML mock uses `backdrop-filter: blur(30px) saturate(190%)`),
+        // which gives the bubble enough density to read against any
+        // wallpaper — bright (white sand, water) or dark. The tinted
+        // gradient on top adds the speaker colour (blue for `me`,
+        // white for `peer`). Without the material underneath, the
+        // gradient alone (0.10–0.20 alpha) is invisible on bright
+        // backgrounds.
+        ZStack {
+            Rectangle().fill(.regularMaterial)
+            LinearGradient(
+                colors: gradientColors,
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+
+    private var gradientColors: [Color] {
         switch speaker {
         case .me:
-            return AnyView(
-                LinearGradient(
-                    colors: [
-                        Color(red: 160 / 255, green: 210 / 255, blue: 1.0).opacity(0.20),
-                        Color(red: 100 / 255, green: 160 / 255, blue: 220 / 255).opacity(0.09),
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
+            return [
+                Color(red: 160 / 255, green: 210 / 255, blue: 1.0).opacity(0.32),
+                Color(red: 100 / 255, green: 160 / 255, blue: 220 / 255).opacity(0.14),
+            ]
         case .peer:
-            return AnyView(
-                LinearGradient(
-                    colors: [
-                        UnisonColors.whiteAlpha(0.10),
-                        UnisonColors.whiteAlpha(0.035),
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
+            return [
+                UnisonColors.whiteAlpha(0.18),
+                UnisonColors.whiteAlpha(0.06),
+            ]
         }
     }
 

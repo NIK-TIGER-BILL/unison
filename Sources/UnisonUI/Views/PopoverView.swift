@@ -137,8 +137,10 @@ public struct PopoverView: View {
         .animation(UnisonAnimations.state, value: vm.isLanguagePairValid)
     }
 
-    /// One side of the language bar — a small caption ("Я ГОВОРЮ" /
-    /// "СЛУШАЮ") above a native `Picker(.menu)`. The picker is
+    /// One side of the language bar — a small caption ("Я говорю" /
+    /// "Слушаю") above a native `Picker(.menu)`. Per HIG, section
+    /// captions use Title Case (not ALL CAPS), matching the rest of
+    /// the app (`Аудио`, `Языки по умолчанию`, etc.). The picker is
     /// `labelsHidden()` so SwiftUI uses our caption as the only label,
     /// and `.tint(.primary)` keeps it neutral on the glass background.
     private func languagePicker(
@@ -148,9 +150,7 @@ public struct PopoverView: View {
     ) -> some View {
         VStack(alignment: alignment, spacing: 4) {
             Text(caption)
-                .font(.system(size: 9.5, weight: .medium))
-                .tracking(1.2)
-                .textCase(.uppercase)
+                .font(.caption)
                 .foregroundStyle(.tertiary)
             Picker("", selection: selection) {
                 ForEach(Language.allCases, id: \.self) { lang in

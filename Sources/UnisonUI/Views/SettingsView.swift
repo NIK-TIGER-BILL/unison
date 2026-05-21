@@ -191,8 +191,15 @@ public struct SettingsView: View {
     // MARK: - Section: OpenAI
 
     private var openAISection: some View {
+        // The API key is a long opaque string (`sk-proj-…` + ~50
+        // characters) so cramming it inline next to a "API ключ" label
+        // truncates the value to "sk-proj…" which is unreadable. Lay
+        // the label above the input and let the field span the full
+        // row width — the same trick the system Settings uses for
+        // long secrets / paths.
         Section("OpenAI") {
-            LabeledContent("API ключ") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("API ключ")
                 SecretInputBound(
                     text: Binding(
                         get: { vm.apiKey },
@@ -200,17 +207,17 @@ public struct SettingsView: View {
                     ),
                     isVisible: $vm.apiKeyVisible
                 )
-                .frame(width: 220)
-            }
-            HStack(spacing: 6) {
-                Text("Хранится в Keychain.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                MutedLink("Получить ключ") {
-                    onOpenURL(SettingsLinks.openAIKeys)
+                .frame(maxWidth: .infinity)
+                HStack(spacing: 6) {
+                    Text("Хранится в Keychain.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    MutedLink("Получить ключ") {
+                        onOpenURL(SettingsLinks.openAIKeys)
+                    }
+                    .accessibilityLabel("Получить ключ OpenAI")
+                    Spacer(minLength: 0)
                 }
-                .accessibilityLabel("Получить ключ OpenAI")
-                Spacer(minLength: 0)
             }
         }
     }
