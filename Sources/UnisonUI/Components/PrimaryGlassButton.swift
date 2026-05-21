@@ -50,7 +50,14 @@ public struct PrimaryGlassButton: View {
             .foregroundStyle(textColor)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 13)
-            .background(backgroundGradient)
+            .padding(.horizontal, 14)
+            .background(
+                // Explicit RoundedRectangle filled with the gradient so
+                // the translucent stops survive the headless snapshot
+                // renderer (no aurora behind to multiply against).
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(backgroundGradient)
+            )
             .overlay(alignment: .top) {
                 // `inset 0 1px 0 rgba(255,255,255,0.28)` — a 1pt-tall
                 // specular highlight along the top edge that gives the
@@ -58,6 +65,7 @@ public struct PrimaryGlassButton: View {
                 Rectangle()
                     .fill(UnisonColors.whiteAlpha(0.28))
                     .frame(height: 1)
+                    .allowsHitTesting(false)
             }
             .overlay(
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
@@ -107,8 +115,12 @@ public struct PrimaryGlassButton: View {
         }
     }
 
-    @ViewBuilder
-    private var backgroundGradient: some View {
+    /// Concrete `LinearGradient` (a `ShapeStyle`) so we can hand it to
+    /// `RoundedRectangle.fill(_:)` rather than `View.background(_:)`. The
+    /// explicit shape fill renders the translucent stops faithfully in
+    /// the headless snapshot renderer where `.background(LinearGradient)`
+    /// can collapse to a uniform tint.
+    private var backgroundGradient: LinearGradient {
         switch variant {
         case .standard:
             LinearGradient(

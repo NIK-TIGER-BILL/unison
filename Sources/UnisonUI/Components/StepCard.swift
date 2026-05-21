@@ -61,10 +61,11 @@ public struct StepCard<Content: View>: View {
             }
             if status != .done {
                 self.content()
-                    .padding(.top, 12)
+                    .padding(.top, 10)
             }
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .background(cardBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)

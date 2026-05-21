@@ -44,7 +44,7 @@ public struct OnboardingView: View {
         ZStack {
             AuroraBackground()
             panel
-                .padding(24)
+                .padding(16)
         }
         .frame(width: OnboardingLayout.windowWidth, height: OnboardingLayout.windowHeight)
         // ESC closes the window. v1 just closes (per spec).
@@ -54,12 +54,21 @@ public struct OnboardingView: View {
     // MARK: - Panel
 
     private var panel: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 14) {
             header
-            cards
+            // The cards section can outgrow the 620pt window when one
+            // of the steps is in an error state (the `ErrorRow` adds
+            // another row underneath the action). The footer is pinned
+            // outside the scroll area so progress + "Готово" stay
+            // visible regardless of card state.
+            ScrollView(.vertical, showsIndicators: false) {
+                cards
+                    .padding(.bottom, 2)
+            }
+            .scrollDisabled(false)
             footer
         }
-        .padding(22)
+        .padding(20)
         .background(panelBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -147,7 +156,7 @@ public struct OnboardingView: View {
     // MARK: - Cards
 
     private var cards: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             blackHoleCard
             microphoneCard
             apiKeyCard
@@ -226,19 +235,31 @@ public struct OnboardingView: View {
                 DashedDivider()
                     .padding(.top, 0)
 
-                HStack(alignment: .center, spacing: 8) {
-                    SecretInput(
-                        text: Binding(
-                            get: { vm.apiKeyDraft },
-                            set: { newValue in
-                                vm.apiKeyDraft = newValue
-                                // Clear inline validation error while editing.
-                                vm.clearError(for: .apiKey)
-                            }
-                        ),
-                        placeholder: "sk-proj-..."
-                    )
+                // SecretInput and "Сохранить" stacked vertically. The
+                // design HTML puts them side-by-side in a 480pt-wide
+                // window, but at our 440pt window the row gets too
+                // cramped — the button "ь" was getting clipped against
+                // the card edge. Stacking keeps the input full-width and
+                // the button right-aligned underneath.
+                SecretInput(
+                    text: Binding(
+                        get: { vm.apiKeyDraft },
+                        set: { newValue in
+                            vm.apiKeyDraft = newValue
+                            // Clear inline validation error while editing.
+                            vm.clearError(for: .apiKey)
+                        }
+                    ),
+                    placeholder: "sk-proj-..."
+                )
+                .padding(.top, 4)
 
+                HStack(spacing: 0) {
+                    MutedLink("Получить ключ") {
+                        onOpenURL(OnboardingViewModel.openAIKeysURL)
+                    }
+                    .accessibilityLabel("Получить ключ OpenAI")
+                    Spacer(minLength: 8)
                     compactPrimaryButton(
                         title: "Сохранить",
                         action: { vm.saveAPIKey() },
@@ -246,12 +267,6 @@ public struct OnboardingView: View {
                         isDisabled: !vm.canSaveKey
                     )
                 }
-                .padding(.top, 4)
-
-                MutedLink("Получить ключ") {
-                    onOpenURL(OnboardingViewModel.openAIKeysURL)
-                }
-                .accessibilityLabel("Получить ключ OpenAI")
 
                 if let message = vm.status[.apiKey]?.errorMessage {
                     ErrorRow(
@@ -278,7 +293,7 @@ public struct OnboardingView: View {
                 title: "Готово",
                 action: onClose
             )
-            .frame(maxWidth: 120)
+            .fixedSize(horizontal: true, vertical: false)
             .disabled(!vm.allDone)
         }
     }
@@ -307,7 +322,7 @@ public struct OnboardingView: View {
         isLoading: Bool,
         loadingTitle: String?
     ) -> some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 10) {
             DashedDivider()
             HStack(spacing: 10) {
                 Text(hint)
@@ -321,13 +336,18 @@ public struct OnboardingView: View {
                     isLoading: isLoading,
                     isDisabled: false
                 )
+                .layoutPriority(1)
             }
         }
     }
 
     /// Small primary button used inside cards. Wraps
     /// `PrimaryGlassButton` so we can constrain its width and disable
-    /// the full-width stretch.
+    /// the full-width stretch. The button hugs its content (no
+    /// `maxWidth: .infinity` stretch) so titles like "Сохранить" /
+    /// "Установить" / "Разрешить" render without right-edge clipping
+    /// when the row's flexible column (hint text or `SecretInput`) has
+    /// already claimed available space.
     @ViewBuilder
     private func compactPrimaryButton(
         title: String,
@@ -340,7 +360,7 @@ public struct OnboardingView: View {
             isLoading: isLoading,
             action: action
         )
-        .frame(maxWidth: 130)
+        .fixedSize(horizontal: true, vertical: false)
         .disabled(isDisabled)
     }
 }
