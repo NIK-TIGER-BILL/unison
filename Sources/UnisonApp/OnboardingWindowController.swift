@@ -33,11 +33,14 @@ public final class OnboardingWindowController {
 
     public func show() {
         if window == nil {
-            // Borderless + transparent so Apple's Liquid Glass (applied
-            // by the SwiftUI panel via `.liquidGlass(cornerRadius:)`)
-            // can refract the real desktop wallpaper through the host
-            // NSWindow. The design ships a close button inside the
-            // header — there's no macOS-drawn titlebar to dismiss.
+            // Strictly `.borderless` — NO `.fullSizeContentView` and NO
+            // `.titled`. `.fullSizeContentView` is for titled windows
+            // and is what makes macOS draw a focus ring around the
+            // square window rect; a pure borderless window doesn't get
+            // a focus ring drawn around its content. Combined with the
+            // SwiftUI `.liquidGlass` filling the entire content area,
+            // the visible rounded glass card and the window key state
+            // line up exactly.
             //
             // Critical for the macOS 26 glass to work correctly:
             // - `isOpaque = false` + `backgroundColor = .clear` lets the
@@ -50,7 +53,7 @@ public final class OnboardingWindowController {
             //   borderless window has no titlebar to grab.
             let w = KeyableBorderlessWindow(
                 contentRect: NSRect(x: 200, y: 200, width: 440, height: 620),
-                styleMask: [.borderless, .fullSizeContentView],
+                styleMask: [.borderless],
                 backing: .buffered,
                 defer: false
             )
@@ -77,7 +80,15 @@ public final class OnboardingWindowController {
             window = w
         }
         window?.center()
+        // `LSUIElement=true` (menubar agent) apps do NOT come forward
+        // on their own when a window appears. Without explicit
+        // activation, the onboarding window ends up behind whatever
+        // app the user was in — exactly the wrong UX for the very
+        // first surface they see. Activate the app, then bring the
+        // window forward unconditionally.
+        NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
     }
 
     public func hideIfDone() {

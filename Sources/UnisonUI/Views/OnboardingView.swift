@@ -48,8 +48,19 @@ public struct OnboardingView: View {
 
     public var body: some View {
         panel
-            .padding(16)
             .frame(width: OnboardingLayout.windowWidth, height: OnboardingLayout.windowHeight)
+            // Glass is the outermost layer so the glass surface fills
+            // the entire NSWindow content area. If the glass were
+            // smaller than the window (e.g. with outer `.padding(16)`),
+            // macOS would draw the focus ring around the window rect
+            // and produce a visible black ring outside the rounded
+            // glass card. By making `.liquidGlass` the outermost layer,
+            // window bounds and glass bounds match exactly.
+            .liquidGlass(cornerRadius: OnboardingLayout.windowCornerRadius)
+            // Clip to the same rounded shape so any system-drawn focus
+            // ring follows the rounded outline instead of the square
+            // window rect.
+            .clipShape(RoundedRectangle(cornerRadius: OnboardingLayout.windowCornerRadius, style: .continuous))
             // ESC closes the window. v1 just closes (per spec).
             .onExitCommand(perform: onClose)
     }
@@ -71,12 +82,11 @@ public struct OnboardingView: View {
             .scrollDisabled(false)
             footer
         }
-        .padding(20)
-        // Outer window: Apple's native Liquid Glass. Inner cards stay
-        // flat (content layer) so we don't nest glass-on-glass.
-        // The host NSWindow is transparent (no own background) so the
-        // glass material refracts the real desktop wallpaper.
-        .liquidGlass(cornerRadius: 22)
+        // Inner padding lives BETWEEN the glass surface and the
+        // content, not OUTSIDE the glass. This keeps the glass aligned
+        // with the NSWindow bounds while preserving content insets.
+        .padding(.horizontal, 24)
+        .padding(.vertical, 24)
     }
 
     // MARK: - Header
@@ -347,5 +357,9 @@ public struct OnboardingView: View {
 private enum OnboardingLayout {
     static let windowWidth: CGFloat = 440
     static let windowHeight: CGFloat = 620
+    /// Matches `OnboardingWindowController` so the focus ring (if the
+    /// compositor decides to draw one) follows the same rounded
+    /// silhouette as the glass card.
+    static let windowCornerRadius: CGFloat = 22
 }
 
