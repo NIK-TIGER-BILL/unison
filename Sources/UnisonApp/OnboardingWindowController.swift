@@ -59,6 +59,11 @@ public final class OnboardingWindowController {
             )
             w.titlebarAppearsTransparent = true
             w.titleVisibility = .hidden
+            // Internal title (never rendered because of `.hidden`) so the
+            // Tart screenshot harness can locate this window via
+            // `process "Unison" → window "Unison Onboarding"` in
+            // AppleScript and crop the screencap to its bounds.
+            w.title = "Unison Onboarding"
             w.isMovableByWindowBackground = true
             w.isReleasedWhenClosed = false
             w.backgroundColor = .clear

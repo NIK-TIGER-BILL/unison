@@ -122,6 +122,32 @@ public final class StatusItemController {
         if popover.isShown { return }
         popover.behavior = .applicationDefined
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        // Surface the popover's backing NSWindow under a stable title so
+        // the Tart screenshot harness can query its frame via
+        // `process "Unison" → window "Unison Popover"` in AppleScript and
+        // crop the screencapture to just that window's bounds. NSPopover
+        // doesn't expose its window until after `show()` runs, hence the
+        // assignment here rather than at init.
+        popover.contentViewController?.view.window?.title = "Unison Popover"
+        // Also log the popover's screen frame to stderr so the harness
+        // can fall back to bounds-from-log if AppleScript can't see the
+        // window (NSPopover hosts its content in a private panel that
+        // accessibility traversal occasionally misses).
+        //
+        // `NSWindow.frame` is in Cocoa coords (origin = bottom-left,
+        // y grows up); `screencapture -R` wants CG coords (origin =
+        // top-left, y grows down). Convert by subtracting the window's
+        // top edge from the screen height.
+        if let window = popover.contentViewController?.view.window,
+           let screen = window.screen ?? NSScreen.main {
+            let cocoaFrame = window.frame
+            let screenHeight = screen.frame.height
+            let cgTop = screenHeight - cocoaFrame.origin.y - cocoaFrame.size.height
+            FileHandle.standardError.write(
+                "popover-frame: \(Int(cocoaFrame.origin.x)),\(Int(cgTop)),\(Int(cocoaFrame.size.width)),\(Int(cocoaFrame.size.height))\n"
+                    .data(using: .utf8) ?? Data()
+            )
+        }
     }
 
     // MARK: - Click handling

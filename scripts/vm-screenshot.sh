@@ -136,6 +136,14 @@ scp_from_vm() {
   sshpass -p "$VM_PASS" scp "${SSH_OPTS[@]}" "$VM_USER@$VM_IP:$1" "$2"
 }
 
+# Single-attempt SSH wrapper for queries where "no output" is a valid
+# result. The retrying `ssh_vm` above re-runs on non-zero exit, which
+# would hammer the VM with three failed osascript calls when the
+# target window isn't visible yet — quiet failure is what we want.
+ssh_vm_once() {
+  sshpass -p "$VM_PASS" ssh "${SSH_OPTS[@]}" "$VM_USER@$VM_IP" "$@"
+}
+
 # Quit any running Unison instance; ignore failures (process may not exist).
 quit_unison() {
   ssh_vm 'osascript -e "tell application \"Unison\" to quit" 2>/dev/null; pkill -9 Unison 2>/dev/null; true'
@@ -198,16 +206,100 @@ hide_other_apps() {
   sleep 1
 }
 
+# Ask AppleScript inside the VM for the bounds of Unison's frontmost
+# window (`window 1` of `process "Unison"`). Returns a string of the
+# form "x,y,w,h" on success, empty on failure. Stderr from osascript is
+# discarded so a "no window" error doesn't pollute logs.
+#
+# The popover, onboarding, transcript, and settings windows all now
+# expose stable internal titles (set in `StatusItemController.swift`,
+# `OnboardingWindowController.swift`, `TranscriptWindowController.swift`,
+# `SettingsWindowController.swift`), but we don't address them by title
+# — we just take whatever is at `window 1`, since the harness only
+# brings up a single window per screen.
+query_unison_window_bounds() {
+  ssh_vm_once '
+    osascript <<APPLESCRIPT 2>/dev/null
+tell application "System Events"
+  tell process "Unison"
+    if (count of windows) > 0 then
+      set pos to position of window 1
+      set sz to size of window 1
+      return ((item 1 of pos) as integer as string) & "," & ((item 2 of pos) as integer as string) & "," & ((item 1 of sz) as integer as string) & "," & ((item 2 of sz) as integer as string)
+    end if
+  end tell
+end tell
+APPLESCRIPT
+  ' 2>/dev/null | tr -d "\r" | tr -d "\n"
+}
+
 # Take a screenshot inside the VM and pull it back to the host. Hides
 # other apps + dismisses notification dialogs first so the capture
 # shows only Unison + the desktop wallpaper.
+#
+# Behaviour:
+# - `menubar`: capture top 30pt strip of the screen (status bar only).
+# - all other screens: query Unison's `window 1` bounds via AppleScript
+#   and pass them to `screencapture -R x,y,w,h` so the PNG is sized to
+#   the window itself. Falls back to full-screen capture if the bounds
+#   query returns nothing (e.g. `onboarding-done` shows no window).
+#
+# Capturing only the window means the downstream multimodal pipeline
+# (which downscales reads to ~256px wide) gets the full UI region
+# resolved per pixel rather than scaled down with the VM desktop.
 capture_screen() {
   local name="$1"
   local remote="/Users/$VM_USER/screen-$name.png"
   local local_path="$SHOTS_DIR/$name.png"
   log "  Capturing $name → $local_path"
   hide_other_apps
-  ssh_vm "screencapture -x -t png '$remote'"
+
+  if [ "$name" = "menubar" ]; then
+    # Top of the screen only. Query the screen width via AppleScript so
+    # we cover the full menubar regardless of the VM's current
+    # resolution (1024×768 vs 2560×1600 vs anything else). 30pt covers
+    # the standard menubar height.
+    local screen_w
+    screen_w=$(ssh_vm_once '
+      osascript -e "tell application \"Finder\" to get bounds of window of desktop" 2>/dev/null \
+        | awk -F", " "{print \$3}"
+    ' 2>/dev/null | tr -d "\r" | tr -d "\n")
+    if [[ ! "$screen_w" =~ ^[0-9]+$ ]] || [ "$screen_w" -eq 0 ]; then
+      # Fallback: derive width from the resolution of the main display.
+      screen_w=$(ssh_vm_once "system_profiler SPDisplaysDataType 2>/dev/null | awk '/Resolution:/ {print \$2; exit}'" \
+        2>/dev/null | tr -d "\r" | tr -d "\n")
+      if [[ ! "$screen_w" =~ ^[0-9]+$ ]] || [ "$screen_w" -eq 0 ]; then
+        screen_w=2560
+      fi
+    fi
+    log "    menubar strip: 0,0,${screen_w},30"
+    ssh_vm "screencapture -x -R '0,0,${screen_w},30' -t png '$remote'"
+  else
+    local bounds
+    bounds=$(query_unison_window_bounds)
+    if [[ "$bounds" =~ ^[0-9]+,[0-9]+,[0-9]+,[0-9]+$ ]]; then
+      log "    window region: $bounds"
+      ssh_vm "screencapture -x -R '$bounds' -t png '$remote'"
+    else
+      # No window was reachable via AX. For `popover` try the
+      # `popover-frame:` line StatusItemController writes to stderr
+      # (/tmp/unison.log) — NSPopover hosts its content in a private
+      # panel that the System Events traversal occasionally misses.
+      local fallback=""
+      if [ "$name" = "popover" ]; then
+        fallback=$(ssh_vm_once "grep -m1 '^popover-frame: ' /tmp/unison.log 2>/dev/null | sed -E 's/^popover-frame: //'" 2>/dev/null \
+          | tr -d "\r" | tr -d "\n")
+      fi
+      if [[ "$fallback" =~ ^[0-9]+,[0-9]+,[0-9]+,[0-9]+$ ]]; then
+        log "    window region (from log): $fallback"
+        ssh_vm "screencapture -x -R '$fallback' -t png '$remote'"
+      else
+        log "    no window detected, capturing full screen"
+        ssh_vm "screencapture -x -t png '$remote'"
+      fi
+    fi
+  fi
+
   scp_from_vm "$remote" "$local_path"
   ssh_vm "rm -f '$remote'" || true
 }

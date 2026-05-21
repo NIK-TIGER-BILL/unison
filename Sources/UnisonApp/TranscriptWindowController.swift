@@ -67,6 +67,11 @@ public final class TranscriptWindowController {
             // Non-activating: clicking the panel doesn't steal focus from
             // the meeting client, but views still receive mouse events.
             panel.becomesKeyOnlyIfNeeded = true
+            // Stable internal title (never rendered — the panel is
+            // borderless) so the Tart screenshot harness can resolve
+            // this window via `process "Unison" → window "Unison
+            // Transcript"` and crop the screencapture to its frame.
+            panel.title = "Unison Transcript"
 
             let host = NSHostingController(rootView: TranscriptView(vm: viewModel))
             host.view.frame = NSRect(origin: .zero, size: frame.size)
