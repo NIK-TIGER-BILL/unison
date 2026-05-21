@@ -102,6 +102,28 @@ public final class StatusItemController {
         state = active ? .active : .idle
     }
 
+    /// Programmatically present the popover anchored to the status item
+    /// button. Used by the Tart VM screenshot harness
+    /// (`UNISON_FORCE_STATE=popover-open`) so we don't depend on
+    /// AppleScript clicking the menubar item (which needs Accessibility
+    /// permission and traverses a non-obvious AX hierarchy).
+    ///
+    /// The default `.transient` behavior dismisses on the first event
+    /// outside the popover — that races with `screencapture` running
+    /// inside the same VM (the OS counts the SSH activation as an
+    /// outside event). When the harness calls this we switch behavior
+    /// to `.applicationDefined` so the popover stays visible until the
+    /// process exits.
+    ///
+    /// No-op if the popover is already shown or the status item has no
+    /// button (e.g. in unit tests without a menu bar).
+    public func showPopover() {
+        guard let button = statusItem.button else { return }
+        if popover.isShown { return }
+        popover.behavior = .applicationDefined
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
     // MARK: - Click handling
 
     @objc private func handleClick(_ sender: NSStatusBarButton) {

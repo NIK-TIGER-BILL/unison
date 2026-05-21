@@ -89,6 +89,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// - `transcript-demo` → pop the transcript window forward (the
     ///   composition layer has already seeded the bubbles).
     /// - `settings-open` → open the Settings window immediately.
+    /// - `popover-open` → programmatically expand the menubar popover
+    ///   (avoids the fragile AppleScript click path that needs
+    ///   Accessibility permission and traverses a non-obvious AX
+    ///   hierarchy on notched displays).
     /// - `onboarding-done` → no extra work here; the onboarding gate
     ///   is already cleared by the composition factories.
     private func applyForceStateOverrides() {
@@ -98,6 +102,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             transcriptWindow.show()
         case .settingsOpen:
             settingsWindow.show()
+        case .popoverOpen:
+            // Activate the app first so the popover renders above
+            // anything the harness left in front (e.g. a Terminal
+            // window from the SSH session host). Defer the actual
+            // `show()` to the next run-loop tick: at this point in
+            // `applicationDidFinishLaunching` the status-item button
+            // hasn't had its frame laid out yet, and `NSPopover.show`
+            // anchors against `button.bounds` — calling it immediately
+            // places the popover at (0,0) on some hosts. One async
+            // hop is enough to let AppKit position the button.
+            NSApp.activate(ignoringOtherApps: true)
+            let item = statusItem!
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                item.showPopover()
+            }
         case .onboardingDone:
             break
         }

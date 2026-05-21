@@ -81,6 +81,7 @@ driving the UI manually. Production launches never set them.
 | `UNISON_FORCE_STATE=onboarding-done` | Mark all 3 onboarding steps satisfied at boot.            |
 | `UNISON_FORCE_STATE=transcript-demo` | Seed `TranscriptStore` with demo bubbles + open window.   |
 | `UNISON_FORCE_STATE=settings-open`   | Open the Settings window immediately after launch.        |
+| `UNISON_FORCE_STATE=popover-open`    | Clear onboarding + show the menubar popover programmatically (avoids fragile AppleScript clicks). |
 
 Implementation lives in `Sources/UnisonApp/Composition.swift` (factories
 + `seedTranscriptDemo`) and `Sources/UnisonApp/AppDelegate.swift`

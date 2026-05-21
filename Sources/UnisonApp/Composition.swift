@@ -17,6 +17,11 @@ public enum UnisonForceState: String, Sendable {
     case transcriptDemo = "transcript-demo"
     /// Open the Settings window immediately after launch.
     case settingsOpen = "settings-open"
+    /// Mark onboarding done AND programmatically show the menubar popover
+    /// at launch. Lets the VM screenshot harness capture the popover
+    /// surface without AppleScript-clicking the status item (which needs
+    /// Accessibility permission and is fragile across notch geometries).
+    case popoverOpen = "popover-open"
 
     /// Resolve from `ProcessInfo.processInfo.environment["UNISON_FORCE_STATE"]`.
     public static var current: UnisonForceState? {
@@ -148,7 +153,7 @@ extension Composition {
     ///   back the real installer (the user will see the real error
     ///   message if they try to install).
     static func makeInstaller(force: UnisonForceState? = UnisonForceState.current) -> any BlackHoleInstaller {
-        if force == .onboardingDone || force == .transcriptDemo {
+        if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen {
             print("[Unison] UNISON_FORCE_STATE=\(force!.rawValue) — using pre-installed MockBlackHoleInstaller")
             return MockBlackHoleInstaller(preInstalled: true)
         }
@@ -173,7 +178,7 @@ extension Composition {
     /// - Otherwise the real `MacPermissions` (prompts the user via
     ///   AVFoundation).
     static func makePermissions(force: UnisonForceState? = UnisonForceState.current) -> any PermissionsService {
-        if force == .onboardingDone || force == .transcriptDemo {
+        if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen {
             return ForcedGrantedPermissions()
         }
         return MacPermissions()
@@ -186,7 +191,7 @@ extension Composition {
     ///   only used to satisfy `validateAPIKey` (`sk-` + 20 chars).
     /// - Otherwise the real `MacKeychain` (writes to the macOS Keychain).
     static func makeKeychain(force: UnisonForceState? = UnisonForceState.current) -> any KeychainService {
-        if force == .onboardingDone || force == .transcriptDemo {
+        if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen {
             return InMemoryKeychain(seeded: "sk-unison-vm-screenshot-placeholder-key")
         }
         return MacKeychain()

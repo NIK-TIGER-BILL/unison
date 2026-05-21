@@ -32,7 +32,7 @@ VM_LOG_FILE="$SHOTS_DIR/.vm.log"
 ALL_SCREENS=(popover onboarding-pending onboarding-done settings transcript menubar)
 KEEP_RUNNING=0
 
-log() { printf '\033[1;36m[vm-shot]\033[0m %s\n' "$*"; }
+log() { printf '\033[1;36m[vm-shot]\033[0m %s\n' "$*" >&2; }
 warn(){ printf '\033[1;33m[vm-shot]\033[0m %s\n' "$*" >&2; }
 err() { printf '\033[1;31m[vm-shot]\033[0m %s\n' "$*" >&2; }
 
@@ -168,12 +168,45 @@ launch_unison() {
   "
 }
 
-# Take a screenshot inside the VM and pull it back to the host.
+# Hide every visible app except Unison/Finder and dismiss any system
+# notification panels that might still be on screen. The most common
+# offender is Terminal.app (the base macOS image opens one Terminal
+# window at first login that then sits in the foreground inside the
+# VM). We also try to close "Notification Center / App Background
+# Activity" panels that appear on a fresh launch.
+#
+# Notes:
+# - Each process is hidden by explicit name; the compound
+#   `set visible of (every process whose name is not "Unison")`
+#   silently no-ops on macOS 26 / Tahoe and leaves Terminal in front.
+# - We do NOT hide Finder — Finder owns the desktop, and hiding it
+#   causes macOS to surface whichever app was previously frontmost
+#   (Terminal in our case) to take over the focused window slot,
+#   undoing the Terminal hide we just performed.
+# - Each line is wrapped in `|| true` because some processes (like
+#   NotificationCenter) may not be running.
+hide_other_apps() {
+  ssh_vm '
+    osascript -e "tell application \"System Events\" to set visible of process \"Terminal\" to false" 2>/dev/null || true
+    osascript -e "tell application \"System Events\" to set visible of process \"NotificationCenter\" to false" 2>/dev/null || true
+    # Click the close button on any "Background Activity" / first-run
+    # alert owned by UserNotificationCenter so it does not occlude
+    # the target window. `button 1` is the default ("OK" / close).
+    osascript -e "tell application \"System Events\" to tell process \"UserNotificationCenter\" to if exists window 1 then click button 1 of window 1" 2>/dev/null || true
+    true
+  '
+  sleep 1
+}
+
+# Take a screenshot inside the VM and pull it back to the host. Hides
+# other apps + dismisses notification dialogs first so the capture
+# shows only Unison + the desktop wallpaper.
 capture_screen() {
   local name="$1"
   local remote="/Users/$VM_USER/screen-$name.png"
   local local_path="$SHOTS_DIR/$name.png"
   log "  Capturing $name → $local_path"
+  hide_other_apps
   ssh_vm "screencapture -x -t png '$remote'"
   scp_from_vm "$remote" "$local_path"
   ssh_vm "rm -f '$remote'" || true
@@ -197,15 +230,15 @@ for screen in "${SCREENS[@]}"; do
 
   case "$screen" in
     popover)
-      # Onboarding gate cleared via FORCE_STATE so the popover is usable.
+      # Onboarding gate cleared + popover expanded programmatically via
+      # `UNISON_FORCE_STATE=popover-open`. The AppDelegate calls
+      # `statusItem.showPopover()` in `applicationDidFinishLaunching`
+      # so we avoid the AppleScript menubar-click path entirely
+      # (which targets the wrong menu bar — main vs status bar — and
+      # needs Accessibility permission anyway).
       reset_app_state
-      launch_unison "UNISON_DEV_MODE=1 UNISON_FORCE_STATE=onboarding-done"
-      sleep 2
-      # Left-click the menubar item to expand the popover. AppKit
-      # registers the status item as menu-bar item 1 (Unison) for the
-      # System Events process named "Unison".
-      ssh_vm 'osascript -e '"'"'tell application "System Events" to tell process "Unison" to click menu bar item 1 of menu bar 1'"'"' || true'
-      sleep 2
+      launch_unison "UNISON_DEV_MODE=1 UNISON_FORCE_STATE=popover-open"
+      sleep 3
       capture_screen popover
       ;;
 
