@@ -43,7 +43,8 @@ public struct ControlPill: View {
     }
 
     public var body: some View {
-        HStack(spacing: 6) {
+        let hideShowLabel = isHidden ? "Показать транскрипт" : "Скрыть транскрипт"
+        return HStack(spacing: 6) {
             StatusDot(state: isActive ? .active : .ready, size: 6)
                 .padding(.leading, 8)
             // HIG Materials: vibrant `.secondary` for the mono timer
@@ -53,6 +54,7 @@ public struct ControlPill: View {
                 .font(UnisonFonts.mono(10.5))
                 .tracking(0.4)
                 .foregroundStyle(.secondary)
+                .accessibilityLabel("Прошло: \(elapsedLabel)")
             sep
             Button(action: onToggleSettings) {
                 Image(systemName: "slider.horizontal.3")
@@ -66,6 +68,8 @@ public struct ControlPill: View {
                     )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Настройки транскрипта")
+            .help("Настройки транскрипта")
             Button(action: onToggleHidden) {
                 Text(isHidden ? "Показать" : "Скрыть")
                     .font(.system(size: 11.5, weight: .medium))
@@ -82,6 +86,8 @@ public struct ControlPill: View {
                     )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(hideShowLabel)
+            .help(hideShowLabel)
             Button(action: onStop) {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 11))
@@ -90,6 +96,8 @@ public struct ControlPill: View {
             }
             .buttonStyle(.plain)
             .padding(.trailing, 4)
+            .accessibilityLabel("Остановить перевод")
+            .help("Остановить перевод")
         }
         .padding(.vertical, 6)
         .glassEffect(

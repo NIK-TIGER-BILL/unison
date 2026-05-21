@@ -9,10 +9,18 @@ import SwiftUI
 public struct FlagText: View {
     public let flag: String
     public let size: CGFloat
+    /// Spoken label for VoiceOver. When `nil`, the flag is presented
+    /// without a label (decorative). Callers showing the flag alongside
+    /// a separate language-name `Text` can leave this as `nil`; callers
+    /// using the flag standalone should pass the language's display
+    /// name so screen readers announce "Русский" instead of the raw
+    /// regional-indicator glyph cluster.
+    public let accessibilityName: String?
 
-    public init(_ flag: String, size: CGFloat = 14) {
+    public init(_ flag: String, size: CGFloat = 14, accessibilityName: String? = nil) {
         self.flag = flag
         self.size = size
+        self.accessibilityName = accessibilityName
     }
 
     public var body: some View {
@@ -22,6 +30,8 @@ public struct FlagText: View {
             // macOS builds — keep the color the emoji's own palette by
             // explicitly using `.tint(nil)` and primary style.
             .foregroundStyle(.primary)
+            .accessibilityLabel(accessibilityName ?? "")
+            .accessibilityHidden(accessibilityName == nil)
     }
 }
 

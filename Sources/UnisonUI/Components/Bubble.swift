@@ -14,6 +14,8 @@ public struct Bubble: View {
     /// Scale multiplier driven by the transcript size slider (0.75 … 1.30).
     public let scale: Double
 
+    @Environment(\.colorSchemeContrast) private var contrast
+
     public init(
         speaker: Speaker,
         primary: String,
@@ -65,11 +67,24 @@ public struct Bubble: View {
         .background(background)
         .overlay(
             shape
-                .strokeBorder(border, lineWidth: 0.5)
+                .strokeBorder(border, lineWidth: borderWidth)
         )
         .clipShape(shape)
         .shadow(color: .black.opacity(0.35), radius: 14, x: 0, y: 14)
         .frame(maxWidth: .infinity, alignment: speaker == .me ? .leading : .trailing)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabelText)
+    }
+
+    private var accessibilityLabelText: String {
+        if secondary.isEmpty {
+            return primary
+        }
+        return "\(primary), переведено как \(secondary)"
+    }
+
+    private var borderWidth: CGFloat {
+        contrast == .increased ? 1.0 : 0.5
     }
 
     private var shape: UnevenRoundedRectangle {
@@ -127,9 +142,10 @@ public struct Bubble: View {
     private var border: Color {
         switch speaker {
         case .me:
-            Color(red: 180 / 255, green: 220 / 255, blue: 1.0).opacity(0.24)
+            Color(red: 180 / 255, green: 220 / 255, blue: 1.0)
+                .opacity(contrast == .increased ? 0.55 : 0.24)
         case .peer:
-            UnisonColors.whiteAlpha(0.13)
+            UnisonColors.whiteAlpha(contrast == .increased ? 0.30 : 0.13)
         }
     }
 }
@@ -144,18 +160,24 @@ public struct TypingDots: View {
     }
 
     @SwiftUI.State private var phase: Int = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public var body: some View {
         HStack(spacing: 3 * scale) {
             ForEach(0..<3) { i in
                 Circle()
-                    .fill(UnisonColors.whiteAlpha(0.6))
+                    // When Reduce Motion is on, all three dots stay
+                    // visible at half opacity (no animated phase pop)
+                    // so the user still sees the typing affordance.
+                    .fill(UnisonColors.whiteAlpha(reduceMotion ? 0.6 : 0.6))
                     .frame(width: 4 * scale, height: 4 * scale)
-                    .offset(y: phase == i ? -2 * scale : 0)
-                    .opacity(phase == i ? 1.0 : 0.25)
+                    .offset(y: (!reduceMotion && phase == i) ? -2 * scale : 0)
+                    .opacity(reduceMotion ? 0.55 : (phase == i ? 1.0 : 0.25))
             }
         }
+        .accessibilityHidden(true)
         .onAppear {
+            guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: false)) {
                 phase = 2
             }

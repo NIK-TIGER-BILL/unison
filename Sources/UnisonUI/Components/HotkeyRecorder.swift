@@ -28,9 +28,11 @@ public struct HotkeyRecorder: View {
     }
 
     @SwiftUI.State private var pulsing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public var body: some View {
-        Button {
+        let canPulse = isRecording && !reduceMotion
+        return Button {
             isRecording = true
             onStartRecording()
         } label: {
@@ -57,17 +59,19 @@ public struct HotkeyRecorder: View {
                             lineWidth: 0.5
                         )
                 )
-                .opacity(isRecording && pulsing ? 0.55 : 1.0)
+                .opacity(canPulse && pulsing ? 0.55 : 1.0)
                 .animation(
-                    isRecording
+                    canPulse
                         ? .easeInOut(duration: 1.2).repeatForever(autoreverses: true)
                         : .default,
                     value: pulsing
                 )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(isRecording ? "Запись горячей клавиши" : "Горячая клавиша: \(label)")
+        .help(isRecording ? "Нажмите сочетание клавиш" : label)
         .onChange(of: isRecording) { _, new in
-            pulsing = new
+            pulsing = new && !reduceMotion
         }
     }
 

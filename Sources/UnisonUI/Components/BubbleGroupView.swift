@@ -8,6 +8,8 @@ public struct BubbleGroupView: View {
     public let groups: [BubbleGroup]
     public let scale: Double
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     public init(groups: [BubbleGroup], scale: Double = 1.0) {
         self.groups = groups
         self.scale = scale
@@ -30,14 +32,24 @@ public struct BubbleGroupView: View {
                 .padding(.top, offset == 0
                     ? 0
                     : (item.isGroupBoundary ? 14 * scale : 3 * scale))
-                .transition(.asymmetric(
-                    insertion: .opacity.combined(with: .scale(scale: 0.93))
-                        .animation(UnisonAnimations.bubbleIn),
-                    removal: .opacity.animation(.easeOut(duration: 0.7))
-                ))
+                .transition(bubbleTransition)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Insertion/removal transitions for bubbles. When Reduce Motion is
+    /// on, both directions are reduced to identity — bubbles pop in/out
+    /// without spring or scale.
+    private var bubbleTransition: AnyTransition {
+        if reduceMotion {
+            return .identity
+        }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .scale(scale: 0.93))
+                .animation(UnisonAnimations.bubbleIn),
+            removal: .opacity.animation(.easeOut(duration: 0.7))
+        )
     }
 
     private struct FlatBubble {

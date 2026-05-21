@@ -96,6 +96,8 @@ public struct LanguagePickerDropdown: View {
         // vibrant `.primary` for the selected row and the checkmark,
         // `.secondary` for the rest so the system can adapt contrast.
         return HStack(spacing: 9) {
+            // Decorative — the row's accessibility label combines the
+            // displayName and selection state below.
             FlagText(lang.flagEmoji)
             Text(lang.displayName)
                 .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
@@ -114,6 +116,9 @@ public struct LanguagePickerDropdown: View {
                 .fill(isKeyboardFocused ? UnisonColors.whiteAlpha(0.10) : Color.clear)
         )
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(isSelected ? "\(lang.displayName), выбрано" : lang.displayName)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private func pick(_ lang: Language) {

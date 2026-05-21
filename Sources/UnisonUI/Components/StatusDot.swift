@@ -27,19 +27,23 @@ public struct StatusDot: View {
     }
 
     @SwiftUI.State private var pulsing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public var body: some View {
-        Circle()
+        let shouldPulse = pulse && !reduceMotion
+        return Circle()
             .fill(color)
             .frame(width: size, height: size)
             .shadow(color: color.opacity(0.65), radius: size * 0.9)
-            .opacity(pulse && pulsing ? 0.5 : 1.0)
+            .opacity(shouldPulse && pulsing ? 0.5 : 1.0)
             .animation(
-                pulse ? UnisonAnimations.pulseAnimation : nil,
+                shouldPulse ? UnisonAnimations.pulseAnimation : nil,
                 value: pulsing
             )
-            .onAppear { if pulse { pulsing = true } }
-            .onChange(of: pulse) { _, new in pulsing = new }
+            .onAppear { if shouldPulse { pulsing = true } }
+            .onChange(of: pulse) { _, new in pulsing = new && !reduceMotion }
+            .accessibilityLabel(accessibilityLabelText)
+            .help(accessibilityLabelText)
     }
 
     private var color: Color {
@@ -48,6 +52,15 @@ public struct StatusDot: View {
         case .active: UnisonColors.active
         case .warn:  UnisonColors.warn
         case .error: UnisonColors.error
+        }
+    }
+
+    private var accessibilityLabelText: String {
+        switch state {
+        case .ready:  "Готов"
+        case .active: "Идёт перевод"
+        case .warn:   "Предупреждение"
+        case .error:  "Ошибка"
         }
     }
 }

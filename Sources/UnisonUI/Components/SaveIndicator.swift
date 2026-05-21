@@ -26,6 +26,9 @@ public struct SaveIndicator: View {
         }
         .opacity(isShown ? 1.0 : 0.0)
         .animation(.easeInOut(duration: 0.25), value: isShown)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(isShown ? "Сохранено" : "")
+        .accessibilityHidden(!isShown)
     }
 }
 

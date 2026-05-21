@@ -24,6 +24,7 @@ public struct TranscriptView: View {
     }
 
     @SwiftUI.State private var isSettingsOpen: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public var body: some View {
         ZStack {
@@ -66,9 +67,9 @@ public struct TranscriptView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .background(Color.clear)
-        .animation(UnisonAnimations.state, value: vm.isHidden)
-        .animation(UnisonAnimations.glassAppear, value: vm.showStopConfirmation)
-        .animation(UnisonAnimations.glassAppear, value: isSettingsOpen)
+        .animation(UnisonAnimations.state.reduceMotion(reduceMotion), value: vm.isHidden)
+        .animation(UnisonAnimations.glassAppear.reduceMotion(reduceMotion), value: vm.showStopConfirmation)
+        .animation(UnisonAnimations.glassAppear.reduceMotion(reduceMotion), value: isSettingsOpen)
     }
 
     // MARK: - Bubbles
@@ -113,7 +114,9 @@ public struct TranscriptView: View {
                         )
                     )
                     .alignmentGuide(.bottom) { d in d[.top] + 12 }
-                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
+                    .transition(reduceMotion
+                        ? .opacity
+                        : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
                     .zIndex(20)
                 }
             }
@@ -182,8 +185,11 @@ public struct TranscriptView: View {
             .padding(22)
             .frame(width: 340)
             .liquidGlass(cornerRadius: 18)
-            .scaleEffect(vm.showStopConfirmation ? 1.0 : 0.92)
-            .offset(y: vm.showStopConfirmation ? 0 : 8)
+            // Reduce Motion skips the scale + offset entrance — the
+            // modal still fades in via the outer `.transition(.opacity)`
+            // on the ZStack.
+            .scaleEffect(reduceMotion ? 1.0 : (vm.showStopConfirmation ? 1.0 : 0.92))
+            .offset(y: reduceMotion ? 0 : (vm.showStopConfirmation ? 0 : 8))
         }
     }
 }

@@ -115,11 +115,10 @@ public struct OnboardingView: View {
     }
 
     private var closeButton: some View {
-        IconButton(size: 26, cornerRadius: 7, action: onClose) {
+        IconButton(label: "Закрыть", size: 26, cornerRadius: 7, action: onClose) {
             Image(systemName: "xmark")
                 .font(.system(size: 11, weight: .medium))
         }
-        .accessibilityLabel("Закрыть")
     }
 
     // MARK: - Cards

@@ -55,10 +55,19 @@ public struct NeutralSlider: View {
         if let step = step {
             Slider(value: $value, in: range, step: step)
                 .tint(.white)
+                .help(helpText)
         } else {
             Slider(value: $value, in: range)
                 .tint(.white)
+                .help(helpText)
         }
+    }
+
+    /// Hover tooltip — fraction-of-range as a percentage so the
+    /// volume slider and the size slider both speak the same dialect.
+    private var helpText: String {
+        let fraction = Self.fraction(of: value, in: range)
+        return "\(Int((fraction * 100).rounded()))%"
     }
 
     // MARK: - Pure helpers (tested separately)

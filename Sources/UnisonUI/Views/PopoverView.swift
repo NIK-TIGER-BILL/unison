@@ -36,6 +36,8 @@ public struct PopoverView: View {
     /// space. Used to anchor the dropdown overlay below the bar.
     @SwiftUI.State private var langBarFrame: CGRect = .zero
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     public var body: some View {
         ZStack(alignment: .topLeading) {
             content
@@ -45,7 +47,9 @@ public struct PopoverView: View {
             if let side = openSide {
                 dropdownOverlay(for: side)
                     .zIndex(10)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                    .transition(reduceMotion
+                        ? .identity
+                        : .opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             }
         }
         .frame(width: PopoverLayout.width)
@@ -61,7 +65,7 @@ public struct PopoverView: View {
                     closeDropdown()
                 }
         )
-        .animation(UnisonAnimations.dropdown, value: openSide)
+        .animation(UnisonAnimations.dropdown.reduceMotion(reduceMotion), value: openSide)
     }
 
     // MARK: - Content
@@ -95,11 +99,10 @@ public struct PopoverView: View {
                 .tracking(-0.26)
                 .foregroundStyle(.primary)
             Spacer()
-            IconButton(action: onOpenSettings) {
+            IconButton(label: "Настройки", action: onOpenSettings) {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 12, weight: .regular))
             }
-            .accessibilityLabel("Настройки")
         }
     }
 
@@ -208,14 +211,14 @@ public struct PopoverView: View {
     // MARK: - Actions
 
     private func toggleSide(_ side: LanguageBar.Side) {
-        withAnimation(UnisonAnimations.dropdown) {
+        withAnimation(UnisonAnimations.dropdown.reduceMotion(reduceMotion)) {
             openSide = (openSide == side) ? nil : side
         }
     }
 
     private func closeDropdown() {
         if openSide != nil {
-            withAnimation(UnisonAnimations.dropdown) {
+            withAnimation(UnisonAnimations.dropdown.reduceMotion(reduceMotion)) {
                 openSide = nil
             }
         }

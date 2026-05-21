@@ -60,6 +60,8 @@ public struct SettingsView: View {
     /// whenever the VM bumps `lastSavedAt`.
     @SwiftUI.State private var saveIndicator = SaveIndicatorController()
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     enum DropdownKind: Hashable {
         case microphone
         case speaker
@@ -80,7 +82,9 @@ public struct SettingsView: View {
             if let kind = openDropdown {
                 dropdownOverlay(for: kind)
                     .zIndex(20)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                    .transition(reduceMotion
+                        ? .identity
+                        : .opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             }
         }
         .frame(width: SettingsLayout.windowWidth, height: SettingsLayout.windowHeight)
@@ -96,7 +100,7 @@ public struct SettingsView: View {
         .onChange(of: vm.lastSavedAt) { _, _ in
             saveIndicator.markSaved()
         }
-        .animation(UnisonAnimations.dropdown, value: openDropdown)
+        .animation(UnisonAnimations.dropdown.reduceMotion(reduceMotion), value: openDropdown)
     }
 
     // MARK: - Window chrome
@@ -363,10 +367,12 @@ public struct SettingsView: View {
                 get: { vm.autostart },
                 set: { vm.updateAutostart($0) }
             ))
+            .controlSize(.mini)
             Toggle("Скрывать меню при старте сессии", isOn: Binding(
                 get: { vm.hideMenuOnSession },
                 set: { vm.updateHideMenuOnSession($0) }
             ))
+            .controlSize(.mini)
         }
     }
 
@@ -408,7 +414,7 @@ public struct SettingsView: View {
     private func dropdownTrigger(kind: DropdownKind, label: String) -> some View {
         let isOpen = (openDropdown == kind)
         Button {
-            withAnimation(UnisonAnimations.dropdown) {
+            withAnimation(UnisonAnimations.dropdown.reduceMotion(reduceMotion)) {
                 openDropdown = isOpen ? nil : kind
             }
         } label: {
@@ -541,7 +547,7 @@ public struct SettingsView: View {
 
     private func closeDropdown() {
         if openDropdown != nil {
-            withAnimation(UnisonAnimations.dropdown) {
+            withAnimation(UnisonAnimations.dropdown.reduceMotion(reduceMotion)) {
                 openDropdown = nil
             }
         }

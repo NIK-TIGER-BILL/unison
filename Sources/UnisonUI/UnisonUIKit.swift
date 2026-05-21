@@ -76,9 +76,10 @@ import Foundation
 /// ### Buttons & links
 ///
 /// - **`IconButton`** — circular icon button using native
-///   `.buttonStyle(.glass)` + `.buttonBorderShape(.circle)`.
-///   `init(size: CGFloat = 28, cornerRadius: CGFloat = 7, action: @escaping () -> Void, @ViewBuilder icon: @escaping () -> Icon)`
-///   `// IconButton(action: open) { Image(systemName: "gear") }`
+///   `.buttonStyle(.glass)` + `.buttonBorderShape(.circle)`. `label`
+///   is the required VoiceOver / hover-tooltip string.
+///   `init(label: String, size: CGFloat = 28, cornerRadius: CGFloat = 7, action: @escaping () -> Void, @ViewBuilder icon: @escaping () -> Icon)`
+///   `// IconButton(label: "Настройки", action: open) { Image(systemName: "gear") }`
 ///
 /// - **`PrimaryGlassButton`** — full-width primary action using
 ///   `.buttonStyle(.glassProminent)`; `.standard` / `.destructive` switches
@@ -160,8 +161,10 @@ import Foundation
 ///   `// LanguagePickerDropdown(selection: $lang, onPick: pick)`
 ///
 /// - **`FlagText`** — fixed-size flag emoji that ignores parent foreground tint.
-///   `init(_ flag: String, size: CGFloat = 14)`
-///   `// FlagText(language.flagEmoji)`
+///   Pass `accessibilityName:` to expose the language name to VoiceOver
+///   when the flag is shown standalone (no adjacent name `Text`).
+///   `init(_ flag: String, size: CGFloat = 14, accessibilityName: String? = nil)`
+///   `// FlagText(language.flagEmoji, accessibilityName: language.displayName)`
 ///
 /// ### Transcript surfaces
 ///

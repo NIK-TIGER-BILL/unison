@@ -27,3 +27,18 @@ public enum UnisonAnimations {
     /// Dropdown open / close.
     public static let dropdown: Animation = .easeOut(duration: 0.16)
 }
+
+public extension Animation {
+    /// Returns `nil` when `reduceMotion` is on so callers can short-
+    /// circuit spring / repeat-forever animations for users who opted
+    /// into Reduce Motion. Pattern:
+    ///
+    /// ```swift
+    /// @Environment(\.accessibilityReduceMotion) var reduceMotion
+    /// // …
+    /// .animation(UnisonAnimations.bubbleIn.reduceMotion(reduceMotion), value: x)
+    /// ```
+    func reduceMotion(_ reduce: Bool) -> Animation? {
+        reduce ? nil : self
+    }
+}

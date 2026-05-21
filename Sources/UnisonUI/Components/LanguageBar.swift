@@ -97,6 +97,8 @@ public struct LanguageSideButton: View {
 
     @SwiftUI.State private var pressed = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     public var body: some View {
         Button(action: onTap) {
             VStack(alignment: alignment, spacing: 4) {
@@ -112,6 +114,9 @@ public struct LanguageSideButton: View {
                     .foregroundStyle(.tertiary)
                 HStack(spacing: 6) {
                     if alignment == .leading {
+                        // Decorative — VoiceOver reads the language
+                        // name from the composite accessibilityLabel
+                        // on the Button below.
                         FlagText(language.flagEmoji)
                     }
                     Text(language.displayName)
@@ -136,13 +141,15 @@ public struct LanguageSideButton: View {
             .scaleEffect(pressed ? 0.98 : 1.0)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(label): \(language.displayName)")
+        .help("\(label): \(language.displayName)")
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { _ in pressed = true }
                 .onEnded   { _ in pressed = false }
         )
-        .animation(UnisonAnimations.press, value: pressed)
-        .animation(UnisonAnimations.dropdown, value: isOpen)
+        .animation(UnisonAnimations.press.reduceMotion(reduceMotion), value: pressed)
+        .animation(UnisonAnimations.dropdown.reduceMotion(reduceMotion), value: isOpen)
     }
 }
 

@@ -22,6 +22,8 @@ public struct StepCard<Content: View>: View {
     public let status: Status
     public let content: () -> Content
 
+    @Environment(\.colorSchemeContrast) private var contrast
+
     public init(
         title: String,
         icon: Image,
@@ -49,12 +51,13 @@ public struct StepCard<Content: View>: View {
                         .fill(iconBackground)
                         .overlay(
                             ConcentricRectangle()
-                                .stroke(iconBorder, lineWidth: 0.5)
+                                .stroke(iconBorder, lineWidth: borderWidth)
                         )
                         .frame(width: 36, height: 36)
                     icon
                         .font(.system(size: 18, weight: .regular))
                         .foregroundStyle(iconColor)
+                        .accessibilityLabel(title)
                 }
                 // HIG Materials: vibrant `.primary` for the card title;
                 // the icon glyph keeps its semantic colour (green when
@@ -67,6 +70,7 @@ public struct StepCard<Content: View>: View {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 16))
                         .foregroundStyle(UnisonColors.ready)
+                        .accessibilityLabel("Готово")
                 }
             }
             if status != .done {
@@ -79,13 +83,17 @@ public struct StepCard<Content: View>: View {
         .background(cardBackground)
         .overlay(
             ConcentricRectangle()
-                .stroke(cardBorder, lineWidth: 0.5)
+                .stroke(cardBorder, lineWidth: borderWidth)
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         // Declare the card's container shape so nested
         // `ConcentricRectangle`s (icon plaque, inner buttons) can
         // pick their radius from the parent automatically.
         .containerShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var borderWidth: CGFloat {
+        contrast == .increased ? 1.0 : 0.5
     }
 
     private var iconBackground: Color {
@@ -97,10 +105,11 @@ public struct StepCard<Content: View>: View {
     }
 
     private var iconBorder: Color {
+        let boost: Double = contrast == .increased ? 1.8 : 1.0
         switch status {
-        case .done:  UnisonColors.ready.opacity(0.35)
-        case .error: UnisonColors.error.opacity(0.32)
-        default:     UnisonColors.whiteAlpha(0.08)
+        case .done:  return UnisonColors.ready.opacity(min(1.0, 0.35 * boost))
+        case .error: return UnisonColors.error.opacity(min(1.0, 0.32 * boost))
+        default:     return UnisonColors.whiteAlpha(min(1.0, 0.08 * boost * 1.5))
         }
     }
 
@@ -121,10 +130,11 @@ public struct StepCard<Content: View>: View {
     }
 
     private var cardBorder: Color {
+        let boost: Double = contrast == .increased ? 2.5 : 1.0
         switch status {
-        case .done:  UnisonColors.ready.opacity(0.18)
-        case .error: UnisonColors.error.opacity(0.28)
-        default:     UnisonColors.whiteAlpha(0.06)
+        case .done:  return UnisonColors.ready.opacity(min(1.0, 0.18 * boost))
+        case .error: return UnisonColors.error.opacity(min(1.0, 0.28 * boost))
+        default:     return UnisonColors.whiteAlpha(min(1.0, 0.06 * boost))
         }
     }
 }

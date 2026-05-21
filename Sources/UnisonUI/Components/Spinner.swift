@@ -23,6 +23,7 @@ public struct Spinner: View {
     }
 
     @SwiftUI.State private var angle: Double = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public var body: some View {
         Circle()
@@ -31,9 +32,11 @@ public struct Spinner: View {
             .frame(width: size, height: size)
             .rotationEffect(.degrees(angle))
             .onAppear {
+                guard !reduceMotion else { return }
                 withAnimation(.linear(duration: 0.85).repeatForever(autoreverses: false)) {
                     angle = 360
                 }
             }
+            .accessibilityLabel("Загрузка")
     }
 }

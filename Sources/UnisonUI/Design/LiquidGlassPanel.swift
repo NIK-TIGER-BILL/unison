@@ -12,6 +12,10 @@ import SwiftUI
 /// system `.identity` glass (effectively flat) so motion-sensitive
 /// users get a clean, opaque surface.
 ///
+/// Respects `\.colorSchemeContrast`: when Increase Contrast is on, the
+/// modifier draws a stronger hairline border on top of the system
+/// glass so panel edges remain visible against busy backgrounds.
+///
 /// Usage:
 /// ```swift
 /// VStack { … }
@@ -21,17 +25,26 @@ public struct LiquidGlassPanel: ViewModifier {
     public let cornerRadius: CGFloat
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     public init(cornerRadius: CGFloat) {
         self.cornerRadius = cornerRadius
     }
 
     public func body(content: Content) -> some View {
-        content
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let isHighContrast = contrast == .increased
+        return content
             .glassEffect(
                 reduceTransparency ? .identity : .regular,
-                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                in: shape
             )
+            .overlay {
+                if isHighContrast {
+                    shape
+                        .strokeBorder(UnisonColors.whiteAlpha(0.30), lineWidth: 1.5)
+                }
+            }
     }
 }
 
