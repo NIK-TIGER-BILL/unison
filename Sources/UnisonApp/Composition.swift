@@ -14,14 +14,19 @@ public final class Composition {
     public let settingsVM: SettingsViewModel
     public let transcriptVM: TranscriptViewModel
     public let permissions: MacPermissions
-    public let installer: BundledBlackHoleInstaller
+    public let installer: any BlackHoleInstaller
     public let keychain: MacKeychain
     private let settingsStore = SettingsStore()
 
     public init() {
         self.registry = CoreAudioDeviceRegistry()
         self.permissions = MacPermissions()
-        self.installer = BundledBlackHoleInstaller()
+        // UI-test escape hatch: when `UNISON_DEV_MODE=1` is set (or the
+        // bundled `.pkg` resources are missing), swap the real
+        // BlackHole installer for an in-process mock that succeeds
+        // after a short delay. This lets us iterate on the onboarding
+        // flow without actually shipping the installer payload.
+        self.installer = Self.makeInstaller()
         self.keychain = MacKeychain()
 
         let kc = self.keychain
@@ -92,6 +97,43 @@ public final class Composition {
         self.transcriptVM.onOriginalVolumeChanged = { volume in
             settingsVMRef.setOriginalMixVolume(volume)
         }
+    }
+}
+
+extension Composition {
+    /// Pick a `BlackHoleInstaller`:
+    /// - `UNISON_DEV_MODE=1`: always use `MockBlackHoleInstaller`.
+    /// - Otherwise: use `BundledBlackHoleInstaller`. If the bundled
+    ///   `.pkg` resources are missing we log a warning but still hand
+    ///   back the real installer (the user will see the real error
+    ///   message if they try to install).
+    static func makeInstaller() -> any BlackHoleInstaller {
+        let env = ProcessInfo.processInfo.environment
+        if env["UNISON_DEV_MODE"] == "1" {
+            print("[Unison] UNISON_DEV_MODE=1 — using MockBlackHoleInstaller")
+            return MockBlackHoleInstaller()
+        }
+        let real = BundledBlackHoleInstaller()
+        // Warn if the bundle doesn't ship the pkgs so a fresh contributor
+        // running `swift run Unison` understands why install fails.
+        if Bundle.main.url(forResource: "BlackHole2ch", withExtension: "pkg") == nil {
+            print("[Unison] warning: BlackHole2ch.pkg not bundled. Run with UNISON_DEV_MODE=1 for a mock installer.")
+        }
+        return real
+    }
+}
+
+/// Development stand-in for `BundledBlackHoleInstaller`. Reports
+/// success after a short delay so the UI flow can be exercised end-to-
+/// end without root prompts or actual driver installation.
+final class MockBlackHoleInstaller: BlackHoleInstaller, @unchecked Sendable {
+    private var installed: Bool = false
+
+    func is2chInstalled() -> Bool { installed }
+    func is16chInstalled() -> Bool { installed }
+    func runBundledInstaller() async throws {
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        installed = true
     }
 }
 

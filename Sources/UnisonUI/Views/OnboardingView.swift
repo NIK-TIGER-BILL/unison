@@ -113,7 +113,9 @@ public struct OnboardingView: View {
         }
     }
 
-    /// 56×56 rounded-glass plate containing a 32px stroked Unison logo.
+    /// 56×56 rounded-glass plate containing a 32pt stroked Unison logo.
+    /// Stroke width is scaled to the rendered shape, mirroring the HTML
+    /// `stroke-width="12"` inside a `256×256` viewBox (so 32pt → 1.5pt).
     private var logoPlate: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -126,7 +128,7 @@ public struct OnboardingView: View {
             UnisonLogoShape()
                 .stroke(
                     Color.white,
-                    style: StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round)
+                    style: StrokeStyle(lineWidth: 32 * 12 / 256, lineCap: .round, lineJoin: .round)
                 )
                 .frame(width: 32, height: 32)
         }

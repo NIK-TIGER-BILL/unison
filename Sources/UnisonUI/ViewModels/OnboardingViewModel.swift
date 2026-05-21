@@ -227,6 +227,14 @@ public final class OnboardingViewModel {
         }
     }
 
+    /// Snapshot-only helper to force a step into a specific UI state.
+    /// Production code drives `status` through the install/permission/
+    /// keychain flows; previews use this to render the spinner / error
+    /// rows without actually running async work.
+    public func setStatus(_ value: OnboardingStepStatus, for kind: OnboardingStepKind) {
+        status[kind] = value
+    }
+
     /// Returns the deep-link URL to the relevant System Settings pane
     /// for the given step. Currently only the microphone error has a
     /// deep link. Returns `nil` for steps without an associated URL.

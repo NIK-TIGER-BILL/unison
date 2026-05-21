@@ -12,6 +12,10 @@ let package = Package(
         .library(name: "UnisonUI", targets: ["UnisonUI"]),
         .executable(name: "Unison", targets: ["UnisonApp"]),
     ],
+    // Note: swift-snapshot-testing requires XCTest, which is not
+    // available on Command Line Tools-only setups. We ship our own
+    // tiny image-snapshot helper (`Tests/UnisonUITests/SnapshotConfig.swift`)
+    // that uses CGImage diffs and Swift Testing — no external deps.
     targets: [
         .target(name: "UnisonDomain"),
         .target(name: "UnisonTranslation", dependencies: ["UnisonDomain"]),
@@ -27,5 +31,12 @@ let package = Package(
         .testTarget(name: "UnisonAudioTests", dependencies: ["UnisonAudio"],
                     resources: [.copy("Fixtures")]),
         .testTarget(name: "UnisonSystemTests", dependencies: ["UnisonSystem"]),
+        .testTarget(
+            name: "UnisonUITests",
+            dependencies: [
+                "UnisonUI",
+                "UnisonDomain",
+            ]
+        ),
     ]
 )

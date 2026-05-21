@@ -18,10 +18,16 @@ public enum PopoverPrimaryIcon: Sendable {
 @MainActor
 @Observable
 public final class PopoverViewModel {
-    private let orchestrator: TranslationOrchestrator
+    private let orchestrator: TranslationOrchestrator?
     private let permissions: any PermissionsService
     private let deviceRegistry: any AudioDeviceRegistry
     public var settings: Settings
+
+    /// Test-only override for the session state. When the VM is
+    /// constructed via `previewing(...)` the state is sourced from this
+    /// property instead of an orchestrator. Production code never
+    /// touches this — `orchestrator.state` always wins when it exists.
+    public var previewState: SessionState = .idle
 
     public init(
         orchestrator: TranslationOrchestrator,
@@ -35,7 +41,42 @@ public final class PopoverViewModel {
         self.settings = settings
     }
 
-    public var state: SessionState { orchestrator.state }
+    /// Private init used by `previewing(...)` for snapshot tests — no
+    /// orchestrator, state driven by `previewState`. Marked
+    /// `nonisolated(unsafe)` is unnecessary because the factory hops
+    /// onto the MainActor anyway.
+    private init(
+        permissions: any PermissionsService,
+        deviceRegistry: any AudioDeviceRegistry,
+        settings: Settings,
+        previewState: SessionState
+    ) {
+        self.orchestrator = nil
+        self.permissions = permissions
+        self.deviceRegistry = deviceRegistry
+        self.settings = settings
+        self.previewState = previewState
+    }
+
+    /// Factory for snapshot/preview use. Skips the orchestrator entirely
+    /// so the VM can be constructed without spinning up the full audio
+    /// stack. Mirrors what `Composition.swift` builds in production but
+    /// substitutes the `state` source for an immutable override.
+    public static func previewing(
+        settings: Settings = .default,
+        state: SessionState = .idle,
+        permissions: any PermissionsService,
+        deviceRegistry: any AudioDeviceRegistry
+    ) -> PopoverViewModel {
+        PopoverViewModel(
+            permissions: permissions,
+            deviceRegistry: deviceRegistry,
+            settings: settings,
+            previewState: state
+        )
+    }
+
+    public var state: SessionState { orchestrator?.state ?? previewState }
 
     public var languagePairDisplay: String {
         let mine = settings.languagePair.mine
@@ -44,7 +85,7 @@ public final class PopoverViewModel {
     }
 
     public var runningTimeSeconds: TimeInterval {
-        if case .translating(_, let startedAt) = orchestrator.state {
+        if case .translating(_, let startedAt) = state {
             return Date().timeIntervalSince(startedAt)
         }
         return 0
@@ -84,8 +125,8 @@ public final class PopoverViewModel {
     /// - `.warn` when the language pair is invalid
     /// - `.ready` otherwise
     public var statusKind: StatusKind {
-        if case .error = orchestrator.state { return .error }
-        if orchestrator.state.isActive { return .active }
+        if case .error = state { return .error }
+        if state.isActive { return .active }
         if !isLanguagePairValid { return .warn }
         return .ready
     }
@@ -101,12 +142,12 @@ public final class PopoverViewModel {
 
     /// Title for the primary action button.
     public var primaryButtonTitle: String {
-        orchestrator.state.isActive ? "Остановить" : "Начать перевод"
+        state.isActive ? "Остановить" : "Начать перевод"
     }
 
     /// Icon for the primary action button.
     public var primaryButtonIcon: PopoverPrimaryIcon {
-        orchestrator.state.isActive ? .stop : .play
+        state.isActive ? .stop : .play
     }
 
     public var startBlockedReason: StartBlockedReason? {
@@ -124,11 +165,11 @@ public final class PopoverViewModel {
     }
 
     public func start() async {
-        await orchestrator.start(mode: settings.sessionMode, languages: settings.languagePair, settings: settings)
+        await orchestrator?.start(mode: settings.sessionMode, languages: settings.languagePair, settings: settings)
     }
 
     public func stop() async {
-        await orchestrator.stop()
+        await orchestrator?.stop()
     }
 
     /// Toggle between Call and Listen modes. Convenience for the view.

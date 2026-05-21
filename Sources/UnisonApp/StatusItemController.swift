@@ -58,6 +58,11 @@ public final class StatusItemController {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.popover = NSPopover()
         popover.behavior = .transient
+        // Force the popover's container into dark appearance so the
+        // SwiftUI `.liquidGlass(...)` panel doesn't sit on top of the
+        // system's white vibrancy backdrop (which produced a
+        // "window in window" double-chrome effect in earlier builds).
+        popover.appearance = NSAppearance(named: .vibrantDark)
         // 340pt width matches the redesigned PopoverView (DESIGN §4.3).
         // Height comes from the SwiftUI ideal size — we enable
         // `preferredContentSize` so the popover grows when the dropdown

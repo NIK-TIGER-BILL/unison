@@ -109,14 +109,22 @@ public final class TranscriptViewModel {
     public func exportAsText() -> String { store.exportAsText() }
 
     /// Seconds since the orchestrator transitioned to `.translating`. Zero
-    /// while idle / connecting / errored.
+    /// while idle / connecting / errored. In snapshot/preview mode the VM
+    /// is constructed without an orchestrator; callers can set
+    /// `previewElapsedSeconds` to drive the pill timer artificially.
     public var elapsedSeconds: TimeInterval {
+        if let override = previewElapsedSeconds { return override }
         guard let orch = orchestrator,
               case .translating(_, let startedAt) = orch.state else {
             return 0
         }
         return nowProvider().timeIntervalSince(startedAt)
     }
+
+    /// Snapshot-only override for the pill's elapsed-seconds label.
+    /// Bypassed entirely in production — the orchestrator's
+    /// `.translating(_, startedAt)` always wins.
+    public var previewElapsedSeconds: TimeInterval?
 
     /// `mm:ss` formatted version of `elapsedSeconds`. Hosts typically wrap
     /// this in `TimelineView(.periodic(...))` so the label ticks without
