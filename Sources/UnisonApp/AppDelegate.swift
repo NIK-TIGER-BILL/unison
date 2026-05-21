@@ -78,6 +78,29 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         observeOrchestratorState()
+
+        // `UNISON_FORCE_STATE` overrides for the Tart VM screenshot
+        // harness. Production launches never set this env var.
+        applyForceStateOverrides()
+    }
+
+    /// Honor `UNISON_FORCE_STATE` so the screenshot harness can land
+    /// the app on a specific surface without driving the UI manually:
+    /// - `transcript-demo` → pop the transcript window forward (the
+    ///   composition layer has already seeded the bubbles).
+    /// - `settings-open` → open the Settings window immediately.
+    /// - `onboarding-done` → no extra work here; the onboarding gate
+    ///   is already cleared by the composition factories.
+    private func applyForceStateOverrides() {
+        guard let force = UnisonForceState.current else { return }
+        switch force {
+        case .transcriptDemo:
+            transcriptWindow.show()
+        case .settingsOpen:
+            settingsWindow.show()
+        case .onboardingDone:
+            break
+        }
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
