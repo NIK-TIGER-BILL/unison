@@ -69,43 +69,9 @@ public struct OnboardingView: View {
             footer
         }
         .padding(20)
-        .background(panelBackground)
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .strokeBorder(UnisonColors.whiteAlpha(0.13), lineWidth: 0.5)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .shadow(color: Color.black.opacity(0.55), radius: 24, x: 0, y: 28)
-    }
-
-    /// Layered background that approximates the design's
-    /// `linear-gradient + ::before + ::after` stack: white wash, top
-    /// specular highlight. The Aurora itself provides the colour
-    /// underneath.
-    @ViewBuilder
-    private var panelBackground: some View {
-        ZStack {
-            // 1. Base white-glass wash (top → bottom).
-            LinearGradient(
-                colors: [
-                    UnisonColors.whiteAlpha(0.08),
-                    UnisonColors.whiteAlpha(0.02),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            // 2. Top specular highlight.
-            LinearGradient(
-                colors: [
-                    UnisonColors.whiteAlpha(0.16),
-                    .clear,
-                ],
-                startPoint: .top,
-                endPoint: .center
-            )
-            .blendMode(.screen)
-        }
+        // Outer window: Apple's native Liquid Glass. Inner cards stay
+        // flat (content layer) so we don't nest glass-on-glass.
+        .liquidGlass(cornerRadius: 22)
     }
 
     // MARK: - Header

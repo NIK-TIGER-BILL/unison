@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// Small bordered button used inline in Settings rows.
-/// Two variants per DESIGN.md §5.16:
-/// - `.base`: translucent white-on-glass.
-/// - `.primary`: brighter white-filled.
+/// Small bordered button used inline in Settings rows. Two variants
+/// per DESIGN.md §5.16:
+/// - `.base` — native `.buttonStyle(.glass)` (translucent, secondary).
+/// - `.primary` — native `.buttonStyle(.glassProminent)` (brighter).
 public struct InlineButton: View {
     public enum Variant: Equatable, Sendable {
         case base
@@ -30,10 +30,23 @@ public struct InlineButton: View {
         self.action = action
     }
 
-    @Environment(\.isEnabled) private var isEnabled
-    @SwiftUI.State private var hovering = false
-
+    @ViewBuilder
     public var body: some View {
+        switch variant {
+        case .base:
+            label
+                .buttonStyle(.glass)
+                .controlSize(.small)
+                .disabled(isLoading)
+        case .primary:
+            label
+                .buttonStyle(.glassProminent)
+                .controlSize(.small)
+                .disabled(isLoading)
+        }
+    }
+
+    private var label: Button<some View> {
         Button(action: action) {
             HStack(spacing: 5) {
                 if isLoading {
@@ -45,42 +58,6 @@ public struct InlineButton: View {
                 Text(title)
                     .font(.system(size: 11, weight: .medium))
             }
-            .padding(.vertical, 4)
-            .padding(.horizontal, 9)
-            .foregroundStyle(textColor)
-            .background(backgroundColor)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(borderColor, lineWidth: 0.5)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .opacity(isEnabled ? 1.0 : 0.45)
-        }
-        .buttonStyle(.plain)
-        .disabled(isLoading)
-        .onHover { hovering = $0 }
-        .animation(UnisonAnimations.hover, value: hovering)
-    }
-
-    private var textColor: Color {
-        switch variant {
-        case .base:    UnisonColors.whiteAlpha(0.85)
-        case .primary: .white
-        }
-    }
-
-    private var backgroundColor: Color {
-        switch variant {
-        case .base:    UnisonColors.whiteAlpha(hovering ? 0.12 : 0.06)
-        case .primary: UnisonColors.whiteAlpha(hovering ? 0.22 : 0.16)
-        }
-    }
-
-    private var borderColor: Color {
-        switch variant {
-        case .base:    UnisonColors.whiteAlpha(0.10)
-        case .primary: UnisonColors.whiteAlpha(0.28)
         }
     }
 }
-

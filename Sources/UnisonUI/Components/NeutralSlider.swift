@@ -1,9 +1,14 @@
 import SwiftUI
 
-/// T2 vertical-handle slider. Neutral white-on-glass treatment, no system
-/// blue. Track is 6pt tall, handle is a 4×18 white capsule that grows to
-/// 20pt on hover. Fill brightness scales with value (`0.12 → 0.85`).
-/// DESIGN.md §5.13.
+/// Native SwiftUI `Slider` with a neutral white tint to match the
+/// Unison palette (no system accent blue). On macOS 26 the system
+/// supplies Liquid Glass styling — track, handle, hover, focus.
+///
+/// The original Unison "T2" custom slider rendered a 6pt track with a
+/// 4×18 white capsule handle. We now defer to Apple's native control
+/// and only override the tint. Two pure helpers — `fraction(of:in:)`
+/// and `fillOpacity(for:)` — are kept on the type because tests and a
+/// few callers depend on them.
 public struct NeutralSlider: View {
     @Binding public var value: Double
     public let range: ClosedRange<Double>
@@ -25,8 +30,6 @@ public struct NeutralSlider: View {
         self.trailingLabel = trailingLabel
     }
 
-    @SwiftUI.State private var hovering = false
-
     public var body: some View {
         HStack(spacing: 10) {
             if let leading = leadingLabel {
@@ -45,50 +48,15 @@ public struct NeutralSlider: View {
         }
     }
 
+    @ViewBuilder
     private var sliderBody: some View {
-        GeometryReader { geo in
-            let trackWidth = geo.size.width
-            let fraction = Self.fraction(of: value, in: range)
-            let opacity = Self.fillOpacity(for: fraction)
-            let handleX = trackWidth * fraction
-            ZStack(alignment: .leading) {
-                // Right portion (unfilled).
-                Capsule()
-                    .fill(UnisonColors.whiteAlpha(0.10))
-                    .frame(height: 6)
-                // Left portion (fill, brightness derived from fraction).
-                Capsule()
-                    .fill(UnisonColors.whiteAlpha(opacity))
-                    .frame(width: handleX, height: 6)
-                // Vertical handle.
-                Capsule()
-                    .fill(LinearGradient(
-                        colors: [.white, Color(red: 221 / 255, green: 221 / 255, blue: 221 / 255)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ))
-                    .frame(width: 4, height: hovering ? 20 : 18)
-                    .shadow(color: .black.opacity(0.55), radius: hovering ? 3 : 2, x: 0, y: 2)
-                    .offset(x: max(0, min(handleX - 2, trackWidth - 4)))
-                    .animation(.easeOut(duration: 0.14), value: hovering)
-            }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { drag in
-                        let f = max(0.0, min(1.0, drag.location.x / trackWidth))
-                        let raw = range.lowerBound + Double(f) * (range.upperBound - range.lowerBound)
-                        if let step = step {
-                            let stepped = (raw / step).rounded() * step
-                            value = min(range.upperBound, max(range.lowerBound, stepped))
-                        } else {
-                            value = min(range.upperBound, max(range.lowerBound, raw))
-                        }
-                    }
-            )
-            .onHover { hovering = $0 }
+        if let step = step {
+            Slider(value: $value, in: range, step: step)
+                .tint(.white)
+        } else {
+            Slider(value: $value, in: range)
+                .tint(.white)
         }
-        .frame(height: 22) // accommodates the 20pt hover handle + breathing room
     }
 
     // MARK: - Pure helpers (tested separately)
@@ -108,4 +76,3 @@ public struct NeutralSlider: View {
         return 0.12 + clamped * 0.73
     }
 }
-

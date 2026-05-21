@@ -38,8 +38,9 @@ import Foundation
 ///
 /// ## Design primitives
 ///
-/// - **`LiquidGlassPanel`** + `View.liquidGlass(cornerRadius:)` — canonical
-///   Aurora Liquid Glass material (Material blur + dark tint + conic rim).
+/// - **`LiquidGlassPanel`** + `View.liquidGlass(cornerRadius:)` — thin
+///   wrapper around Apple's native `glassEffect(.regular, in:)` (macOS 26+).
+///   Respects `\.accessibilityReduceTransparency`.
 /// - **`AuroraBackground`** + `View.auroraBackground()` — three-layer aurora
 ///   gradient used behind onboarding/settings/transcript windows.
 /// - **`UnisonLogoShape`** — `Shape` rendering the parametric Unison logo.
@@ -73,15 +74,19 @@ import Foundation
 ///
 /// ### Buttons & links
 ///
-/// - **`IconButton`** — transparent square icon button (28×28 default).
+/// - **`IconButton`** — circular icon button using native
+///   `.buttonStyle(.glass)` + `.buttonBorderShape(.circle)`.
 ///   `init(size: CGFloat = 28, cornerRadius: CGFloat = 7, action: @escaping () -> Void, @ViewBuilder icon: @escaping () -> Icon)`
 ///   `// IconButton(action: open) { Image(systemName: "gear") }`
 ///
-/// - **`PrimaryGlassButton`** — full-width primary action; `.standard` / `.destructive`.
+/// - **`PrimaryGlassButton`** — full-width primary action using
+///   `.buttonStyle(.glassProminent)`; `.standard` / `.destructive` switches
+///   the tint between neutral and Liquid-Glass-Red.
 ///   `init(title: String, icon: Image? = nil, variant: Variant = .standard, isLoading: Bool = false, action: @escaping () -> Void)`
 ///   `// PrimaryGlassButton(title: "Начать перевод", action: start)`
 ///
-/// - **`InlineButton`** — small bordered button in Settings rows; `.base` / `.primary`.
+/// - **`InlineButton`** — small Settings-row button; `.base` uses
+///   `.buttonStyle(.glass)`, `.primary` uses `.buttonStyle(.glassProminent)`.
 ///   `init(_ title: String, icon: Image? = nil, variant: Variant = .base, isLoading: Bool = false, action: @escaping () -> Void)`
 ///   `// InlineButton("Переустановить", icon: Image(systemName: "arrow.clockwise"), action: reinstall)`
 ///
@@ -95,11 +100,15 @@ import Foundation
 ///   `init(selection: Binding<SessionMode>, segments: [Segment])`
 ///   `// SegmentedToggle(selection: $mode)`
 ///
-/// - **`PillToggle`** — pill on/off switch (34×19).
-///   `init(isOn: Binding<Bool>)`
-///   `// PillToggle(isOn: $autostart)`
+/// - **Native `Toggle`** with `.toggleStyle(.switch)` — on/off switches
+///   in Settings. macOS 26 supplies Liquid Glass styling automatically;
+///   we deleted the custom `PillToggle` in favour of the system control.
+///   `// Toggle("", isOn: $autostart).labelsHidden().toggleStyle(.switch)`
 ///
-/// - **`NeutralSlider`** — vertical-handle slider (no system blue).
+/// - **`NeutralSlider`** — thin wrapper around native `Slider` with a
+///   white tint (no system accent blue). The two pure helpers
+///   `fraction(of:in:)` and `fillOpacity(for:)` remain on the type
+///   for downstream callers and unit tests.
 ///   `init(value: Binding<Double>, in range: ClosedRange<Double>, step: Double? = nil, leadingLabel: String? = nil, trailingLabel: String? = nil)`
 ///   `// NeutralSlider(value: $volume, in: 0...1)`
 ///

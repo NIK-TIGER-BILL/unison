@@ -1,9 +1,12 @@
-// swift-tools-version:6.0
+// swift-tools-version:6.2
 import PackageDescription
 
 let package = Package(
     name: "Unison",
-    platforms: [.macOS(.v14)],
+    // macOS 26 (Tahoe) baseline — native Liquid Glass APIs
+    // (`glassEffect`, `.buttonStyle(.glass)`, `GlassEffectContainer`) are
+    // the source of truth for the app's surface treatment. No backports.
+    platforms: [.macOS(.v26)],
     products: [
         .library(name: "UnisonDomain", targets: ["UnisonDomain"]),
         .library(name: "UnisonTranslation", targets: ["UnisonTranslation"]),

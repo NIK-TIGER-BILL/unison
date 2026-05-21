@@ -4,7 +4,12 @@ import SwiftUI
 /// Скрыть/Показать text button + stop icon. Draggable via the panel's
 /// host window (UnisonApp sets `isMovableByWindowBackground`).
 /// DESIGN.md §5.18.
+///
+/// Single Liquid Glass capsule — all internal controls sit on top
+/// of one glass surface (no nested glass). The pill itself uses
+/// Apple's native `.glassEffect(.regular, in: Capsule())`.
 public struct ControlPill: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     public let isActive: Bool
     public let elapsedLabel: String
     public let isHidden: Bool
@@ -78,7 +83,7 @@ public struct ControlPill: View {
             .padding(.trailing, 4)
         }
         .padding(.vertical, 6)
-        .liquidGlass(cornerRadius: 999)
+        .glassEffect(reduceTransparency ? .identity : .regular, in: Capsule())
     }
 
     private var sep: some View {

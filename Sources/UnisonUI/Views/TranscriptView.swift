@@ -133,50 +133,18 @@ public struct TranscriptView: View {
                     Button(action: { vm.cancelStop() }) {
                         Text("Отмена")
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(UnisonColors.whiteAlpha(0.85))
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .fill(UnisonColors.whiteAlpha(0.08))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                            .strokeBorder(UnisonColors.whiteAlpha(0.12), lineWidth: 0.5)
-                                    )
-                            )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.glass)
+                    .controlSize(.regular)
                     .keyboardShortcut(.cancelAction)
 
                     Button(action: { vm.confirmStop() }) {
                         Text("Остановить")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [
-                                                UnisonColors.coralTop.opacity(0.55),
-                                                UnisonColors.coralBottom.opacity(0.40),
-                                            ],
-                                            startPoint: .top,
-                                            endPoint: .bottom
-                                        )
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                            .strokeBorder(
-                                                UnisonColors.coralTop.opacity(0.45),
-                                                lineWidth: 0.5
-                                            )
-                                    )
-                                    .shadow(color: UnisonColors.coralBottom.opacity(0.32), radius: 4, x: 0, y: 4)
-                            )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.glassProminent)
+                    .tint(Color(red: 220 / 255, green: 60 / 255, blue: 90 / 255))
+                    .controlSize(.regular)
                     .keyboardShortcut(.defaultAction)
                 }
                 .padding(.top, 18)

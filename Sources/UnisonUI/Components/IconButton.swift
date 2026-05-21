@@ -1,8 +1,16 @@
 import SwiftUI
 
-/// Square, transparent icon button used for gear / settings / close / stop.
-/// 28×28 by default with a small hover background and 0.94 press scale.
-/// DESIGN.md §5.3, §5.7.
+/// Square / circular icon button used for gear / settings / close /
+/// stop. Uses Apple's native `.buttonStyle(.glass)` with a circular
+/// border shape on macOS 26 — the system supplies the hover / press /
+/// pressed-glow treatment automatically. DESIGN.md §5.3, §5.7.
+///
+/// `size` and `cornerRadius` are accepted for API compatibility but
+/// are mostly informational now — control size and border shape are
+/// picked from `controlSize(_:)` / `buttonBorderShape(_:)`. The
+/// `size` parameter still sets the icon's frame so existing call
+/// sites that depend on a specific tap target (e.g. 28×28) keep
+/// their pixel-accurate alignment.
 public struct IconButton<Icon: View>: View {
     public let size: CGFloat
     public let cornerRadius: CGFloat
@@ -21,31 +29,13 @@ public struct IconButton<Icon: View>: View {
         self.icon = icon
     }
 
-    @SwiftUI.State private var hovering = false
-    @SwiftUI.State private var pressed = false
-
     public var body: some View {
         Button(action: action) {
             icon()
                 .frame(width: size, height: size)
-                .foregroundStyle(hovering
-                    ? UnisonColors.whiteAlpha(0.95)
-                    : UnisonColors.whiteAlpha(0.55))
-                .background(
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(hovering ? UnisonColors.whiteAlpha(0.10) : .clear)
-                )
-                .scaleEffect(pressed ? 0.94 : 1.0)
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in pressed = true }
-                .onEnded   { _ in pressed = false }
-        )
-        .animation(UnisonAnimations.hover, value: hovering)
-        .animation(UnisonAnimations.press, value: pressed)
+        .buttonStyle(.glass)
+        .controlSize(.small)
+        .buttonBorderShape(.circle)
     }
 }
-

@@ -116,30 +116,9 @@ public struct SettingsView: View {
             }
             .scrollIndicators(.hidden)
         }
-        // Glass chrome: dark tint over the Aurora floor, hairline border,
-        // top specular highlight. Skips `.regularMaterial` so the Aurora
-        // gradients remain visible through the window — matches the design
-        // HTML's `backdrop-filter: blur` semi-transparent surface. The
-        // real `NSVisualEffectView` blur is wired by the window controller.
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color(red: 20 / 255, green: 22 / 255, blue: 30 / 255).opacity(0.55))
-                LinearGradient(
-                    colors: [UnisonColors.whiteAlpha(0.16), .clear],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .blendMode(.screen)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            }
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(UnisonColors.whiteAlpha(0.13), lineWidth: 0.5)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .shadow(color: Color.black.opacity(0.5), radius: 18, x: 0, y: 16)
+        // Native Liquid Glass — the system handles tint, specular
+        // highlight, border, and shadow. Rows inside stay flat.
+        .liquidGlass(cornerRadius: 14)
     }
 
     /// Custom title bar — the real `NSWindow` traffic lights live in
@@ -386,16 +365,22 @@ public struct SettingsView: View {
         Group {
             SectionHeader("Поведение")
             SettingsRow("Запускать при логине") {
-                PillToggle(isOn: Binding(
+                Toggle("", isOn: Binding(
                     get: { vm.autostart },
                     set: { vm.updateAutostart($0) }
                 ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
             }
             SettingsRow("Скрывать меню при старте сессии") {
-                PillToggle(isOn: Binding(
+                Toggle("", isOn: Binding(
                     get: { vm.hideMenuOnSession },
                     set: { vm.updateHideMenuOnSession($0) }
                 ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
             }
         }
     }

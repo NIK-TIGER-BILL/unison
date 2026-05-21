@@ -1,9 +1,12 @@
 import SwiftUI
 
-/// Full-width primary action button. Two variants:
-/// - `.standard` — white-glass gradient ("Начать перевод", "Готово").
-/// - `.destructive` — coral gradient for Stop ("Остановить перевод").
-/// DESIGN.md §5.4.
+/// Full-width primary action button. Native Liquid Glass on macOS 26:
+/// `.buttonStyle(.glassProminent)` for the primary surface; `.tint(...)`
+/// switches it to a destructive red. DESIGN.md §5.4.
+///
+/// Two variants:
+/// - `.standard` — neutral white-glass (Start translating, Done).
+/// - `.destructive` — coral-tinted (Stop translating).
 public struct PrimaryGlassButton: View {
     public enum Variant: Equatable, Sendable {
         case standard
@@ -30,10 +33,6 @@ public struct PrimaryGlassButton: View {
         self.action = action
     }
 
-    @Environment(\.isEnabled) private var isEnabled
-    @SwiftUI.State private var hovering = false
-    @SwiftUI.State private var pressed = false
-
     public var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
@@ -45,108 +44,23 @@ public struct PrimaryGlassButton: View {
                 }
                 Text(title)
                     .font(.system(size: 14, weight: .semibold))
-                    .shadow(color: .black.opacity(0.25), radius: 0, x: 0, y: 1)
             }
-            .foregroundStyle(textColor)
+            .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 13)
-            .padding(.horizontal, 14)
-            .background(
-                // Explicit RoundedRectangle filled with the gradient so
-                // the translucent stops survive the headless snapshot
-                // renderer (no aurora behind to multiply against).
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(backgroundGradient)
-            )
-            .overlay(alignment: .top) {
-                // `inset 0 1px 0 rgba(255,255,255,0.28)` — a 1pt-tall
-                // specular highlight along the top edge that gives the
-                // button its 3-dimensional "glass" feel.
-                Rectangle()
-                    .fill(UnisonColors.whiteAlpha(0.28))
-                    .frame(height: 1)
-                    .allowsHitTesting(false)
-            }
-            .overlay(
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .strokeBorder(borderColor, lineWidth: 0.5)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-            .shadow(
-                color: shadowColor,
-                radius: hovering ? 8 : 6,
-                x: 0,
-                y: hovering ? 6 : 4
-            )
-            .scaleEffect(pressed && isEnabled ? 0.98 : 1.0)
-            .opacity(isEnabled ? 1.0 : 0.55)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.glassProminent)
+        .tint(tint)
+        .controlSize(.large)
+        .buttonBorderShape(.roundedRectangle(radius: 13))
         .disabled(isLoading)
-        .onHover { hovering = $0 }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in pressed = true }
-                .onEnded   { _ in pressed = false }
-        )
-        .animation(UnisonAnimations.hover, value: hovering)
-        .animation(UnisonAnimations.press, value: pressed)
     }
 
-    private var textColor: Color {
-        isEnabled ? .white : UnisonColors.whiteAlpha(0.4)
-    }
-
-    private var borderColor: Color {
+    /// `nil` lets the system pick the neutral prominent material; a
+    /// coral tint flips the button to the destructive Liquid-Glass-Red.
+    private var tint: Color? {
         switch variant {
-        case .standard:
-            isEnabled ? UnisonColors.whiteAlpha(0.22) : UnisonColors.whiteAlpha(0.10)
-        case .destructive:
-            UnisonColors.coralTop.opacity(0.40)
+        case .standard:    nil
+        case .destructive: Color(red: 220 / 255, green: 60 / 255, blue: 90 / 255)
         }
     }
-
-    private var shadowColor: Color {
-        switch variant {
-        case .standard:
-            Color.black.opacity(hovering ? 0.35 : 0.28)
-        case .destructive:
-            UnisonColors.coralBottom.opacity(hovering ? 0.42 : 0.32)
-        }
-    }
-
-    /// Concrete `LinearGradient` (a `ShapeStyle`) so we can hand it to
-    /// `RoundedRectangle.fill(_:)` rather than `View.background(_:)`. The
-    /// explicit shape fill renders the translucent stops faithfully in
-    /// the headless snapshot renderer where `.background(LinearGradient)`
-    /// can collapse to a uniform tint.
-    private var backgroundGradient: LinearGradient {
-        switch variant {
-        case .standard:
-            LinearGradient(
-                colors: hovering
-                    ? [UnisonColors.whiteAlpha(0.30), UnisonColors.whiteAlpha(0.12)]
-                    : [UnisonColors.whiteAlpha(0.22), UnisonColors.whiteAlpha(0.08)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        case .destructive:
-            LinearGradient(
-                colors: hovering
-                    ? [
-                        // Brighter hover stops — slight tonal lift from base coral.
-                        Color(red: 1.0, green: 130 / 255, blue: 150 / 255).opacity(0.55),
-                        Color(red: 230 / 255, green: 75 / 255, blue: 105 / 255).opacity(0.38),
-                    ]
-                    : [
-                        UnisonColors.coralTop.opacity(0.42),
-                        UnisonColors.coralBottom.opacity(0.28),
-                    ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-    }
-
 }
-
