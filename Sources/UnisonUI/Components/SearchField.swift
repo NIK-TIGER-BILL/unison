@@ -31,14 +31,18 @@ public struct SearchField: View {
     @FocusState private var focused: Bool
 
     public var body: some View {
+        // HIG Materials: the dropdown sits on `.liquidGlass`. Vibrant
+        // `.primary` for the focused state and the typed text, with
+        // `.secondary` for the unfocused glyph — the system handles
+        // light/dark and Increase Contrast for both.
         HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
-                .foregroundStyle(UnisonColors.whiteAlpha(focused ? 0.78 : 0.45))
+                .foregroundStyle(focused ? .primary : .secondary)
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
-                .foregroundStyle(UnisonColors.whiteAlpha(0.95))
+                .foregroundStyle(.primary)
                 .focused($focused)
         }
         .padding(.vertical, 7)

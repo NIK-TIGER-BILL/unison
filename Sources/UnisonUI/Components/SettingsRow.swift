@@ -26,23 +26,26 @@ public struct SettingsRow<Trailing: View>: View {
     }
 
     public var body: some View {
+        // HIG Materials: vibrant `.primary` for the row title (full
+        // value text), `.secondary` for the icon and the hint copy
+        // beneath it. The system handles contrast on the Form glass.
         HStack(alignment: hint == nil ? .center : .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 9) {
                     if let icon = icon {
                         icon
                             .font(.system(size: 13, weight: .regular))
-                            .foregroundStyle(UnisonColors.whiteAlpha(0.55))
+                            .foregroundStyle(.secondary)
                             .frame(width: 13, height: 13)
                     }
                     Text(title)
                         .font(.system(size: 12.5))
-                        .foregroundStyle(UnisonColors.whiteAlpha(0.88))
+                        .foregroundStyle(.primary)
                 }
                 if let hint = hint {
                     Text(hint)
                         .font(.system(size: 11))
-                        .foregroundStyle(UnisonColors.whiteAlpha(0.45))
+                        .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .lineLimit(3)
                 }

@@ -87,10 +87,13 @@ public struct PopoverView: View {
     private var topRow: some View {
         HStack(spacing: 8) {
             StatusDot(state: vm.statusKind.dotState)
+            // HIG Materials: use vibrant `.primary` foreground so the
+            // system handles contrast across light/dark and Increase
+            // Contrast / Reduce Transparency on the glass background.
             Text("Unison")
                 .font(.system(size: 13, weight: .semibold))
                 .tracking(-0.26)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
             Spacer()
             IconButton(action: onOpenSettings) {
                 Image(systemName: "slider.horizontal.3")
@@ -163,7 +166,9 @@ public struct PopoverView: View {
             Text(vm.elapsedSecondsString)
                 .font(UnisonFonts.mono(11.5))
                 .tracking(0.92)
-                .foregroundStyle(UnisonColors.whiteAlpha(0.55))
+                // HIG Materials: vibrant `.secondary` keeps the mono
+                // timer subdued but legible over the glass panel.
+                .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .frame(maxWidth: .infinity)
         }

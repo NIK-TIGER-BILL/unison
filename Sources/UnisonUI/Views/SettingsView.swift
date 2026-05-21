@@ -129,10 +129,13 @@ public struct SettingsView: View {
         HStack(spacing: 8) {
             // Spacer to clear the native traffic lights (left ~74pt).
             Color.clear.frame(width: 64, height: 1)
+            // HIG Materials: vibrant `.primary` lets the system tune
+            // contrast across light/dark, Increase Contrast, and Reduce
+            // Transparency on top of the aurora-glass titlebar.
             Text("Unison · Настройки")
                 .font(.system(size: 12.5, weight: .medium))
                 .tracking(-0.06)
-                .foregroundStyle(UnisonColors.whiteAlpha(0.85))
+                .foregroundStyle(.primary)
             Spacer()
             SaveIndicator(isShown: Binding(
                 get: { saveIndicator.isShown },
@@ -177,16 +180,20 @@ public struct SettingsView: View {
                     Text("\(Int(vm.settings.originalMixVolume * 100))%")
                         .font(UnisonFonts.mono(11))
                         .tracking(0.44)
-                        .foregroundStyle(UnisonColors.whiteAlpha(0.55))
+                        // HIG Materials: vibrant `.secondary` for the
+                        // mono percentage trailing the slider.
+                        .foregroundStyle(.secondary)
                         .frame(width: 36, alignment: .trailing)
                         .monospacedDigit()
                 }
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Громкость оригинала")
+                    // HIG Materials: vibrant `.secondary` for hint copy
+                    // beneath a `LabeledContent` row.
                     Text("Тихий фон под переводом во время звонка.")
                         .font(.system(size: 11))
-                        .foregroundStyle(UnisonColors.whiteAlpha(0.45))
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -226,9 +233,10 @@ public struct SettingsView: View {
                 .frame(width: 220)
             }
             HStack(spacing: 6) {
+                // HIG Materials: vibrant `.secondary` for hint copy.
                 Text("Хранится в Keychain.")
                     .font(.system(size: 11))
-                    .foregroundStyle(UnisonColors.whiteAlpha(0.45))
+                    .foregroundStyle(.secondary)
                 MutedLink("Получить ключ") {
                     onOpenURL(SettingsLinks.openAIKeys)
                 }
@@ -307,9 +315,11 @@ public struct SettingsView: View {
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Виртуальные аудио-устройства")
+                    // HIG Materials: vibrant `.secondary` for hint copy
+                    // beneath a `LabeledContent` row.
                     Text("Нужны для перехвата звука с приложений и подачи перевода обратно.")
                         .font(.system(size: 11))
-                        .foregroundStyle(UnisonColors.whiteAlpha(0.45))
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -318,9 +328,12 @@ public struct SettingsView: View {
     private func blackHoleStatusRow(status: BlackHoleStatus) -> some View {
         HStack(spacing: 6) {
             StatusDot(state: statusDotState(for: status), size: 6)
+            // The StatusDot already encodes semantic state in colour;
+            // the trailing label is plain descriptive text, so vibrant
+            // `.secondary` is appropriate per HIG Materials.
             Text(statusLabel(for: status))
                 .font(.system(size: 12))
-                .foregroundStyle(UnisonColors.whiteAlpha(0.55))
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -363,12 +376,15 @@ public struct SettingsView: View {
         Section("О приложении") {
             LabeledContent("Версия") {
                 HStack(spacing: 4) {
+                    // HIG Materials: vibrant `.primary` for the version
+                    // number (full-strength value text) and `.secondary`
+                    // for the trailing build suffix.
                     Text("1.0.0")
                         .font(.system(size: 11.5, weight: .medium))
-                        .foregroundStyle(UnisonColors.whiteAlpha(0.88))
+                        .foregroundStyle(.primary)
                     Text("· build 42")
                         .font(.system(size: 11.5))
-                        .foregroundStyle(UnisonColors.whiteAlpha(0.55))
+                        .foregroundStyle(.secondary)
                 }
             }
             LabeledContent("Лицензия") {
@@ -397,16 +413,17 @@ public struct SettingsView: View {
             }
         } label: {
             HStack(spacing: 6) {
+                // HIG Materials: vibrant `.primary` keeps the trigger
+                // label legible whether the dropdown is open or closed;
+                // the chevron drops to `.secondary` for a softer accent.
                 Text(label)
                     .font(.system(size: 12))
-                    .foregroundStyle(isOpen ? .white : UnisonColors.whiteAlpha(0.92))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(isOpen
-                        ? UnisonColors.whiteAlpha(0.85)
-                        : UnisonColors.whiteAlpha(0.55))
+                    .foregroundStyle(isOpen ? .primary : .secondary)
                     .rotationEffect(.degrees(isOpen ? 180 : 0))
             }
             .padding(.vertical, 5)
@@ -578,9 +595,11 @@ private struct DeviceDropdown: View {
                 LazyVStack(spacing: 1) {
                     defaultRow
                     if filtered.isEmpty && !query.isEmpty {
+                        // HIG Materials: vibrant `.tertiary` for the
+                        // empty-state placeholder on the dropdown glass.
                         Text("Ничего не найдено")
                             .font(.system(size: 12))
-                            .foregroundStyle(UnisonColors.whiteAlpha(0.4))
+                            .foregroundStyle(.tertiary)
                             .padding(.vertical, 14)
                     } else {
                         ForEach(filtered, id: \.uid) { device in
@@ -603,18 +622,22 @@ private struct DeviceDropdown: View {
 
     private var defaultRow: some View {
         let isSelected = (selectedUID == nil)
+        // HIG Materials: dropdown rows sit on `.liquidGlass` — vibrant
+        // `.primary` for the active/selected row keeps the leading
+        // glyph and checkmark consistent with row text; `.secondary`
+        // for unselected reads as softer on the same surface.
         return HStack(spacing: 9) {
             Image(systemName: "circle.dotted")
                 .font(.system(size: 11))
-                .foregroundStyle(UnisonColors.whiteAlpha(0.55))
+                .foregroundStyle(.secondary)
             Text("По умолчанию")
                 .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? .white : UnisonColors.whiteAlpha(0.85))
+                .foregroundStyle(isSelected ? .primary : .secondary)
             Spacer(minLength: 0)
             if isSelected {
                 Image(systemName: "checkmark")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
         }
         .padding(.vertical, 7)
@@ -629,17 +652,19 @@ private struct DeviceDropdown: View {
 
     private func row(for device: AudioDevice) -> some View {
         let isSelected = device.uid == selectedUID
+        // HIG Materials: `.primary` for the selected row, `.secondary`
+        // for the rest — vibrancy adapts contrast on the glass surface.
         return HStack(spacing: 9) {
             Text(device.name)
                 .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? .white : UnisonColors.whiteAlpha(0.85))
+                .foregroundStyle(isSelected ? .primary : .secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
             if isSelected {
                 Image(systemName: "checkmark")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
         }
         .padding(.vertical, 7)

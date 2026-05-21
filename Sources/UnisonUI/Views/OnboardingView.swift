@@ -79,10 +79,13 @@ public struct OnboardingView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 14) {
             logoPlate
+            // HIG Materials: vibrant `.primary` for the onboarding
+            // title — the system handles contrast against the
+            // aurora-glass background.
             Text("Установка")
                 .font(.system(size: 22, weight: .light))
                 .tracking(-0.66)
-                .foregroundStyle(UnisonColors.pageFg)
+                .foregroundStyle(.primary)
             Spacer(minLength: 0)
             closeButton
         }
@@ -250,10 +253,12 @@ public struct OnboardingView: View {
 
     private var footer: some View {
         HStack(alignment: .center, spacing: 12) {
+            // HIG Materials: vibrant `.secondary` for the mono
+            // progress counter beneath the steps.
             Text(vm.progressLabel)
                 .font(UnisonFonts.mono(11))
                 .tracking(0.66)
-                .foregroundStyle(UnisonColors.whiteAlpha(0.5))
+                .foregroundStyle(.secondary)
             Spacer(minLength: 0)
             PrimaryGlassButton(
                 title: "Готово",
@@ -291,9 +296,11 @@ public struct OnboardingView: View {
         VStack(spacing: 10) {
             DashedDivider()
             HStack(spacing: 10) {
+                // HIG Materials: vibrant `.secondary` for inline hint
+                // copy next to the primary action button.
                 Text(hint)
                     .font(.system(size: 12.5))
-                    .foregroundStyle(UnisonColors.whiteAlpha(0.55))
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 compactPrimaryButton(

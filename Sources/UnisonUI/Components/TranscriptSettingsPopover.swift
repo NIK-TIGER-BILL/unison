@@ -15,16 +15,18 @@ public struct TranscriptSettingsPopover: View {
         VStack(alignment: .leading, spacing: 0) {
             Group {
                 groupHead(title: "Размер транскрипта", value: Self.sizeLabel(for: sizeIndex))
+                // HIG Materials: vibrant `.secondary` for the small
+                // letter labels that frame the size slider.
                 HStack(spacing: 10) {
                     Text("A")
                         .font(UnisonFonts.mono(10.5))
                         .tracking(0.4)
-                        .foregroundStyle(UnisonColors.whiteAlpha(0.45))
+                        .foregroundStyle(.secondary)
                     NeutralSlider(value: $sizeIndex, in: 0...4)
                         .frame(maxWidth: .infinity)
                     Text("A")
                         .font(.system(size: 13))
-                        .foregroundStyle(UnisonColors.whiteAlpha(0.45))
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.top, 6)
             }
@@ -44,15 +46,17 @@ public struct TranscriptSettingsPopover: View {
     }
 
     private func groupHead(title: String, value: String) -> some View {
+        // HIG Materials: vibrant `.primary` for the group title and
+        // `.secondary` for the trailing mono value.
         HStack {
             Text(title)
                 .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(UnisonColors.whiteAlpha(0.9))
+                .foregroundStyle(.primary)
             Spacer()
             Text(value)
                 .font(UnisonFonts.mono(11))
                 .tracking(0.4)
-                .foregroundStyle(UnisonColors.whiteAlpha(0.55))
+                .foregroundStyle(.secondary)
         }
     }
 

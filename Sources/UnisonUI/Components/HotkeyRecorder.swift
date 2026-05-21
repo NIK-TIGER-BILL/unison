@@ -34,10 +34,13 @@ public struct HotkeyRecorder: View {
             isRecording = true
             onStartRecording()
         } label: {
+            // HIG Materials: vibrant `.primary` while recording (the
+            // pulsing chip is the focal point); `.secondary` while idle
+            // so the chord reads as a quieter value.
             Text(label)
                 .font(UnisonFonts.mono(11))
                 .tracking(0.7)
-                .foregroundStyle(isRecording ? .white : UnisonColors.whiteAlpha(0.85))
+                .foregroundStyle(isRecording ? .primary : .secondary)
                 .padding(.vertical, 3)
                 .padding(.horizontal, 8)
                 .frame(minWidth: 60)

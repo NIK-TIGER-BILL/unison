@@ -15,6 +15,9 @@ public struct SecretInput: View {
     @FocusState private var fieldFocused: Bool
 
     public var body: some View {
+        // HIG Materials: vibrant `.primary` for the typed mono key
+        // text and `.secondary` for the inline "Показать / Скрыть"
+        // toggle label.
         HStack(spacing: 8) {
             Group {
                 if isVisible {
@@ -26,7 +29,7 @@ public struct SecretInput: View {
             .textFieldStyle(.plain)
             .font(UnisonFonts.mono(11.5))
             .tracking(0.4)
-            .foregroundStyle(UnisonColors.whiteAlpha(0.85))
+            .foregroundStyle(.primary)
             .focused($fieldFocused)
 
             Button {
@@ -34,7 +37,7 @@ public struct SecretInput: View {
             } label: {
                 Text(isVisible ? "Скрыть" : "Показать")
                     .font(.system(size: 10.5))
-                    .foregroundStyle(UnisonColors.whiteAlpha(0.5))
+                    .foregroundStyle(.secondary)
                     .padding(.vertical, 2)
                     .padding(.horizontal, 4)
                     .background(

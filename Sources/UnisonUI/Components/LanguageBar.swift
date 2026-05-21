@@ -62,9 +62,11 @@ public struct LanguageBar: View {
     }
 
     private var arrow: some View {
+        // HIG Materials: vibrant `.secondary` for the bidirectional
+        // swap icon between the two language sides.
         Image(systemName: "arrow.left.arrow.right")
             .font(.system(size: 13))
-            .foregroundStyle(UnisonColors.whiteAlpha(0.55))
+            .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
             .padding(.bottom, 2)
     }
@@ -98,24 +100,29 @@ public struct LanguageSideButton: View {
     public var body: some View {
         Button(action: onTap) {
             VStack(alignment: alignment, spacing: 4) {
+                // HIG Materials: the tracked-uppercase "Я ГОВОРЮ" /
+                // "СЛУШАЮ" caption is intentionally faded (`.tertiary`),
+                // the language name is the primary value text, and the
+                // chevron flips from `.tertiary` → `.primary` when its
+                // dropdown is open.
                 Text(label)
                     .font(.system(size: 9.5, weight: .medium))
                     .tracking(1.2)
                     .textCase(.uppercase)
-                    .foregroundStyle(UnisonColors.whiteAlpha(0.45))
+                    .foregroundStyle(.tertiary)
                 HStack(spacing: 6) {
                     if alignment == .leading {
                         FlagText(language.flagEmoji)
                     }
                     Text(language.displayName)
                         .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                     if alignment == .trailing {
                         FlagText(language.flagEmoji)
                     }
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(UnisonColors.whiteAlpha(isOpen ? 0.85 : 0.4))
+                        .foregroundStyle(isOpen ? .primary : .tertiary)
                         .rotationEffect(.degrees(isOpen ? 180 : 0))
                 }
             }

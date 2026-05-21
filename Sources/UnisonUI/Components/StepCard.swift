@@ -56,9 +56,12 @@ public struct StepCard<Content: View>: View {
                         .font(.system(size: 18, weight: .regular))
                         .foregroundStyle(iconColor)
                 }
+                // HIG Materials: vibrant `.primary` for the card title;
+                // the icon glyph keeps its semantic colour (green when
+                // done, coral on error, neutral otherwise).
                 Text(title)
                     .font(.system(size: 14.5, weight: .medium))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Spacer(minLength: 0)
                 if status == .done {
                     Image(systemName: "checkmark.circle.fill")

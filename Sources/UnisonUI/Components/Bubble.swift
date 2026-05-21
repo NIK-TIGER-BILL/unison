@@ -33,6 +33,14 @@ public struct Bubble: View {
     }
 
     public var body: some View {
+        // HIG Materials note: bubbles render on top of *flat tinted
+        // gradients* (blue tint for `me`, white tint for `peer`) — not
+        // on a Liquid Glass material. Vibrant `.primary` / `.secondary`
+        // foregrounds are designed for material surfaces; on a flat
+        // tinted background they would desaturate or shift unexpectedly.
+        // Keep explicit `Color.white` (and a half-opacity for the
+        // translated subtext) so the bubble text reads consistently
+        // regardless of light/dark or Increase Contrast settings.
         VStack(alignment: .leading, spacing: 5 * scale) {
             HStack(spacing: 6 * scale) {
                 Text(primary)

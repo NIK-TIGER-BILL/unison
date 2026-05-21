@@ -80,7 +80,10 @@ private struct SegmentButton: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
-            .foregroundStyle(isSelected ? Color.white : UnisonColors.whiteAlpha(0.55))
+            // HIG Materials: vibrant `.primary` for the active segment
+            // and `.secondary` for the inactive one — the system handles
+            // contrast across light/dark and Increase Contrast.
+            .foregroundStyle(isSelected ? .primary : .secondary)
             .background(selectedBackground)
             .overlay(selectedBorder)
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

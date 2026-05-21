@@ -46,15 +46,18 @@ public struct ControlPill: View {
         HStack(spacing: 6) {
             StatusDot(state: isActive ? .active : .ready, size: 6)
                 .padding(.leading, 8)
+            // HIG Materials: vibrant `.secondary` for the mono timer
+            // and other muted controls on the glass capsule; the active
+            // gear icon flips to `.primary` to signal selection.
             Text(elapsedLabel)
                 .font(UnisonFonts.mono(10.5))
                 .tracking(0.4)
-                .foregroundStyle(UnisonColors.whiteAlpha(0.7))
+                .foregroundStyle(.secondary)
             sep
             Button(action: onToggleSettings) {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 12))
-                    .foregroundStyle(isSettingsOpen ? .white : UnisonColors.whiteAlpha(0.65))
+                    .foregroundStyle(isSettingsOpen ? .primary : .secondary)
                     .frame(width: 24, height: 24)
                     .background(
                         Circle().fill(isSettingsOpen
@@ -66,7 +69,7 @@ public struct ControlPill: View {
             Button(action: onToggleHidden) {
                 Text(isHidden ? "Показать" : "Скрыть")
                     .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(UnisonColors.whiteAlpha(0.75))
+                    .foregroundStyle(.secondary)
                     .padding(.vertical, 5)
                     .padding(.horizontal, 11)
                     .background(
@@ -82,7 +85,7 @@ public struct ControlPill: View {
             Button(action: onStop) {
                 Image(systemName: "stop.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(UnisonColors.whiteAlpha(0.65))
+                    .foregroundStyle(.secondary)
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)

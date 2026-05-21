@@ -21,6 +21,9 @@ public struct MutedLink: View {
     }
 
     public var body: some View {
+        // HIG Materials: vibrant `.secondary` for the muted-link
+        // treatment — the system handles contrast for the trailing
+        // ↗ icon together with the label.
         Button(action: action) {
             HStack(spacing: 4) {
                 Text(title)
@@ -29,7 +32,7 @@ public struct MutedLink: View {
                     .font(.system(size: 9))
                     .opacity(0.7)
             }
-            .foregroundStyle(UnisonColors.whiteAlpha(0.5))
+            .foregroundStyle(.secondary)
             .padding(.vertical, 2)
             .padding(.horizontal, 6)
             .contentShape(Rectangle())

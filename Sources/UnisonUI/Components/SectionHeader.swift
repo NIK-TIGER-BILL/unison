@@ -18,9 +18,11 @@ public struct SectionHeader: View {
     }
 
     public var body: some View {
+        // HIG Materials: vibrant `.primary` so section titles get the
+        // system's contrast / Increase Contrast treatment on glass.
         Text(text)
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(UnisonColors.whiteAlpha(0.85))
+            .foregroundStyle(.primary)
             .padding(.top, 18)
             .padding(.bottom, 6)
             .padding(.horizontal, 16)

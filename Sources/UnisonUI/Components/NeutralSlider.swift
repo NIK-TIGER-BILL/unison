@@ -31,19 +31,21 @@ public struct NeutralSlider: View {
     }
 
     public var body: some View {
+        // HIG Materials: vibrant `.secondary` for the small mono labels
+        // that frame the slider on the popover / settings glass.
         HStack(spacing: 10) {
             if let leading = leadingLabel {
                 Text(leading)
                     .font(UnisonFonts.mono(10.5))
                     .tracking(0.4)
-                    .foregroundStyle(UnisonColors.whiteAlpha(0.45))
+                    .foregroundStyle(.secondary)
             }
             sliderBody
             if let trailing = trailingLabel {
                 Text(trailing)
                     .font(UnisonFonts.mono(10.5))
                     .tracking(0.4)
-                    .foregroundStyle(UnisonColors.whiteAlpha(0.45))
+                    .foregroundStyle(.secondary)
             }
         }
     }

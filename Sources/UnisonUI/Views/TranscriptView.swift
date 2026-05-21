@@ -146,13 +146,16 @@ public struct TranscriptView: View {
                 .onTapGesture { vm.cancelStop() }
 
             VStack(alignment: .leading, spacing: 0) {
+                // HIG Materials: vibrant `.primary` for the modal title
+                // and `.secondary` for the supporting paragraph on top
+                // of the `.liquidGlass` modal surface.
                 Text("Остановить перевод?")
                     .font(.system(size: 16, weight: .medium))
                     .tracking(-0.24)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                 Text("Сессия будет закрыта и транскрипт исчезнет.")
                     .font(.system(size: 13))
-                    .foregroundStyle(UnisonColors.whiteAlpha(0.65))
+                    .foregroundStyle(.secondary)
                     .lineSpacing(2)
                     .padding(.top, 6)
                 HStack(spacing: 8) {

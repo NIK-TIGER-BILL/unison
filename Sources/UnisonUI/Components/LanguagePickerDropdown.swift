@@ -37,9 +37,11 @@ public struct LanguagePickerDropdown: View {
             ScrollView {
                 LazyVStack(spacing: 1) {
                     if filtered.isEmpty {
+                        // HIG Materials: vibrant `.tertiary` for the
+                        // empty-state placeholder on the dropdown glass.
                         Text("Ничего не найдено")
                             .font(.system(size: 12))
-                            .foregroundStyle(UnisonColors.whiteAlpha(0.4))
+                            .foregroundStyle(.tertiary)
                             .padding(.vertical, 14)
                     } else {
                         ForEach(Array(filtered.enumerated()), id: \.element) { idx, lang in
@@ -90,16 +92,19 @@ public struct LanguagePickerDropdown: View {
 
     private func row(for lang: Language, isKeyboardFocused: Bool) -> some View {
         let isSelected = lang == selection
+        // HIG Materials: dropdown rows live on a `.liquidGlass` panel —
+        // vibrant `.primary` for the selected row and the checkmark,
+        // `.secondary` for the rest so the system can adapt contrast.
         return HStack(spacing: 9) {
             FlagText(lang.flagEmoji)
             Text(lang.displayName)
                 .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? .white : UnisonColors.whiteAlpha(0.85))
+                .foregroundStyle(isSelected ? .primary : .secondary)
             Spacer(minLength: 0)
             if isSelected {
                 Image(systemName: "checkmark")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
             }
         }
         .padding(.vertical, 7)

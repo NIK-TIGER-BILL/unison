@@ -16,10 +16,13 @@ public struct SaveIndicator: View {
             Image(systemName: "checkmark")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(UnisonColors.ready)
+            // HIG Materials: vibrant `.secondary` so the indicator
+            // reads as an unobtrusive status; the checkmark itself
+            // stays the semantic `ready` green.
             Text("сохранено")
                 .font(UnisonFonts.mono(10.5))
                 .tracking(0.4)
-                .foregroundStyle(UnisonColors.whiteAlpha(0.4))
+                .foregroundStyle(.secondary)
         }
         .opacity(isShown ? 1.0 : 0.0)
         .animation(.easeInOut(duration: 0.25), value: isShown)
