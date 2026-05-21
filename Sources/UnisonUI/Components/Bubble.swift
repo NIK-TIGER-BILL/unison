@@ -132,16 +132,24 @@ public struct Bubble: View {
     }
 
     private var gradientColors: [Color] {
+        // The `me` bubble's blue tint has to survive the `.regularMaterial`
+        // underneath (which heavily desaturates) and any wallpaper tint
+        // pulled through by the material's vibrancy. Earlier alpha values
+        // (0.32 / 0.14) washed out to almost neutral against blue/green
+        // backdrops (e.g. the sea wallpaper used by the VM screenshots),
+        // making me and peer bubbles read as the same colour. Bumped to
+        // saturate the tint enough that the side affordance is obvious
+        // regardless of background.
         switch speaker {
         case .me:
             return [
-                Color(red: 160 / 255, green: 210 / 255, blue: 1.0).opacity(0.32),
-                Color(red: 100 / 255, green: 160 / 255, blue: 220 / 255).opacity(0.14),
+                Color(red: 130 / 255, green: 190 / 255, blue: 1.0).opacity(0.48),
+                Color(red: 70 / 255, green: 130 / 255, blue: 220 / 255).opacity(0.26),
             ]
         case .peer:
             return [
-                UnisonColors.whiteAlpha(0.18),
-                UnisonColors.whiteAlpha(0.06),
+                UnisonColors.whiteAlpha(0.22),
+                UnisonColors.whiteAlpha(0.08),
             ]
         }
     }

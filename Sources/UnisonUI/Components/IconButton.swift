@@ -44,6 +44,15 @@ public struct IconButton<Icon: View>: View {
         .buttonStyle(.glass)
         .controlSize(.small)
         .buttonBorderShape(.circle)
+        // Suppress the macOS Full Keyboard Access focus ring. The
+        // gear / close / stop icons are decorative chrome — they
+        // already get a hover/press treatment from `.glass`, and the
+        // bright accent-coloured ring (which macOS draws around the
+        // first focusable button when a panel opens) reads as a
+        // permanent "selected" state on the popover. Buttons remain
+        // reachable via Tab (`.focusable(true)`) but the ring isn't
+        // drawn at rest.
+        .focusEffectDisabled()
         .accessibilityLabel(label)
         .help(label)
     }
