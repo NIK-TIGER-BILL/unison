@@ -135,21 +135,21 @@ public struct Bubble: View {
         // The `me` bubble's blue tint has to survive the `.regularMaterial`
         // underneath (which heavily desaturates) and any wallpaper tint
         // pulled through by the material's vibrancy. Earlier alpha values
-        // (0.32 / 0.14) washed out to almost neutral against blue/green
-        // backdrops (e.g. the sea wallpaper used by the VM screenshots),
-        // making me and peer bubbles read as the same colour. Bumped to
-        // saturate the tint enough that the side affordance is obvious
-        // regardless of background.
+        // (0.32 / 0.14, then 0.48 / 0.26) still washed out against the
+        // sea wallpaper used by the VM screenshots — the `me` bubbles
+        // came out greenish, not blue. Cycle 3 bumps the stops to
+        // 0.55 / 0.30 (me) and 0.16 / 0.06 (peer) so the side colour
+        // affordance survives material vibrancy on any backdrop.
         switch speaker {
         case .me:
             return [
-                Color(red: 130 / 255, green: 190 / 255, blue: 1.0).opacity(0.48),
-                Color(red: 70 / 255, green: 130 / 255, blue: 220 / 255).opacity(0.26),
+                Color(red: 140 / 255, green: 200 / 255, blue: 1.0).opacity(0.55),
+                Color(red: 95 / 255, green: 165 / 255, blue: 220 / 255).opacity(0.30),
             ]
         case .peer:
             return [
-                UnisonColors.whiteAlpha(0.22),
-                UnisonColors.whiteAlpha(0.08),
+                UnisonColors.whiteAlpha(0.16),
+                UnisonColors.whiteAlpha(0.06),
             ]
         }
     }
@@ -158,9 +158,9 @@ public struct Bubble: View {
         switch speaker {
         case .me:
             Color(red: 180 / 255, green: 220 / 255, blue: 1.0)
-                .opacity(contrast == .increased ? 0.55 : 0.24)
+                .opacity(contrast == .increased ? 0.70 : 0.45)
         case .peer:
-            UnisonColors.whiteAlpha(contrast == .increased ? 0.30 : 0.13)
+            UnisonColors.whiteAlpha(contrast == .increased ? 0.38 : 0.20)
         }
     }
 }
