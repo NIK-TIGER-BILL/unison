@@ -32,22 +32,12 @@ public struct InlineButton: View {
 
     @Environment(\.isEnabled) private var isEnabled
     @SwiftUI.State private var hovering = false
-    @SwiftUI.State private var spinAngle = 0.0
 
     public var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
                 if isLoading {
-                    Circle()
-                        .trim(from: 0, to: 0.7)
-                        .stroke(Color.white, lineWidth: 1.3)
-                        .frame(width: 10, height: 10)
-                        .rotationEffect(.degrees(spinAngle))
-                        .onAppear {
-                            withAnimation(.linear(duration: 0.85).repeatForever(autoreverses: false)) {
-                                spinAngle = 360
-                            }
-                        }
+                    Spinner(size: 10, lineWidth: 1.3)
                 } else if let icon = icon {
                     icon
                         .font(.system(size: 10, weight: .regular))

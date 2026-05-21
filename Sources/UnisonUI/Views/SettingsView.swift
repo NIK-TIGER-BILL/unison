@@ -234,20 +234,9 @@ public struct SettingsView: View {
                 Text("Хранится в Keychain.")
                     .font(.system(size: 11))
                     .foregroundStyle(UnisonColors.whiteAlpha(0.45))
-                Button {
+                MutedLink("Получить ключ") {
                     onOpenURL(SettingsLinks.openAIKeys)
-                } label: {
-                    HStack(spacing: 3) {
-                        Text("Получить ключ")
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 9))
-                            .opacity(0.7)
-                    }
-                    .font(.system(size: 11))
-                    .foregroundStyle(UnisonColors.whiteAlpha(0.5))
-                    .padding(.leading, 4)
                 }
-                .buttonStyle(.plain)
                 .accessibilityLabel("Получить ключ OpenAI")
                 Spacer(minLength: 0)
             }
@@ -409,20 +398,9 @@ public struct SettingsView: View {
     }
 
     private func aboutLink(_ text: String, url: URL) -> some View {
-        Button {
+        MutedLink(text) {
             onOpenURL(url)
-        } label: {
-            HStack(spacing: 4) {
-                Text(text)
-                    .font(.system(size: 11.5))
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 9))
-                    .opacity(0.7)
-            }
-            .foregroundStyle(UnisonColors.whiteAlpha(0.5))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Dropdown trigger (chip)
@@ -610,7 +588,7 @@ private struct DeviceDropdown: View {
     var body: some View {
         VStack(spacing: 0) {
             if devices.count > 6 {
-                searchRow
+                SearchField(text: $query)
                     .padding(.bottom, 6)
             }
             ScrollView {
@@ -637,26 +615,6 @@ private struct DeviceDropdown: View {
         .onKeyPress(.escape) {
             onCancel()
             return .handled
-        }
-    }
-
-    private var searchRow: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundStyle(UnisonColors.whiteAlpha(0.45))
-            TextField("Найти…", text: $query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
-                .foregroundStyle(UnisonColors.whiteAlpha(0.95))
-        }
-        .padding(.vertical, 7)
-        .padding(.horizontal, 10)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(UnisonColors.whiteAlpha(0.12))
-                .frame(height: 0.5)
-                .padding(.horizontal, 2)
         }
     }
 

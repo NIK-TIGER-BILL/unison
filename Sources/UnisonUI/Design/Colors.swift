@@ -35,6 +35,18 @@ public enum UnisonColors {
     /// `#ff7a8c` — error state (menubar badge, error rows).
     public static let error = Color(red: 0xff / 255, green: 0x7a / 255, blue: 0x8c / 255)
 
+    // MARK: - Coral destructive palette
+    //
+    // Two RGB stops define the destructive (Stop) gradient seen on the
+    // primary "Остановить перевод" button and the confirmation modal.
+    // Centralised so any future destructive surface uses the same tint.
+
+    /// `#ff6e82` — top stop of the destructive gradient.
+    public static let coralTop = Color(red: 255 / 255, green: 110 / 255, blue: 130 / 255)
+
+    /// `#dc3c5a` — bottom stop of the destructive gradient / its shadow tint.
+    public static let coralBottom = Color(red: 220 / 255, green: 60 / 255, blue: 90 / 255)
+
     // MARK: - Neutral helpers
 
     /// White at the given opacity. Used everywhere instead of an accent

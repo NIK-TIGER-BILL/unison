@@ -33,13 +33,12 @@ public struct PrimaryGlassButton: View {
     @Environment(\.isEnabled) private var isEnabled
     @SwiftUI.State private var hovering = false
     @SwiftUI.State private var pressed = false
-    @SwiftUI.State private var spinAngle = 0.0
 
     public var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if isLoading {
-                    spinner
+                    Spinner(size: 12, lineWidth: 1.5)
                 } else if let icon = icon {
                     icon
                         .font(.system(size: 11, weight: .semibold))
@@ -86,7 +85,7 @@ public struct PrimaryGlassButton: View {
         case .standard:
             isEnabled ? UnisonColors.whiteAlpha(0.22) : UnisonColors.whiteAlpha(0.10)
         case .destructive:
-            Color(red: 1.0, green: 110 / 255, blue: 130 / 255).opacity(0.40)
+            UnisonColors.coralTop.opacity(0.40)
         }
     }
 
@@ -95,7 +94,7 @@ public struct PrimaryGlassButton: View {
         case .standard:
             Color.black.opacity(hovering ? 0.35 : 0.28)
         case .destructive:
-            Color(red: 220 / 255, green: 60 / 255, blue: 90 / 255).opacity(hovering ? 0.42 : 0.32)
+            UnisonColors.coralBottom.opacity(hovering ? 0.42 : 0.32)
         }
     }
 
@@ -114,12 +113,13 @@ public struct PrimaryGlassButton: View {
             LinearGradient(
                 colors: hovering
                     ? [
+                        // Brighter hover stops — slight tonal lift from base coral.
                         Color(red: 1.0, green: 130 / 255, blue: 150 / 255).opacity(0.55),
                         Color(red: 230 / 255, green: 75 / 255, blue: 105 / 255).opacity(0.38),
                     ]
                     : [
-                        Color(red: 1.0, green: 110 / 255, blue: 130 / 255).opacity(0.42),
-                        Color(red: 220 / 255, green: 60 / 255, blue: 90 / 255).opacity(0.28),
+                        UnisonColors.coralTop.opacity(0.42),
+                        UnisonColors.coralBottom.opacity(0.28),
                     ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -127,17 +127,5 @@ public struct PrimaryGlassButton: View {
         }
     }
 
-    private var spinner: some View {
-        Circle()
-            .trim(from: 0, to: 0.7)
-            .stroke(Color.white, lineWidth: 1.5)
-            .frame(width: 12, height: 12)
-            .rotationEffect(.degrees(spinAngle))
-            .onAppear {
-                withAnimation(.linear(duration: 0.85).repeatForever(autoreverses: false)) {
-                    spinAngle = 360
-                }
-            }
-    }
 }
 

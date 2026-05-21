@@ -159,8 +159,8 @@ public struct TranscriptView: View {
                                     .fill(
                                         LinearGradient(
                                             colors: [
-                                                Color(red: 255 / 255, green: 110 / 255, blue: 130 / 255).opacity(0.55),
-                                                Color(red: 220 / 255, green: 60 / 255, blue: 90 / 255).opacity(0.40),
+                                                UnisonColors.coralTop.opacity(0.55),
+                                                UnisonColors.coralBottom.opacity(0.40),
                                             ],
                                             startPoint: .top,
                                             endPoint: .bottom
@@ -169,11 +169,11 @@ public struct TranscriptView: View {
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 9, style: .continuous)
                                             .strokeBorder(
-                                                Color(red: 255 / 255, green: 110 / 255, blue: 130 / 255).opacity(0.45),
+                                                UnisonColors.coralTop.opacity(0.45),
                                                 lineWidth: 0.5
                                             )
                                     )
-                                    .shadow(color: Color(red: 220 / 255, green: 60 / 255, blue: 90 / 255).opacity(0.32), radius: 4, x: 0, y: 4)
+                                    .shadow(color: UnisonColors.coralBottom.opacity(0.32), radius: 4, x: 0, y: 4)
                             )
                     }
                     .buttonStyle(.plain)

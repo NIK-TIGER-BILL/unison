@@ -244,22 +244,9 @@ public struct OnboardingView: View {
                 }
                 .padding(.top, 4)
 
-                Button {
+                MutedLink("Получить ключ") {
                     onOpenURL(OnboardingViewModel.openAIKeysURL)
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Получить ключ")
-                            .font(.system(size: 11.5))
-                        Image(systemName: "arrow.up.right")
-                            .font(.system(size: 9))
-                            .opacity(0.7)
-                    }
-                    .foregroundStyle(UnisonColors.whiteAlpha(0.5))
-                    .padding(.vertical, 2)
-                    .padding(.horizontal, 6)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
                 .accessibilityLabel("Получить ключ OpenAI")
 
                 if let message = vm.status[.apiKey]?.errorMessage {
@@ -361,23 +348,3 @@ private enum OnboardingLayout {
     static let windowHeight: CGFloat = 620
 }
 
-// MARK: - Dashed divider
-
-/// 0.5-pt dashed horizontal divider used inside step cards.
-/// SwiftUI `Divider` doesn't support dashing, so we stroke a single
-/// horizontal `Path` at full available width.
-private struct DashedDivider: View {
-    var body: some View {
-        GeometryReader { proxy in
-            Path { p in
-                p.move(to: CGPoint(x: 0, y: 0.25))
-                p.addLine(to: CGPoint(x: proxy.size.width, y: 0.25))
-            }
-            .stroke(
-                UnisonColors.whiteAlpha(0.08),
-                style: StrokeStyle(lineWidth: 0.5, dash: [3, 3])
-            )
-        }
-        .frame(height: 0.5)
-    }
-}

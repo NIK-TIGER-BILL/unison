@@ -24,7 +24,6 @@ public struct LanguagePickerDropdown: View {
 
     @SwiftUI.State private var query: String = ""
     @SwiftUI.State private var focusedIndex: Int = 0
-    @FocusState private var searchFocused: Bool
 
     private var filtered: [Language] {
         Self.filter(languages, query: query)
@@ -32,7 +31,7 @@ public struct LanguagePickerDropdown: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            searchRow
+            SearchField(text: $query)
                 .padding(.horizontal, 2)
                 .padding(.bottom, 6)
             ScrollView {
@@ -60,7 +59,6 @@ public struct LanguagePickerDropdown: View {
         .onAppear {
             // Seed focus on the currently-selected language if visible.
             focusedIndex = filtered.firstIndex(of: selection) ?? 0
-            searchFocused = true
         }
         .onChange(of: query) { _, _ in
             focusedIndex = 0
@@ -87,27 +85,6 @@ public struct LanguagePickerDropdown: View {
         .onKeyPress(.escape) {
             onCancel()
             return .handled
-        }
-    }
-
-    private var searchRow: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundStyle(UnisonColors.whiteAlpha(searchFocused ? 0.78 : 0.35))
-            TextField("Найти…", text: $query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
-                .foregroundStyle(UnisonColors.whiteAlpha(0.95))
-                .focused($searchFocused)
-        }
-        .padding(.vertical, 7)
-        .padding(.horizontal, 10)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(UnisonColors.whiteAlpha(searchFocused ? 0.32 : 0.12))
-                .frame(height: 0.5)
-                .padding(.horizontal, 2)
         }
     }
 
