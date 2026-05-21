@@ -62,6 +62,7 @@ public struct ErrorRow: View {
             HStack(spacing: 4) {
                 Text(label)
                     .font(.system(size: 11.5))
+                    .lineLimit(1)
                 if case .openSettings = action {
                     Image(systemName: "arrow.up.right")
                         .font(.system(size: 9))
@@ -76,6 +77,9 @@ public struct ErrorRow: View {
                     .strokeBorder(UnisonColors.error.opacity(0.20), lineWidth: 0.5)
             )
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            // Keep the button's natural width so its label is never
+            // truncated when the error message wraps to multiple lines.
+            .fixedSize(horizontal: true, vertical: false)
         }
         .buttonStyle(.plain)
     }

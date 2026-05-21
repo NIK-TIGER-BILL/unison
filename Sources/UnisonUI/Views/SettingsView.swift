@@ -67,6 +67,11 @@ public struct SettingsView: View {
 
     public var body: some View {
         ZStack(alignment: .topLeading) {
+            // Aurora glass floor — visible through the window's
+            // transparent chrome (the controller sets the NSWindow's
+            // background to clear). Matches `design/settings-final/`.
+            AuroraBackground()
+
             window
                 .frame(width: SettingsLayout.windowWidth)
 
@@ -111,8 +116,30 @@ public struct SettingsView: View {
             }
             .scrollIndicators(.hidden)
         }
-        .liquidGlass(cornerRadius: 14)
+        // Glass chrome: dark tint over the Aurora floor, hairline border,
+        // top specular highlight. Skips `.regularMaterial` so the Aurora
+        // gradients remain visible through the window — matches the design
+        // HTML's `backdrop-filter: blur` semi-transparent surface. The
+        // real `NSVisualEffectView` blur is wired by the window controller.
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(red: 20 / 255, green: 22 / 255, blue: 30 / 255).opacity(0.55))
+                LinearGradient(
+                    colors: [UnisonColors.whiteAlpha(0.16), .clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .blendMode(.screen)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(UnisonColors.whiteAlpha(0.13), lineWidth: 0.5)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: Color.black.opacity(0.5), radius: 18, x: 0, y: 16)
     }
 
     /// Custom title bar — the real `NSWindow` traffic lights live in

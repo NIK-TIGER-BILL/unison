@@ -45,11 +45,20 @@ public struct PrimaryGlassButton: View {
                 }
                 Text(title)
                     .font(.system(size: 14, weight: .semibold))
+                    .shadow(color: .black.opacity(0.25), radius: 0, x: 0, y: 1)
             }
             .foregroundStyle(textColor)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 13)
             .background(backgroundGradient)
+            .overlay(alignment: .top) {
+                // `inset 0 1px 0 rgba(255,255,255,0.28)` — a 1pt-tall
+                // specular highlight along the top edge that gives the
+                // button its 3-dimensional "glass" feel.
+                Rectangle()
+                    .fill(UnisonColors.whiteAlpha(0.28))
+                    .frame(height: 1)
+            }
             .overlay(
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
                     .strokeBorder(borderColor, lineWidth: 0.5)
