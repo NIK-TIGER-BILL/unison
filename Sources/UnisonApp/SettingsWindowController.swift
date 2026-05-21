@@ -95,7 +95,15 @@ public final class SettingsWindowController {
                 onOpenURL: onOpenURL,
                 onRecordHotkey: onRecordHotkey
             )
-            w.contentViewController = NSHostingController(rootView: root)
+            let host = NSHostingController(rootView: root)
+            // Pin the content size so the Form's intrinsic horizontal
+            // content-hugging doesn't shrink the window. Without this,
+            // SwiftUI Form.grouped collapses to ~200pt wide.
+            host.sizingOptions = [.preferredContentSize]
+            host.preferredContentSize = NSSize(width: 560, height: 540)
+            w.contentViewController = host
+            w.setContentSize(NSSize(width: 560, height: 540))
+            w.center()
             window = w
         }
         window?.center()
