@@ -38,15 +38,15 @@ public actor OpenAIRealtimeStream: TranslationStream {
     /// of `.networkLost`.
     ///
     /// INVARIANT: This flag is set ONLY when the server delivers an
-    /// actual translation chunk — `output_audio.delta` or
-    /// `output_transcript.delta`. Handshake/lifecycle events like
-    /// `session.*`, `error`, or `conversation.*` MUST NOT flip it,
-    /// because the orchestrator's empty-close escalation uses
-    /// `receivedAnyData=false` as the signal for "server accepted us
-    /// then dropped before translating a byte" — a credential/policy
-    /// failure that should terminate the session quickly. If a
-    /// non-data event ever toggles this, the user gets stuck in an
-    /// endless `.reconnecting` flap.
+    /// actual translation chunk — `session.output_audio.delta` or
+    /// `session.output_transcript.delta` (GA event names). Handshake/
+    /// lifecycle events like `session.created`, `session.updated`,
+    /// `error`, etc. MUST NOT flip it, because the orchestrator's
+    /// empty-close escalation uses `receivedAnyData=false` as the
+    /// signal for "server accepted us then dropped before translating
+    /// a byte" — a credential/policy failure that should terminate the
+    /// session quickly. If a non-data event ever toggles this, the
+    /// user gets stuck in an endless `.reconnecting` flap.
     private var receivedAnyData = false
 
     public init(
@@ -54,7 +54,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
         client: any WSClient,
         clock: any Clock,
         speaker: Speaker = .peer,
-        url: URL = URL(string: "wss://api.openai.com/v1/realtime/translations")!
+        url: URL = URL(string: "wss://api.openai.com/v1/realtime?model=gpt-realtime-translate")!
     ) {
         self.apiKey = apiKey
         self.client = client
@@ -75,9 +75,12 @@ public actor OpenAIRealtimeStream: TranslationStream {
 
     public func connect(target: Language) async throws {
         connectionContinuation.yield(.connecting)
+        // GA Realtime API — no `OpenAI-Beta` header. The Beta endpoint
+        // (`/v1/realtime/translations` + `OpenAI-Beta: realtime=v1`) was
+        // retired and now returns `beta_api_shape_disabled`. The GA
+        // endpoint authenticates with a plain Bearer token only.
         try await client.connect(url: url, headers: [
             "Authorization": "Bearer \(apiKey)",
-            "OpenAI-Beta": "realtime=v1",
         ])
         connectionContinuation.yield(.connected)
 

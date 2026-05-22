@@ -22,16 +22,52 @@ public enum RealtimeClientEvent: Encodable, Sendable {
     }
 }
 
+/// GA `session.update` for `gpt-realtime-translate`.
+///
+/// Shape per OpenAI cookbook (`examples/voice_solutions/realtime_translation_guide.mdx`):
+///
+/// ```json
+/// {
+///   "type": "session.update",
+///   "session": {
+///     "audio": {
+///       "input": {
+///         "transcription": { "model": "gpt-realtime-whisper" },
+///         "noise_reduction": { "type": "near_field" }
+///       },
+///       "output": { "language": "<target>" }
+///     }
+///   }
+/// }
+/// ```
+///
+/// `gpt-realtime-translate` does NOT support custom voice selection or
+/// `instructions` — it uses dynamic voice adaptation tracking the source
+/// speaker. The model is implicit in the connection URL
+/// (`?model=gpt-realtime-translate`), so the payload omits it.
 public struct SessionUpdatePayload: Sendable {
     public let targetLanguage: String
     public init(targetLanguage: String) { self.targetLanguage = targetLanguage }
 
     func encodeWrapped(to encoder: Encoder, type: String) throws {
         struct Output: Encodable { let language: String }
-        struct Audio: Encodable { let output: Output }
+        struct TranscriptionModel: Encodable { let model: String }
+        struct NoiseReduction: Encodable { let type: String }
+        struct Input: Encodable {
+            let transcription: TranscriptionModel
+            let noise_reduction: NoiseReduction
+        }
+        struct Audio: Encodable { let input: Input; let output: Output }
         struct Session: Encodable { let audio: Audio }
         struct Envelope: Encodable { let type: String; let session: Session }
-        try Envelope(type: type, session: Session(audio: Audio(output: .init(language: targetLanguage)))).encode(to: encoder)
+        let session = Session(audio: Audio(
+            input: Input(
+                transcription: .init(model: "gpt-realtime-whisper"),
+                noise_reduction: .init(type: "near_field")
+            ),
+            output: .init(language: targetLanguage)
+        ))
+        try Envelope(type: type, session: session).encode(to: encoder)
     }
 }
 
@@ -76,20 +112,35 @@ extension RealtimeServerEvent: Decodable {
         let c = try decoder.container(keyedBy: TopKeys.self)
         let type = try c.decode(String.self, forKey: .type)
         switch type {
-        case "output_audio.delta":
+        // GA event names per OpenAI cookbook for gpt-realtime-translate.
+        // Carries base64-encoded 24 kHz PCM16 audio in `delta`.
+        case "session.output_audio.delta":
             let delta = try c.decode(String.self, forKey: .delta)
             self = .outputAudioDelta(.init(delta: delta))
-        case "output_transcript.delta":
+        // Target-language transcript fragments. `session.input_transcript.delta`
+        // (source-language) is intentionally not surfaced here — Unison only
+        // displays the translated side.
+        case "session.output_transcript.delta":
             let delta = try c.decode(String.self, forKey: .delta)
             self = .outputTranscriptDelta(.init(delta: delta))
         case "session.closed":
             self = .sessionClosed
         case "error":
+            // GA error payload may have a nil `code` (some server errors only
+            // carry `type` + `message`). Default to "unknown" so the
+            // existing classifier still runs.
             let errC = try c.nestedContainer(keyedBy: ErrorKeys.self, forKey: .error)
-            let code = try errC.decode(String.self, forKey: .code)
-            let msg = try errC.decode(String.self, forKey: .message)
+            let code = (try? errC.decode(String.self, forKey: .code)) ?? "unknown"
+            let msg = (try? errC.decode(String.self, forKey: .message)) ?? ""
             self = .error(.init(code: code, message: msg))
         default:
+            // Lifecycle / informational events we don't act on:
+            //   session.created, session.updated,
+            //   session.input_transcript.delta (source captions — unused),
+            //   conversation.item.created, response.created, response.done,
+            //   input_audio_buffer.{committed,speech_started,speech_stopped},
+            //   rate_limits.updated, etc.
+            // Forwarded as `.unknown(type)` so the handler can skip silently.
             self = .unknown(type)
         }
     }

@@ -8,11 +8,20 @@ import Testing
     try await stream.connect(target: .en)
 
     #expect(ws.connectCalls.count == 1)
+    // GA: Bearer-only. The `OpenAI-Beta` header is gone — the GA endpoint
+    // rejects the Beta shape entirely.
     #expect(ws.connectCalls[0].1["Authorization"] == "Bearer sk-test")
+    #expect(ws.connectCalls[0].1["OpenAI-Beta"] == nil)
+    // URL must hit the GA endpoint with the translate model in the query.
+    #expect(ws.connectCalls[0].0.absoluteString == "wss://api.openai.com/v1/realtime?model=gpt-realtime-translate")
 
     if case .text(let json) = ws.sentMessages.first {
         #expect(json.contains("session.update"))
         #expect(json.contains("\"language\":\"en\""))
+        // GA-only fields — proves we're not sending the legacy
+        // `{"session":{"audio":{"output":{"language":"en"}}}}` shape.
+        #expect(json.contains("\"transcription\""))
+        #expect(json.contains("\"gpt-realtime-whisper\""))
     } else {
         Issue.record("Expected session.update text message")
     }
@@ -48,7 +57,8 @@ import Testing
     }
 
     let pcm = bytes([0xAA, 0xBB, 0xCC, 0xDD])
-    let json = #"{"type":"output_audio.delta","delta":"\#(pcm.base64EncodedString())"}"#
+    // GA event name: `session.output_audio.delta`.
+    let json = #"{"type":"session.output_audio.delta","delta":"\#(pcm.base64EncodedString())"}"#
     ws.push(.text(json))
 
     let collected = await collector.value
@@ -68,7 +78,8 @@ import Testing
         return nil
     }
 
-    let json = #"{"type":"output_transcript.delta","delta":"Hello"}"#
+    // GA event name: `session.output_transcript.delta`.
+    let json = #"{"type":"session.output_transcript.delta","delta":"Hello"}"#
     ws.push(.text(json))
 
     let delta = await collector.value
@@ -97,6 +108,42 @@ import Testing
         #expect(e == .apiKeyInvalid)
     } else {
         Issue.record("Expected .failed(.apiKeyInvalid), got \(String(describing: state))")
+    }
+}
+
+@Test func stream_sessionLifecycleEvents_doNotFlipReceivedAnyData() async throws {
+    // GA lifecycle events (session.created, session.updated, etc.) arrive
+    // BEFORE any translation chunk. They MUST NOT set `receivedAnyData` —
+    // otherwise the orchestrator's auth-failure escalation can't trip on
+    // a pre-data close. This test pushes a `session.created` then closes
+    // the WS normally; the resulting state must be `.failed(.apiKeyInvalid,
+    // receivedAnyData: false)`.
+    let ws = FakeWSClient()
+    let stream = OpenAIRealtimeStream(apiKey: "sk-test", client: ws, clock: SystemClock())
+    try await stream.connect(target: .en)
+
+    let collector = Task { () -> ConnectionState? in
+        for await s in stream.connectionState where s != .connected && s != .connecting {
+            return s
+        }
+        return nil
+    }
+
+    // Server says hi (GA handshake) — should be ignored by the data tracker.
+    let created = #"{"type":"session.created","event_id":"evt_1","session":{"id":"sess_1","model":"gpt-realtime-translate"}}"#
+    ws.push(.text(created))
+    let updated = #"{"type":"session.updated","event_id":"evt_2","session":{}}"#
+    ws.push(.text(updated))
+
+    // Then close cleanly without ever sending a translation chunk.
+    ws.pushClose(.normal)
+
+    let state = await collector.value
+    if case .failed(let e, let receivedAnyData) = state {
+        #expect(e == .apiKeyInvalid)
+        #expect(receivedAnyData == false, "Lifecycle events must not flip receivedAnyData")
+    } else {
+        Issue.record("Expected .failed(.apiKeyInvalid, receivedAnyData: false), got \(String(describing: state))")
     }
 }
 
@@ -177,6 +224,19 @@ import Testing
 @Test func classifyClose_protocolError1002_isNetwork() {
     let err = OpenAIRealtimeStream.classifyClose(code: 1002, reason: nil, receivedData: false)
     #expect(err == .networkLost)
+}
+
+@Test func classifyClose_reasonBetaApiShapeDisabled_isAuthFailure() {
+    // GA-migration sentinel: if anyone re-introduces the Beta endpoint or
+    // header, the server now responds with this shape. Surface it as
+    // `.apiKeyInvalid` so the UI shows the credentials-error row instead
+    // of a perpetual reconnect loop.
+    let err = OpenAIRealtimeStream.classifyClose(
+        code: 1008,
+        reason: #"{"error":{"type":"invalid_request_error","code":"beta_api_shape_disabled","message":"The Realtime Beta API is no longer supported."}}"#,
+        receivedData: false
+    )
+    #expect(err == .apiKeyInvalid)
 }
 
 @Test func stream_normalCloseBeforeData_treatedAsAuthFailure() async throws {
