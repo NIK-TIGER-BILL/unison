@@ -205,8 +205,22 @@ EXPECTED_HAPPY=(
 )
 
 # Patterns we expect ONLY when the OpenAI key is invalid (auth-failed path).
+# The auth-failure surface has two on-wire flavours OpenAI uses:
+#  (a) Server accepts the WS, then closes normally (code 1000) with no
+#      data — pre-classifier era pattern, still seen on some accounts.
+#  (b) Server pushes an `{"type":"error","error":{"code":"invalid_api_key"}}`
+#      event and closes with code 3000 + reason payload. This is the
+#      modern (May 2026) shape and the one that exposed the POSIX-89
+#      masking bug — the classifier now substitutes the typed error for
+#      the racy transport NSError, so the Orchestrator surfaces
+#      `.error(apiKeyInvalid)` instead of `.error(networkLost)`.
 EXPECTED_AUTHFAIL=(
-  "WS closed normally before any data"
+  "WS closed normally before any data|peer WS abnormal close — code=3000.*invalid_api_key"
+  # Sanity: the final orchestrator state must be apiKeyInvalid, NOT
+  # networkLost. Regression marker for the close-classifier propagation
+  # bug (commit history: \"fix(realtime): propagate classified close
+  # reason through connect()\").
+  "Orchestrator.*peer.connect failed: apiKeyInvalid"
 )
 
 # Patterns we expect ONLY when BlackHole isn't installed in the VM

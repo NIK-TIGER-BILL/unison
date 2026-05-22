@@ -116,6 +116,85 @@ import Testing
     }
 }
 
+@Test func mockServer_errorEventThenAbnormalClose_connectThrowsClassifiedError() async throws {
+    // Regression for the POSIX-89 masking bug. Sequence:
+    //   1. Server accepts WS upgrade.
+    //   2. Server pushes `{"type":"error","error":{"code":"invalid_api_key",...}}`.
+    //   3. Server closes with abnormal code 3000 + reason "invalid_api_key".
+    //   4. Meanwhile, `OpenAIRealtimeStream.connect()` is mid-`client.send(session.update)`
+    //      — that send loses the race with the close and surfaces a generic
+    //      NSPOSIXErrorDomain 89 ("Operation canceled").
+    // BEFORE the fix: `connect()` threw the POSIX NSError, which the
+    // orchestrator's `mapConnectError` collapsed to `.networkLost`,
+    // hiding the real reason from the user.
+    // AFTER the fix: `connect()` notices the close-monitor / error-event
+    // handler already classified the failure as `.apiKeyInvalid` and
+    // throws that instead.
+    let server = try MockOpenAIRealtimeServer()
+    try await server.start()
+    defer { server.stop() }
+
+    let stream = OpenAIRealtimeStream(
+        apiKey: "sk-mock-key",
+        client: URLSessionWSClient(),
+        clock: SystemClock(),
+        speaker: .peer,
+        url: server.url
+    )
+
+    // Drive the server: as soon as the upgrade lands, push the error
+    // event and close with code 3000 + reason — no `nextClientMessage`
+    // wait, so the close races the client's outbound session.update.
+    let serverDriver = Task {
+        // Tiny wait to let the WS upgrade finish on the client side.
+        // Without this the server may try to send before the connection
+        // is .ready, which NWConnection silently drops.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await server.sendErrorEvent(code: "invalid_api_key", message: "Incorrect API key provided")
+        await server.closeConnection(code: 3000)
+    }
+
+    var thrown: Error?
+    do {
+        try await stream.connect(target: .en)
+    } catch {
+        thrown = error
+    }
+    _ = await serverDriver.value
+
+    // The thrown error MUST be the classified TranslationError, not a
+    // generic NSError. Both close-paths (server `error` event and the
+    // abnormal close) classify as `.apiKeyInvalid`, so that's what
+    // surfaces.
+    switch thrown {
+    case let .some(te as TranslationError):
+        #expect(te == .apiKeyInvalid,
+                "expected .apiKeyInvalid; got \(te)")
+    case let .some(other):
+        Issue.record("expected TranslationError.apiKeyInvalid; got non-TranslationError \(type(of: other)): \(other)")
+    case .none:
+        // `connect()` may also return normally if the send happened to
+        // win the race; in that case the failure surfaces on the
+        // `connectionState` stream instead. We still want the same
+        // classification.
+        let resolved = await Task { () -> ConnectionState? in
+            for await s in stream.connectionState where s != .connected && s != .connecting {
+                return s
+            }
+            return nil
+        }.value
+        switch resolved {
+        case .some(.failed(let err, _)):
+            #expect(err == .apiKeyInvalid,
+                    "no error thrown; expected connectionState .apiKeyInvalid; got \(err)")
+        default:
+            Issue.record("no error thrown and no .failed state; got \(String(describing: resolved))")
+        }
+    }
+
+    await stream.close()
+}
+
 @Test func mockServer_inputAudioBufferAppend_landsOnServer() async throws {
     // Verify the orchestrator's `send(_:)` path writes the right
     // `session.input_audio_buffer.append` envelope on the wire.

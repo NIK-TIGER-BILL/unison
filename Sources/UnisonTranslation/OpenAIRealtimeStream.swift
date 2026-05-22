@@ -67,6 +67,15 @@ public actor OpenAIRealtimeStream: TranslationStream {
     /// channel. Helps tell apart "server is silent" vs "audio path
     /// broken but transcript landed".
     private var loggedFirstTranscriptDelta = false
+    /// Sticky classification of *why* the WS / server failed. Set by
+    /// `handleClose` and the server `error` event handler — the first
+    /// classification wins so later transport-level noise (POSIX 89
+    /// "Operation canceled" raised by an in-flight `client.send` once
+    /// the socket has already shut down) can't overwrite the real
+    /// reason. `connect()` uses this to substitute a meaningful
+    /// `TranslationError` for whatever generic NSError the transport
+    /// happens to throw at the same moment.
+    private var lastClassifiedError: TranslationError?
 
     public init(
         apiKey: String,
@@ -133,7 +142,38 @@ public actor OpenAIRealtimeStream: TranslationStream {
 
         let evt = RealtimeClientEvent.sessionUpdate(.init(targetLanguage: target.rawValue))
         let data = try JSONEncoder().encode(evt)
-        try await client.send(.text(String(data: data, encoding: .utf8) ?? ""))
+        do {
+            try await client.send(.text(String(data: data, encoding: .utf8) ?? ""))
+        } catch {
+            // The send may race with a server-initiated close: the WS
+            // is already shut down by the time URLSession marshals our
+            // outbound frame, surfacing as a generic `POSIX 89
+            // "Operation canceled"` NSError. If `handleClose` or the
+            // server `error` event already classified the failure
+            // (e.g. `.apiKeyInvalid` from a reason payload), propagate
+            // *that* — the transport-level noise hides the real cause.
+            if let classified = lastClassifiedError {
+                Self.log.error("connect — send(session.update) failed but close already classified as \(String(describing: classified)); propagating classified error instead of POSIX")
+                throw classified
+            }
+            // Give the close-monitor task a tiny grace window in case
+            // the classification is in-flight on a separate task and
+            // simply hasn't landed yet.
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            if let classified = lastClassifiedError {
+                Self.log.error("connect — send(session.update) failed; classified error arrived in grace window: \(String(describing: classified))")
+                throw classified
+            }
+            throw error
+        }
+    }
+
+    /// First-write-wins setter for the sticky classification. Both the
+    /// WS-close path and the server `error` event funnel through here.
+    private func setClassifiedError(_ error: TranslationError) {
+        if lastClassifiedError == nil {
+            lastClassifiedError = error
+        }
     }
 
     public func send(_ frame: AudioFrame) async {
@@ -202,14 +242,17 @@ public actor OpenAIRealtimeStream: TranslationStream {
                 connectionContinuation.yield(.disconnected)
             } else {
                 Self.log.error("\(speakerLabel) WS closed normally before any data — likely auth/policy; surfacing .apiKeyInvalid")
+                setClassifiedError(.apiKeyInvalid)
                 connectionContinuation.yield(.failed(.apiKeyInvalid, receivedAnyData: false))
             }
         case .abnormal(let code, let reasonText):
             let mapped = Self.classifyClose(code: code, reason: reasonText, receivedData: receivedData)
             Self.log.error("\(speakerLabel) WS abnormal close — code=\(code) reason=\(reasonText ?? "<nil>") receivedData=\(receivedData) → \(String(describing: mapped))")
+            setClassifiedError(mapped)
             connectionContinuation.yield(.failed(mapped, receivedAnyData: receivedData))
         case .error(let ns):
             Self.log.error("\(speakerLabel) WS transport error — domain=\(ns.domain) code=\(ns.code) receivedData=\(receivedData) → .networkLost")
+            setClassifiedError(.networkLost)
             connectionContinuation.yield(.failed(.networkLost, receivedAnyData: receivedData))
         }
     }
@@ -331,6 +374,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
                 }
             }()
             Self.log.error("server error event code=\(e.code) receivedData=\(self.receivedAnyData) → \(String(describing: mapped))")
+            setClassifiedError(mapped)
             connectionContinuation.yield(.failed(mapped, receivedAnyData: self.receivedAnyData))
         case .unknown:
             break

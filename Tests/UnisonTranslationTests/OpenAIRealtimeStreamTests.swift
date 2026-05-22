@@ -275,6 +275,99 @@ import Testing
     }
 }
 
+@Test func stream_connectSendThrowsPOSIX_butCloseAlreadyClassified_propagatesClassifiedError() async throws {
+    // Regression for the POSIX-89 masking bug. Production sequence:
+    //   1. WS handshake succeeds.
+    //   2. Server pushes a close with code 3000 + reason "invalid_api_key"
+    //      (or fires a server `error` event with code `invalid_api_key`).
+    //   3. Client-side, `OpenAIRealtimeStream.connect()` is mid-
+    //      `client.send(session.update)`. URLSession marshals the send
+    //      *after* the close has been processed, surfaces a generic
+    //      `NSPOSIXErrorDomain code=89 "Operation canceled"` NSError.
+    //
+    // Before the fix, `connect()` threw the POSIX NSError, which the
+    // orchestrator's `mapConnectError` collapsed to `.networkLost` —
+    // hiding the real reason. The fix introduces a sticky
+    // `lastClassifiedError` so the send catch-block substitutes the
+    // classified `TranslationError` for the transport-level noise.
+    let ws = FakeWSClient()
+    let stream = OpenAIRealtimeStream(apiKey: "sk-test", client: ws, clock: SystemClock())
+
+    ws.nextSendShouldThrow = posixOperationCanceledError()
+    // Race-emulation hook: simulate the close arriving *immediately
+    // before* the send returns its error. This is what the production
+    // transport produces — the close-monitor task processes the close
+    // first, the send throws second.
+    ws.beforeSendThrow = { [weak ws] in
+        ws?.pushClose(.abnormal(
+            code: 3000,
+            reason: #"{"error":{"code":"invalid_api_key","message":"Incorrect API key provided"}}"#
+        ))
+    }
+
+    var thrown: Error?
+    do {
+        try await stream.connect(target: .en)
+    } catch {
+        thrown = error
+    }
+
+    // The thrown error MUST be `.apiKeyInvalid`, not the POSIX NSError.
+    guard let te = thrown as? TranslationError else {
+        Issue.record("expected TranslationError.apiKeyInvalid; got \(String(describing: thrown))")
+        return
+    }
+    #expect(te == .apiKeyInvalid, "expected .apiKeyInvalid; got \(te)")
+}
+
+@Test func stream_connectSendThrowsPOSIX_withoutPriorClassification_propagatesPOSIX() async throws {
+    // Counter-test for the sticky-classification fix: if the send
+    // genuinely fails for a non-classified reason (network down, DNS,
+    // anything that isn't preceded by a WS close or server error event),
+    // we should NOT manufacture a `TranslationError` — the orchestrator
+    // is allowed to fall back to `.networkLost` via `mapConnectError`.
+    let ws = FakeWSClient()
+    let stream = OpenAIRealtimeStream(apiKey: "sk-test", client: ws, clock: SystemClock())
+
+    ws.nextSendShouldThrow = GenericSendError()
+    // No beforeSendThrow hook — nothing classifies before the throw.
+
+    var thrown: Error?
+    do {
+        try await stream.connect(target: .en)
+    } catch {
+        thrown = error
+    }
+    #expect(thrown is GenericSendError,
+            "with no prior classification, the original send error must propagate; got \(String(describing: thrown))")
+}
+
+@Test func stream_connectSendThrowsPOSIX_serverErrorEventClassifies_propagatesClassifiedError() async throws {
+    // Variant: classification comes from the server `error` event path
+    // (not the WS close), then the send fails. The fix must also catch
+    // this — server error events are the most common production signal
+    // for credential rejection.
+    let ws = FakeWSClient()
+    let stream = OpenAIRealtimeStream(apiKey: "sk-test", client: ws, clock: SystemClock())
+
+    ws.nextSendShouldThrow = posixOperationCanceledError()
+    ws.beforeSendThrow = { [weak ws] in
+        ws?.push(.text(#"{"type":"error","error":{"code":"invalid_api_key","message":"bad"}}"#))
+    }
+
+    var thrown: Error?
+    do {
+        try await stream.connect(target: .en)
+    } catch {
+        thrown = error
+    }
+    guard let te = thrown as? TranslationError else {
+        Issue.record("expected TranslationError.apiKeyInvalid; got \(String(describing: thrown))")
+        return
+    }
+    #expect(te == .apiKeyInvalid, "expected .apiKeyInvalid; got \(te)")
+}
+
 @Test func stream_closeSendsSessionCloseAndShutsDown() async throws {
     let ws = FakeWSClient()
     let stream = OpenAIRealtimeStream(apiKey: "sk-test", client: ws, clock: SystemClock())
