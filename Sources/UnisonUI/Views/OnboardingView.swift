@@ -278,6 +278,10 @@ public struct OnboardingView: View {
                 title: "Готово",
                 action: onClose
             )
+            // Same `minWidth: 100` as the per-step buttons so the
+            // footer "Готово" reads at the same visual width as
+            // "Установить" / "Разрешить" / "Сохранить" above.
+            .frame(minWidth: 100)
             .fixedSize(horizontal: true, vertical: false)
             .disabled(!vm.allDone)
         }
@@ -335,6 +339,12 @@ public struct OnboardingView: View {
     /// "Установить" / "Разрешить" render without right-edge clipping
     /// when the row's flexible column (hint text or `SecretInput`) has
     /// already claimed available space.
+    ///
+    /// A consistent `minWidth` of 100pt is enforced so the three step
+    /// actions ("Установить" / "Разрешить" / "Сохранить") AND the
+    /// footer ("Готово") line up visually, matching the System
+    /// Settings convention where all primary action buttons share a
+    /// uniform width regardless of their label length.
     @ViewBuilder
     private func compactPrimaryButton(
         title: String,
@@ -347,6 +357,7 @@ public struct OnboardingView: View {
             isLoading: isLoading,
             action: action
         )
+        .frame(minWidth: 100)
         .fixedSize(horizontal: true, vertical: false)
         .disabled(isDisabled)
     }

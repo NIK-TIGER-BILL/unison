@@ -68,10 +68,14 @@ public struct SettingsView: View {
             aboutSection
         }
         .formStyle(.grouped)
-        .frame(width: SettingsLayout.windowWidth, height: SettingsLayout.windowHeight)
-        // The native form supplies its own translucent background and
-        // grouped-section cards on macOS 26 — we don't override
-        // `.scrollContentBackground` or layer custom glass on top.
+        .frame(minWidth: SettingsLayout.windowWidth, minHeight: SettingsLayout.minWindowHeight)
+        // Hide the form's default opaque scroll-content background so
+        // the host window's `NSVisualEffectView(.windowBackground)`
+        // shows through behind the section cards. Without this the
+        // form draws an opaque material on top of the visual effect
+        // view and the user sees a solid grey panel instead of the
+        // Liquid Glass material System Settings uses.
+        .scrollContentBackground(.hidden)
         //
         // `.overlay` puts the SaveIndicator *above* the content rather
         // than inserting it into the layout flow. Two consequences:
@@ -398,11 +402,12 @@ private struct SecretInputBound: View {
 
 private enum SettingsLayout {
     static let windowWidth: CGFloat = 560
-    // 1040pt fits every section of the Form (Аудио / Языки / OpenAI /
-    // Hotkeys / BlackHole / Поведение / О приложении) without the
-    // user needing to scroll. The previous value (540pt) clipped
-    // BlackHole status and the behaviour toggles below the fold.
-    static let windowHeight: CGFloat = 1040
+    /// Lower bound for the form's intrinsic height. The window itself
+    /// opens at 620pt (the standard macOS Settings pane height) and
+    /// the user can resize it; the form's native scroll view handles
+    /// overflow when the window is shorter than the full content
+    /// stack.
+    static let minWindowHeight: CGFloat = 480
 }
 
 // MARK: - External URLs

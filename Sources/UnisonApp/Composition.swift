@@ -146,8 +146,14 @@ extension Composition {
     /// Pick a `BlackHoleInstaller`:
     /// - `UNISON_FORCE_STATE=onboarding-done` or `transcript-demo`:
     ///   return a pre-installed mock so the onboarding window stays closed.
-    /// - `UNISON_DEV_MODE=1`: use `MockBlackHoleInstaller` that succeeds
-    ///   after a short delay (lets QA exercise the in-progress spinner).
+    /// - `UNISON_MOCK_BLACKHOLE=1`: explicit opt-in to the mock
+    ///   installer (lets QA exercise the in-progress spinner without
+    ///   actually running `installer`).
+    /// - `UNISON_DEV_MODE=1` **without** a `.app` bundle (i.e.
+    ///   `swift run`): use the mock so a fresh contributor doesn't hit
+    ///   "pkgs not bundled" while developing UI flows. When running
+    ///   inside an `.app` that ships the pkgs, dev-mode still uses the
+    ///   real installer so the user can actually install BlackHole.
     /// - Otherwise: use `BundledBlackHoleInstaller`. If the bundled
     ///   `.pkg` resources are missing we log a warning but still hand
     ///   back the real installer (the user will see the real error
@@ -158,15 +164,31 @@ extension Composition {
             return MockBlackHoleInstaller(preInstalled: true)
         }
         let env = ProcessInfo.processInfo.environment
-        if env["UNISON_DEV_MODE"] == "1" {
-            print("[Unison] UNISON_DEV_MODE=1 — using MockBlackHoleInstaller")
+        // Explicit mock opt-in, independent of `UNISON_DEV_MODE`. Used
+        // by snapshot tests / contributors who want the mock spinner
+        // even when running the .app.
+        if env["UNISON_MOCK_BLACKHOLE"] == "1" {
+            print("[Unison] UNISON_MOCK_BLACKHOLE=1 — using MockBlackHoleInstaller")
+            return MockBlackHoleInstaller()
+        }
+        // `swift run` puts the binary somewhere inside `.build/...` —
+        // no `.app` wrapper, no bundled Resources. In that case
+        // `UNISON_DEV_MODE=1` falls back to the mock so the dev can
+        // still walk through onboarding without the pkgs available.
+        // When we're inside an `.app` bundle, dev mode no longer
+        // forces the mock: the real installer can find the pkgs in
+        // Resources/ and the user can click "Установить" to actually
+        // install BlackHole.
+        let isAppBundle = Bundle.main.bundlePath.hasSuffix(".app")
+        if env["UNISON_DEV_MODE"] == "1" && !isAppBundle {
+            print("[Unison] UNISON_DEV_MODE=1 (no .app bundle) — using MockBlackHoleInstaller")
             return MockBlackHoleInstaller()
         }
         let real = BundledBlackHoleInstaller()
         // Warn if the bundle doesn't ship the pkgs so a fresh contributor
         // running `swift run Unison` understands why install fails.
         if Bundle.main.url(forResource: "BlackHole2ch", withExtension: "pkg") == nil {
-            print("[Unison] warning: BlackHole2ch.pkg not bundled. Run with UNISON_DEV_MODE=1 for a mock installer.")
+            print("[Unison] warning: BlackHole2ch.pkg not bundled. Run with UNISON_MOCK_BLACKHOLE=1 for a mock installer.")
         }
         return real
     }

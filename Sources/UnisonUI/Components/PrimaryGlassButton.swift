@@ -45,6 +45,8 @@ public struct PrimaryGlassButton: View {
     public let action: () -> Void
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @SwiftUI.State private var isHovered = false
 
     public init(
         title: String,
@@ -63,6 +65,13 @@ public struct PrimaryGlassButton: View {
     public var body: some View {
         let shape = RoundedRectangle(cornerRadius: 13, style: .continuous)
 
+        // Hover affordance: native `.glassEffect(.regular.interactive())`
+        // already animates the glass surface itself on hover/press, but
+        // the tint gradient and specular highlight on top of it are
+        // static. To give the button an unmistakable hover signal we
+        // bump brightness by 4% and scale to 1.015 while the pointer
+        // is inside the shape. `ButtonStyleConfiguration.isPressed`
+        // (`PressableButtonStyle`) covers the press state.
         Button(action: action) {
             HStack(spacing: 8) {
                 if isLoading {
@@ -122,9 +131,21 @@ public struct PrimaryGlassButton: View {
             .clipShape(shape)
             .shadow(color: shadowColor, radius: 6, x: 0, y: 4)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressablePrimaryButtonStyle())
         .contentShape(shape)
         .disabled(isLoading)
+        // Subtle brightness bump on hover — a 4% lift on top of the
+        // already-bright tint gradient makes the cursor's presence
+        // visible without changing the button's colour identity.
+        .brightness(isHovered ? 0.04 : 0)
+        .scaleEffect(isHovered ? 1.015 : 1.0)
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.12),
+            value: isHovered
+        )
+        .onHover { hovering in
+            isHovered = hovering
+        }
     }
 
     /// Gradient that paints the button. Mirrors the CSS:
@@ -176,5 +197,23 @@ public struct PrimaryGlassButton: View {
         case .destructive:
             Color(red: 220 / 255, green: 60 / 255, blue: 90 / 255).opacity(0.32)
         }
+    }
+}
+
+/// Local button style that exposes the press state visually. We can't
+/// use `.buttonStyle(.plain)` and reach `configuration.isPressed`, so
+/// this small wrapper scales the label down to 0.985 on press for a
+/// physical "click" feel that the system glass interactive material
+/// alone doesn't provide on the tint gradient layer.
+private struct PressablePrimaryButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.985 : 1.0)
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.08),
+                value: configuration.isPressed
+            )
     }
 }

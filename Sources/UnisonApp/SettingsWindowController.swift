@@ -54,6 +54,10 @@ public final class SettingsWindowController {
             // Standard macOS Settings-style window:
             // - `.titled`: native titlebar with the document title.
             // - `.closable` / `.miniaturizable`: all three traffic lights.
+            // - `.resizable`: user can resize the Settings window to fit
+            //   their display. Native Form supplies an internal scroll
+            //   view so reducing the height shows a scroll indicator
+            //   instead of clipping rows.
             //
             // We deliberately omit `.fullSizeContentView`: with that flag
             // SwiftUI content extends under the titlebar and the system
@@ -63,15 +67,16 @@ public final class SettingsWindowController {
             // band on its own and the form starts directly below it,
             // matching every other System Settings-style window on
             // Tahoe.
-            // Height 800 fits the entire form (Аудио, Языки, OpenAI,
-            // Hotkeys, BlackHole, Поведение, О приложении) in a single
-            // view at the default size, so the user does not have to
-            // scroll to reach BlackHole status, behaviour toggles, or
-            // the About section. Matches System Settings panes that
-            // ship tall by default.
+            //
+            // Default height is 620pt — the standard macOS System
+            // Settings pane height — so the window fits comfortably on
+            // any display out of the box. The Form's internal scroll
+            // view handles overflow, and the user can drag the bottom
+            // edge to expand the window if they want every section
+            // visible at once.
             let w = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 560, height: 1040),
-                styleMask: [.titled, .closable, .miniaturizable],
+                contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered,
                 defer: false
             )
@@ -84,17 +89,24 @@ public final class SettingsWindowController {
             // composition.
             w.titlebarAppearsTransparent = false
             w.isReleasedWhenClosed = false
-            // `NSColor.windowBackgroundColor` is a system dynamic colour
-            // that supplies the macOS 26 Tahoe window material — glass
-            // with adaptive translucency that reacts to Reduce
-            // Transparency and Increase Contrast automatically. With
-            // `isOpaque = true` the system composites this material
-            // for us; we get refraction of the desktop wallpaper /
-            // sibling windows for free without manually layering
-            // `NSVisualEffectView` or `.glassEffect` on top.
-            w.backgroundColor = NSColor.windowBackgroundColor
-            w.isOpaque = true
+            // Liquid Glass requires an explicit `NSVisualEffectView`
+            // backing on macOS 26: `NSColor.windowBackgroundColor` in
+            // light mode is a solid grey, not the translucent material
+            // System Settings uses. We back the window with
+            // `NSVisualEffectView(material: .windowBackground)` and
+            // make the window itself transparent so the visual effect
+            // shows through. The Form's own scroll-content background
+            // is hidden below in `SettingsView` so the glass is visible
+            // beneath the section cards.
+            w.isOpaque = false
+            w.backgroundColor = .clear
             w.hasShadow = true
+            // Min/max bounds: the smaller end keeps the form usable on
+            // 13" displays (sections still readable, no horizontal
+            // squish); the upper bound prevents accidental over-expand
+            // on multi-monitor setups.
+            w.minSize = NSSize(width: 560, height: 480)
+            w.maxSize = NSSize(width: 800, height: 1200)
 
             let root = SettingsView(
                 vm: viewModel,
@@ -102,13 +114,33 @@ public final class SettingsWindowController {
                 onRecordHotkey: onRecordHotkey
             )
             let host = NSHostingController(rootView: root)
-            // Pin the content size so the Form's intrinsic horizontal
-            // content-hugging doesn't shrink the window. Without this,
-            // SwiftUI Form.grouped collapses to ~200pt wide.
-            host.sizingOptions = [.preferredContentSize]
-            host.preferredContentSize = NSSize(width: 560, height: 1040)
-            w.contentViewController = host
-            w.setContentSize(NSSize(width: 560, height: 1040))
+            host.view.translatesAutoresizingMaskIntoConstraints = false
+
+            // Liquid Glass backing for the window content area. With
+            // `.windowBackground` material, `NSVisualEffectView`
+            // resolves to the system Liquid Glass material on Tahoe —
+            // the same translucent surface System Settings draws on,
+            // which refracts the desktop wallpaper and sibling windows
+            // behind the window.
+            let veView = NSVisualEffectView()
+            veView.material = .windowBackground
+            veView.blendingMode = .behindWindow
+            veView.state = .active
+            veView.translatesAutoresizingMaskIntoConstraints = false
+            veView.addSubview(host.view)
+            NSLayoutConstraint.activate([
+                host.view.topAnchor.constraint(equalTo: veView.topAnchor),
+                host.view.bottomAnchor.constraint(equalTo: veView.bottomAnchor),
+                host.view.leadingAnchor.constraint(equalTo: veView.leadingAnchor),
+                host.view.trailingAnchor.constraint(equalTo: veView.trailingAnchor),
+            ])
+
+            w.contentView = veView
+            // We're setting the content view directly (not via
+            // controller) so the visual effect view stays the root —
+            // a contentViewController would replace it on demand.
+            w.contentViewController = nil
+            w.setContentSize(NSSize(width: 560, height: 620))
             w.center()
             window = w
         }
