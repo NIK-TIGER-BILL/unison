@@ -241,7 +241,11 @@ public final class PopoverViewModel {
         case .networkLost:
             return "Нет связи с серверами OpenAI. Проверьте интернет."
         case .apiKeyInvalid:
-            return "OpenAI ключ невалидный. Проверьте на platform.openai.com/api-keys или вставьте новый в Настройках."
+            // Markdown link — ErrorRow renders the message through a
+            // `Text(LocalizedStringKey(...))` initializer that auto-
+            // parses `[label](url)` into a clickable link, while the
+            // surrounding text stays selectable via `.textSelection`.
+            return "OpenAI ключ невалидный. Проверьте на [platform.openai.com/api-keys](https://platform.openai.com/api-keys) или вставьте новый в Настройках."
         case .rateLimited:
             return "Превышен лимит запросов OpenAI. Повторите позже."
         case .insufficientCredits:

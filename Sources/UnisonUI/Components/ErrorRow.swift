@@ -30,10 +30,17 @@ public struct ErrorRow: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white)
                 if let detail = detail {
-                    Text(detail)
+                    // `Text(LocalizedStringKey)` parses markdown so the
+                    // VM can embed clickable URLs via `[label](https://…)`.
+                    // The user can still select+copy the underlying text
+                    // because Text content is `.textSelection(.enabled)`'d
+                    // on the row below.
+                    Text(LocalizedStringKey(detail))
                         .font(.system(size: 12))
                         .foregroundStyle(Color(red: 255 / 255, green: 200 / 255, blue: 210 / 255).opacity(0.95))
+                        .tint(UnisonColors.whiteAlpha(0.95))
                         .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
                 }
             }
             Spacer(minLength: 0)
