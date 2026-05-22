@@ -1,6 +1,9 @@
 import AppKit
+import Darwin
+import Dispatch
 import Observation
 import SwiftUI
+import UnisonAudio
 import UnisonDomain
 import UnisonUI
 
@@ -20,6 +23,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// some other observable property in the orchestrator.
     private var lastMenubarState: MenubarState = .idle
 
+    /// Dispatch sources for SIGINT/SIGTERM so the runloop can route the
+    /// signal through `NSApp.terminate` (which fires
+    /// `applicationWillTerminate`, which calls `orchestrator.stop()`,
+    /// which patches the WAV dump header sizes). Without this, `pkill
+    /// -INT Unison` just `exit(0)`s the process and the dump file ends
+    /// up with placeholder 0xFFFFFFFF sizes — still readable by the
+    /// integration test, but malformed for normal players.
+    private var signalSources: [DispatchSourceSignal] = []
+
     public func applicationDidFinishLaunching(_ notification: Notification) {
         // Touch the file-log singleton so the boot banner is written
         // before any other component logs. The integration test greps
@@ -31,6 +43,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             level: "info",
             message: "applicationDidFinishLaunching — pid=\(ProcessInfo.processInfo.processIdentifier)"
         )
+
+        installSignalHandlers()
 
         let hotkeys = HotkeyService()
         self.hotkeyService = hotkeys
@@ -170,9 +184,48 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
+        FileLogStore.shared.write(
+            category: "AppDelegate",
+            level: "info",
+            message: "applicationWillTerminate — graceful shutdown"
+        )
         hotkeyService?.stop()
-        let orch = composition.orchestrator
-        Task { @MainActor in await orch.stop() }
+
+        // Synchronous audio teardown FIRST — this is what patches the
+        // WAV dump header sizes (if `UNISON_DUMP_OUTPUT_WAV` was set).
+        // We deliberately call the player + mixer directly instead of
+        // going through `await orchestrator.stop()`: applicationWillTerminate
+        // is synchronous on the main actor, and a `Task { @MainActor in
+        // await orch.stop() }` deadlocks because semaphore.wait blocks
+        // main while the Task waits for main to free up.
+        composition.virtualMicPlayer.stop()
+        composition.outputMixer.stop()
+    }
+
+    /// Routes SIGINT / SIGTERM through `NSApp.terminate(_:)` so the full
+    /// shutdown chain runs (applicationWillTerminate → orchestrator.stop
+    /// → BlackHole2chPlayer.stop → WAV header patch). Default behaviour
+    /// of SIGINT in a Cocoa app is `exit(0)` from the kernel signal
+    /// handler — no Swift code runs.
+    private func installSignalHandlers() {
+        // Ignore the default disposition so the kernel doesn't kill us
+        // before the dispatch source picks up the signal.
+        signal(SIGINT, SIG_IGN)
+        signal(SIGTERM, SIG_IGN)
+
+        for sig in [SIGINT, SIGTERM] {
+            let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            src.setEventHandler {
+                FileLogStore.shared.write(
+                    category: "AppDelegate",
+                    level: "info",
+                    message: "received signal \(sig) — invoking NSApp.terminate"
+                )
+                NSApp.terminate(nil)
+            }
+            src.resume()
+            signalSources.append(src)
+        }
     }
 
     // MARK: - Orchestrator → menubar state

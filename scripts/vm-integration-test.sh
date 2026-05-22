@@ -138,19 +138,26 @@ echo "keychain seed ok"
 EOF
 
 # --- 4. Launch Unison with the integration force-state -----------------------
-log "Launching Unison with UNISON_FORCE_STATE=start-translation + UNISON_TEST_AUDIO + UNISON_API_KEY…"
+log "Launching Unison with UNISON_FORCE_STATE=start-translation + UNISON_TEST_AUDIO + UNISON_API_KEY + UNISON_DUMP_OUTPUT_WAV…"
 # Pass the API key through env (UNISON_API_KEY) in addition to seeding
 # the keychain. The Composition prefers env when set — sidesteps the
 # observed Tart-VM keychain access quirk where SecItemCopyMatching can't
 # find the entry added via `security add-generic-password` even though
 # `security find-generic-password` confirms it's stored. Real-world
 # launches still read from keychain via the Onboarding flow.
+#
+# UNISON_DUMP_OUTPUT_WAV makes BlackHole2chPlayer mirror every scheduled
+# frame to a WAV file. This is the only way to prove translated audio
+# actually crossed the resampler-and-schedule pipeline (vs the weaker
+# "scheduleBuffer was called" signal from the log).
 ssh_vm "
+  rm -f /tmp/unison_output.wav 2>/dev/null
   nohup env \
     UNISON_DEV_MODE=1 \
     UNISON_FORCE_STATE=start-translation \
     UNISON_TEST_AUDIO=/Users/$VM_USER/test_speech_ru.wav \
     UNISON_API_KEY='$OPENAI_KEY' \
+    UNISON_DUMP_OUTPUT_WAV=/tmp/unison_output.wav \
     /Users/$VM_USER/Unison.app/Contents/MacOS/Unison >/tmp/unison.log 2>&1 &
   disown
   for i in \$(seq 1 10); do
@@ -165,7 +172,23 @@ log "Process launched."
 log "Waiting ${WAIT_SECONDS}s for translation pipeline + assertions…"
 sleep "$WAIT_SECONDS"
 
-# --- 6. Pull log file ---------------------------------------------------------
+# --- 6. Stop Unison in the VM (BEFORE log pull) ------------------------------
+# Two-phase shutdown: SIGINT first so AppDelegate.applicationWillTerminate
+# runs and `BlackHole2chPlayer.stop()` patches the WAV header sizes
+# (otherwise the dump file ends up with placeholder 0xFFFF_FFFF sizes,
+# which most players reject — host analysis still works via "read raw
+# float32 LE after offset 44", but a well-formed file is friendlier).
+# Then SIGKILL as a fallback if SIGINT didn't take effect within 2s.
+#
+# Order is critical: we stop FIRST, then pull the log, so the
+# shutdown sequence ("received signal 2", "applicationWillTerminate",
+# "dump — closed") makes it into the log file we ship to assertions.
+log "Stopping Unison in VM (SIGINT for graceful flush, then SIGKILL)…"
+ssh_vm 'pkill -INT Unison 2>/dev/null; true'
+sleep 2
+ssh_vm 'pkill -9 Unison 2>/dev/null; true'
+
+# --- 7. Pull log file ---------------------------------------------------------
 log "Pulling ~/Library/Logs/Unison/unison.log → $LOG_OUT"
 scp_from_vm "/Users/$VM_USER/Library/Logs/Unison/unison.log" "$LOG_OUT" || {
   err "Failed to fetch log file. Falling back to /tmp/unison.log (stdout)…"
@@ -179,9 +202,16 @@ fi
 LOG_SIZE=$(wc -l < "$LOG_OUT" | tr -d ' ')
 log "Pulled $LOG_SIZE lines into $LOG_OUT"
 
-# --- 7. Stop Unison in the VM -------------------------------------------------
-log "Stopping Unison in VM…"
-ssh_vm 'pkill -9 Unison 2>/dev/null; true'
+# --- 7b. Pull WAV dump (if it was generated) ---------------------------------
+WAV_OUT="$REPO_DIR/vm-integration-test-output.wav"
+log "Pulling /tmp/unison_output.wav → $WAV_OUT (if present)…"
+if scp_from_vm "/tmp/unison_output.wav" "$WAV_OUT" 2>/dev/null; then
+  WAV_SIZE=$(stat -f%z "$WAV_OUT" 2>/dev/null || echo 0)
+  log "Pulled WAV dump: $WAV_SIZE bytes"
+else
+  WAV_SIZE=0
+  warn "No WAV dump pulled (file missing or empty)."
+fi
 
 # --- 8. Assertions ------------------------------------------------------------
 # Each pattern matches a line that the file logger should have written
@@ -284,6 +314,43 @@ else
   for p in "${EXPECTED_HAPPY[@]}"; do
     assert_pattern "$p" || PASS=0
   done
+
+  # Verify the WAV dump captured real audio (not silence) — the "schedule
+  # was called" log line alone doesn't prove samples have signal. Python
+  # reads raw float32 LE starting at offset 44 (header), computes RMS,
+  # and asserts at least 0.5s of non-trivial signal.
+  log "  WAV dump verification:"
+  if [ "$WAV_SIZE" -gt 44 ]; then
+    if python3 - "$WAV_OUT" <<'PY'
+import sys, struct, os
+path = sys.argv[1]
+size = os.path.getsize(path)
+data_bytes = size - 44
+sample_count = data_bytes // 4  # float32 LE, mono
+duration = sample_count / 48000.0
+with open(path, 'rb') as f:
+    f.seek(44)
+    raw = f.read()
+import struct
+samples = struct.unpack(f'<{sample_count}f', raw)
+# RMS over the whole dump
+sq_sum = sum(s * s for s in samples)
+rms = (sq_sum / max(1, sample_count)) ** 0.5
+peak = max((abs(s) for s in samples), default=0.0)
+print(f'    duration={duration:.3f}s sample_count={sample_count} rms={rms:.5f} peak={peak:.5f}')
+ok = duration >= 0.5 and rms >= 1e-4 and peak >= 1e-3
+sys.exit(0 if ok else 1)
+PY
+    then
+      printf '\033[1;32m  ✓\033[0m WAV dump has ≥0.5s of non-silent audio\n'
+    else
+      printf '\033[1;31m  ✗ WAV dump verification FAILED\033[0m (too short or silent)\n'
+      PASS=0
+    fi
+  else
+    printf '\033[1;31m  ✗ WAV dump MISSING or empty\033[0m (size=%s)\n' "$WAV_SIZE"
+    PASS=0
+  fi
 fi
 
 # --- 9. Tear down (or keep running for next call) ----------------------------

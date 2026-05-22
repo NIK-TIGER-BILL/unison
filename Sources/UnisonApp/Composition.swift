@@ -49,6 +49,16 @@ public final class Composition {
     public let permissions: any PermissionsService
     public let installer: any BlackHoleInstaller
     public let keychain: any KeychainService
+
+    /// Exposed so `AppDelegate.applicationWillTerminate` can call
+    /// `stop()` synchronously and let `BlackHole2chPlayer` patch its
+    /// WAV dump header before the process exits. The async
+    /// orchestrator.stop() path deadlocks on the main actor when
+    /// invoked from applicationWillTerminate (sem.wait blocks main,
+    /// the Task hop needs main to run) — so we side-step it for the
+    /// audio teardown.
+    public let virtualMicPlayer: BlackHole2chPlayer
+    public let outputMixer: AVAudioOutputMixer
     private let settingsStore = SettingsStore()
 
     /// Boot-time diagnostic logger — mirrors to unified logging + the
@@ -117,6 +127,8 @@ public final class Composition {
         let peerCap = BlackHoleSinkCapture(registry: registry)
         let mixer = AVAudioOutputMixer()
         let bhPlayer = BlackHole2chPlayer(registry: registry)
+        self.virtualMicPlayer = bhPlayer
+        self.outputMixer = mixer
 
         self.orchestrator = TranslationOrchestrator(
             micCapture: mic,

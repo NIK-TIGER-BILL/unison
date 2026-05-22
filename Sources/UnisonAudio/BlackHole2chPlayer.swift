@@ -24,6 +24,17 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
     /// exactly once so the log isn't drowned by the per-chunk firehose.
     private var loggedFirstFrame = false
 
+    /// Test-only WAV capture handle. When `UNISON_DUMP_OUTPUT_WAV=path` is
+    /// set in the process environment, every scheduled frame's float32 PCM
+    /// is appended here so the VM integration test can assert that real
+    /// audio (not just `scheduleBuffer` calls) crossed the pipeline. The
+    /// handle is opened on first frame and closed in `stop()`. If the
+    /// process is killed before `stop()`, the WAV header has a placeholder
+    /// size — host-side analysis treats anything past offset 44 as float32
+    /// samples regardless.
+    private var dumpHandle: FileHandle?
+    private var dumpedByteCount: UInt32 = 0
+
     public init(registry: CoreAudioDeviceRegistry) {
         self.registry = registry
     }
@@ -48,6 +59,7 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         player.stop()
         engine.stop()
         started = false
+        closeDumpFileIfNeeded()
     }
 
     private func startIfNeeded() throws {
@@ -120,9 +132,91 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
             memcpy(buf.floatChannelData![0], p, frame.pcm.count)
         }
         player.scheduleBuffer(buf, completionHandler: nil)
+        appendFrameToDumpIfNeeded(frame)
         if !loggedFirstFrame {
             loggedFirstFrame = true
             Self.log.info("schedule — first frame scheduled to BlackHole 2ch (\(frame.sampleRate)Hz × \(frame.channels)ch, \(frame.sampleCount) samples)")
         }
+    }
+
+    // MARK: - WAV dump (test-only)
+
+    /// Opens the WAV dump file lazily on first frame so the captured format
+    /// matches the actual pipeline output (no guessing the sample rate).
+    /// Subsequent frames with mismatched format are silently dropped from
+    /// the dump (still scheduled normally) — the WAV file represents the
+    /// canonical scheduled stream.
+    private func appendFrameToDumpIfNeeded(_ frame: AudioFrame) {
+        if dumpHandle == nil {
+            guard let path = ProcessInfo.processInfo.environment["UNISON_DUMP_OUTPUT_WAV"],
+                  !path.isEmpty else { return }
+            openDumpFile(path: path, sampleRate: UInt32(frame.sampleRate), channels: UInt16(frame.channels))
+        }
+        guard let handle = dumpHandle else { return }
+        handle.write(frame.pcm)
+        dumpedByteCount &+= UInt32(frame.pcm.count)
+    }
+
+    private func openDumpFile(path: String, sampleRate: UInt32, channels: UInt16) {
+        FileManager.default.createFile(atPath: path, contents: nil)
+        guard let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: path)) else {
+            Self.log.error("dump — failed to open \(path) for WAV capture")
+            return
+        }
+        // Placeholder header — sizes are patched on `stop()`. If the
+        // process is killed first, host analysis still works by reading
+        // from offset 44 as raw float32 LE.
+        handle.write(Self.buildWAVHeader(sampleRate: sampleRate, channels: channels, dataSize: 0xFFFF_FFFF))
+        dumpHandle = handle
+        dumpedByteCount = 0
+        Self.log.info("dump — opened \(path) for WAV capture (\(sampleRate)Hz × \(channels)ch float32 LE)")
+    }
+
+    private func closeDumpFileIfNeeded() {
+        guard let handle = dumpHandle else { return }
+        let dataSize = dumpedByteCount
+        let fileSize = dataSize &+ 36
+        // Patch RIFF chunk size (offset 4) and data chunk size (offset 40).
+        try? handle.seek(toOffset: 4)
+        handle.write(Self.uint32LE(fileSize))
+        try? handle.seek(toOffset: 40)
+        handle.write(Self.uint32LE(dataSize))
+        try? handle.close()
+        dumpHandle = nil
+        let durationSec = Double(dataSize) / 4.0 / 48000.0
+        Self.log.info("dump — closed; \(dataSize) bytes (~\(String(format: "%.2f", durationSec))s of float32 mono)")
+    }
+
+    private static func buildWAVHeader(sampleRate: UInt32, channels: UInt16, dataSize: UInt32) -> Data {
+        var header = Data()
+        let bitsPerSample: UInt16 = 32
+        let byteRate = sampleRate * UInt32(channels) * UInt32(bitsPerSample / 8)
+        let blockAlign = channels * (bitsPerSample / 8)
+        let fileSize = dataSize &+ 36
+
+        header.append(contentsOf: "RIFF".utf8)
+        header.append(uint32LE(fileSize))
+        header.append(contentsOf: "WAVE".utf8)
+        header.append(contentsOf: "fmt ".utf8)
+        header.append(uint32LE(16))           // fmt chunk size
+        header.append(uint16LE(3))            // format = IEEE float
+        header.append(uint16LE(channels))
+        header.append(uint32LE(sampleRate))
+        header.append(uint32LE(byteRate))
+        header.append(uint16LE(blockAlign))
+        header.append(uint16LE(bitsPerSample))
+        header.append(contentsOf: "data".utf8)
+        header.append(uint32LE(dataSize))
+        return header
+    }
+
+    private static func uint32LE(_ v: UInt32) -> Data {
+        var le = v.littleEndian
+        return Data(bytes: &le, count: 4)
+    }
+
+    private static func uint16LE(_ v: UInt16) -> Data {
+        var le = v.littleEndian
+        return Data(bytes: &le, count: 2)
     }
 }

@@ -18,5 +18,6 @@ Resources/blackhole/*.pkg
 # Tart VM screenshot harness output
 vm-screenshots/
 
-# VM integration test pulled log (kept locally for debugging)
+# VM integration test artifacts (kept locally for debugging — never committed)
 vm-integration-test.log
+vm-integration-test-output.wav
