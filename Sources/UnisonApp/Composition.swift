@@ -163,12 +163,23 @@ public final class Composition {
         )
         let store = settingsStore
         let popVM = self.popoverVM
+        let orch = self.orchestrator
         self.settingsVM = SettingsViewModel(
             initial: initialSettings,
             deviceRegistry: registry,
             onChange: { s in
                 store.save(s)
                 popVM.settings = s
+                // Live-propagate the settings that can be applied without
+                // restarting the session. Without this, dragging the
+                // "original mix volume" slider during a Listen-mode
+                // session only persists for next start — the running
+                // engine keeps the old gain until you stop+restart.
+                // Language pair / device UIDs / session mode all
+                // require a full restart, so they're applied at the
+                // next start() (the popover picker is .disabled while
+                // active to make that contract obvious).
+                orch.updateOriginalMixVolume(s.originalMixVolume)
             },
             keychain: keychain,
             installer: installer,
