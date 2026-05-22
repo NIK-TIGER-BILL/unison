@@ -8,14 +8,27 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     private let translatedPlayer = AVAudioPlayerNode()
     private let originalPlayer = AVAudioPlayerNode()
     private let mixer: AVAudioMixerNode
+    /// Latches on first successful `start(_:)` so the second start in a
+    /// stop-restart cycle doesn't `engine.attach(_:)` already-attached
+    /// nodes. `AVAudioEngine.attach` is documented to throw an Obj-C
+    /// exception if the same node is attached twice — and Obj-C
+    /// exceptions in Swift are non-recoverable. The previous version
+    /// got away with it on this OS revision but the contract is
+    /// fragile; latching makes it explicit. `stop()` deliberately
+    /// does *not* detach (the engine reuses the same player instances
+    /// on restart, so detach+reattach buys nothing but reset risk).
+    private var attached = false
 
     public init() {
         self.mixer = engine.mainMixerNode
     }
 
     public func start(deviceUID: String?) async throws {
-        engine.attach(translatedPlayer)
-        engine.attach(originalPlayer)
+        if !attached {
+            engine.attach(translatedPlayer)
+            engine.attach(originalPlayer)
+            attached = true
+        }
 
         // Assign the requested output device before resolving formats so
         // AVAudioEngine can negotiate the mixer→output connection at the

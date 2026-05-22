@@ -135,8 +135,16 @@ public struct PopoverView: View {
     /// macOS pop-up button; the opened menu is a system `NSMenu`
     /// drawn over the popover, so it never gets clipped (which is the
     /// whole point of replacing the previous overlay-based dropdown).
+    ///
+    /// Disabled while a session is active: `updateLanguagePair` only
+    /// rewrites `settings.languagePair` — it doesn't touch the
+    /// running orchestrator, so changing the pair mid-session was a
+    /// silent no-op that misled the user (UI shows en→ru but audio
+    /// still flows ru→en). Disabling the picker until the user
+    /// stops makes the contract explicit.
     private var languageBar: some View {
-        HStack(alignment: .center, spacing: 0) {
+        let locked = vm.state.isActive
+        return HStack(alignment: .center, spacing: 0) {
             languagePicker(
                 caption: "Я говорю",
                 alignment: .leading,
@@ -172,7 +180,10 @@ public struct PopoverView: View {
                         )
                 )
         )
+        .disabled(locked)
+        .opacity(locked ? 0.55 : 1.0)
         .animation(UnisonAnimations.state, value: vm.isLanguagePairValid)
+        .animation(UnisonAnimations.state, value: locked)
     }
 
     /// One side of the language bar — a small caption ("Я говорю" /

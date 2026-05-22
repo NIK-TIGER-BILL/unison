@@ -204,6 +204,17 @@ public final class PopoverViewModel {
             return
         }
 
+        // If the previous attempt parked us in `.error` (e.g. transient
+        // network blip surfaced before reconnect succeeded, or the user
+        // pulled BlackHole mid-session), the orchestrator's
+        // `guard case .idle = state` rejects a fresh start() and the
+        // user-facing "Начать перевод" button appears dead. Reset to
+        // idle here so the click does what it says.
+        if case .error = state {
+            Self.log.info("start() — resetting from .error to .idle before fresh attempt")
+            await orchestrator?.stop()
+        }
+
         await orchestrator?.start(mode: mode, languages: settings.languagePair, settings: settings)
         let postState = String(describing: state)
         Self.log.info("start() returned — state=\(postState)")

@@ -140,10 +140,17 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
             return String(data: data, encoding: .utf8)
         }()
         let code = closeCode.rawValue
-        Self.log.error("WS close — code=\(code) reason=\(reasonString ?? "<nil>")")
+        // Log level mirrors the close semantics: code 1000 (normal
+        // closure) is what we ourselves trigger via stop(), so emitting
+        // it at .error makes log scans noisy and misleads operators
+        // ("oh look, every stop is errored"). Abnormal closes — auth
+        // failures, server-initiated tears, transport drops — stay at
+        // .error so they stand out.
         if closeCode == .normalClosure {
+            Self.log.info("WS close — code=\(code) reason=\(reasonString ?? "<nil>") (normal)")
             closeContinuation?.yield(.normal)
         } else {
+            Self.log.error("WS close — code=\(code) reason=\(reasonString ?? "<nil>")")
             closeContinuation?.yield(.abnormal(code: code, reason: reasonString))
         }
     }
