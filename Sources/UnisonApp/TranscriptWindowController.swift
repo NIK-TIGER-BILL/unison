@@ -15,9 +15,11 @@ import UnisonUI
 ///   Positioned 22pt above the visible bottom edge, horizontally centered.
 /// - Transparent background so the SwiftUI glass material is the only
 ///   visible chrome.
-/// - `isMovableByWindowBackground = true` — the SwiftUI content is mostly
-///   transparent (only the pill and bubbles have any hit-testable surface),
-///   so dragging anywhere on the pill or background moves the panel.
+/// - `isMovableByWindowBackground = false` — interactive controls inside
+///   the settings popover (sliders especially) need to receive their
+///   own drag events. Instead, the pill installs a dedicated
+///   `WindowDragHandle` background view so drags on the pill chrome
+///   still move the panel.
 @MainActor
 public final class TranscriptWindowController {
     private var window: NSWindow?
@@ -58,7 +60,9 @@ public final class TranscriptWindowController {
             )
             panel.level = .floating
             panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
-            panel.isMovableByWindowBackground = true
+            // See doc comment above — sliders inside the settings
+            // popover would otherwise fall through to the window.
+            panel.isMovableByWindowBackground = false
             panel.hasShadow = false
             panel.isOpaque = false
             panel.backgroundColor = .clear

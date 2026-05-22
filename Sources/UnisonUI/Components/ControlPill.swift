@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// Transcript-window control pill: status dot + timer + settings gear +
-/// Скрыть/Показать text button + stop icon. Draggable via the panel's
-/// host window (UnisonApp sets `isMovableByWindowBackground`).
-/// DESIGN.md §5.18.
+/// Скрыть/Показать text button + stop icon. Draggable via a
+/// `WindowDragHandle` installed as the pill's background — buttons sit
+/// on top and intercept clicks normally, the chrome behind them moves
+/// the host panel. DESIGN.md §5.18.
 ///
 /// Single Liquid Glass capsule — all internal controls sit on top
 /// of one glass surface (no nested glass). Uses Apple's native
@@ -100,6 +101,7 @@ public struct ControlPill: View {
             .help("Остановить перевод")
         }
         .padding(.vertical, 6)
+        .background(WindowDragHandle())
         .glassEffect(
             reduceTransparency ? .identity : .regular.interactive(),
             in: Capsule()

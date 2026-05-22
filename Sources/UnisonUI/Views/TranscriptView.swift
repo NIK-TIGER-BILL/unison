@@ -82,9 +82,10 @@ public struct TranscriptView: View {
     // MARK: - Pill + popover
 
     private var controlPillWithPopover: some View {
-        // The pill is centered; the popover is anchored above it, aligned
-        // to the pill's leading edge — matching the CSS `bottom: 100%;
-        // left: 0;` rule in the HTML mock.
+        // The pill is centered; the popover sits directly above it,
+        // horizontally centered relative to the pill. The VStack stacks
+        // them vertically, and the outer `.frame(maxWidth: .infinity)`
+        // on the caller centres the column inside the window.
         //
         // Per Apple's Liquid Glass guidance, multiple adjacent glass
         // surfaces should be wrapped in a `GlassEffectContainer` for
@@ -92,16 +93,7 @@ public struct TranscriptView: View {
         // settings popover (rounded-rectangle glass) are visible at the
         // same time when the gear is open, so we container them.
         GlassEffectContainer {
-            ZStack(alignment: .bottomLeading) {
-                controlPill
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear.preference(
-                                key: PillFrameKey.self,
-                                value: proxy.frame(in: .local)
-                            )
-                        }
-                    )
+            VStack(spacing: 12) {
                 if isSettingsOpen {
                     TranscriptSettingsPopover(
                         sizeIndex: Binding(
@@ -113,12 +105,12 @@ public struct TranscriptView: View {
                             set: { vm.updateOriginalVolume(Int(($0 * 100).rounded())) }
                         )
                     )
-                    .alignmentGuide(.bottom) { d in d[.top] + 12 }
                     .transition(reduceMotion
                         ? .opacity
                         : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
                     .zIndex(20)
                 }
+                controlPill
             }
         }
     }
@@ -141,10 +133,13 @@ public struct TranscriptView: View {
     // MARK: - Stop modal
 
     private var stopModal: some View {
+        // The host transcript panel is borderless / transparent, so the
+        // design HTML's full-window `.modal-backdrop` dim would render
+        // as a stray dark rectangle around the card. We drop the dim
+        // and use an invisible click-catcher behind the card to keep
+        // "tap outside to cancel" behaviour.
         ZStack {
-            // Backdrop — dimmed blur per `.modal-backdrop`.
-            Color.black.opacity(0.45)
-                .ignoresSafeArea()
+            Color.clear
                 .contentShape(Rectangle())
                 .onTapGesture { vm.cancelStop() }
 
@@ -194,11 +189,3 @@ public struct TranscriptView: View {
     }
 }
 
-// MARK: - PreferenceKey
-
-private struct PillFrameKey: PreferenceKey {
-    static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
-    }
-}
