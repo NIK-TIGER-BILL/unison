@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 import UnisonDomain
 
 public enum StartBlockedReason: Equatable, Sendable {
@@ -18,6 +19,13 @@ public enum PopoverPrimaryIcon: Sendable {
 @MainActor
 @Observable
 public final class PopoverViewModel {
+    /// `os.Logger` channel for the popover view-model. Stream this with
+    /// `log stream --predicate 'subsystem == "com.unison.app"' --info`
+    /// to see exactly which step of `start()` is reached (or skipped)
+    /// when a click on "Начать перевод" appears to do nothing.
+    @ObservationIgnored
+    static let log = Logger(subsystem: "com.unison.app", category: "PopoverVM")
+
     private let orchestrator: TranslationOrchestrator?
     private let permissions: any PermissionsService
     private let deviceRegistry: any AudioDeviceRegistry
@@ -165,11 +173,34 @@ public final class PopoverViewModel {
     }
 
     public func start() async {
-        await orchestrator?.start(mode: settings.sessionMode, languages: settings.languagePair, settings: settings)
+        // Snapshot the pre-flight environment so silent failures stop
+        // being silent. Every line here lands in unified logging under
+        // `com.unison.app`/`PopoverVM`.
+        let mode = settings.sessionMode
+        let mineCode = settings.languagePair.mine.rawValue
+        let peerCode = settings.languagePair.peer.rawValue
+        let blocked = String(describing: startBlockedReason)
+        let micStatus = String(describing: permissions.currentStatus(.microphone))
+        let bh2 = deviceRegistry.findBlackHole2ch() != nil
+        let bh16 = deviceRegistry.findBlackHole16ch() != nil
+        let preState = String(describing: state)
+        Self.log.info("start() called — mode=\(mode.rawValue, privacy: .public), pair=\(mineCode, privacy: .public)→\(peerCode, privacy: .public)")
+        Self.log.info("start() pre-flight — blockedReason=\(blocked, privacy: .public), mic=\(micStatus, privacy: .public), BH2ch=\(bh2 ? "present" : "missing", privacy: .public), BH16ch=\(bh16 ? "present" : "missing", privacy: .public), state=\(preState, privacy: .public)")
+
+        if orchestrator == nil {
+            Self.log.error("start() — orchestrator is nil (preview VM); skipping")
+            return
+        }
+
+        await orchestrator?.start(mode: mode, languages: settings.languagePair, settings: settings)
+        let postState = String(describing: state)
+        Self.log.info("start() returned — state=\(postState, privacy: .public)")
     }
 
     public func stop() async {
+        Self.log.info("stop() called — state=\(String(describing: self.state), privacy: .public)")
         await orchestrator?.stop()
+        Self.log.info("stop() returned — state=\(String(describing: self.state), privacy: .public)")
     }
 
     /// Toggle between Call and Listen modes. Convenience for the view.
@@ -181,5 +212,32 @@ public final class PopoverViewModel {
     /// the view layer from poking at `settings.languagePair` directly.
     public func updateLanguagePair(_ pair: LanguagePair) {
         settings.languagePair = pair
+    }
+
+    /// Russian user-facing message for a `TranslationError` surfaced via
+    /// the popover. Kept on the view-model so tests can verify the
+    /// mapping without instantiating SwiftUI views. Wording stays short
+    /// per the project's UX-copy convention (see MEMORY.md).
+    public nonisolated static func userMessage(for error: TranslationError) -> String {
+        switch error {
+        case .permissionDenied(.microphone):
+            return "Нет доступа к микрофону. Откройте Настройки → Privacy & Security → Microphone."
+        case .blackHole2chMissing:
+            return "BlackHole 2ch не найден. Установите драйвер в Onboarding."
+        case .blackHole16chMissing:
+            return "BlackHole 16ch не найден. Установите драйвер в Onboarding."
+        case .networkLost:
+            return "Нет связи с серверами OpenAI. Проверьте интернет."
+        case .apiKeyInvalid:
+            return "Ключ OpenAI отклонён. Проверьте в Настройках."
+        case .rateLimited:
+            return "Превышен лимит запросов OpenAI. Повторите позже."
+        case .insufficientCredits:
+            return "Закончились средства OpenAI. Пополните баланс."
+        case .inputDeviceUnavailable:
+            return "Микрофон недоступен. Выберите другое устройство в Настройках."
+        case .outputDeviceUnavailable:
+            return "Аудио-выход недоступен. Выберите другое устройство в Настройках."
+        }
     }
 }

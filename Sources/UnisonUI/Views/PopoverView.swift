@@ -48,6 +48,18 @@ public struct PopoverView: View {
             if vm.state.isActive {
                 timer
             }
+            // Surface session-startup failures inline. Without this the
+            // popover would look identical to its idle state after a
+            // failed `start()` — exactly the silent-failure bug.
+            if let reason = vm.state.errorValue {
+                ErrorRow(
+                    title: "Не удалось запустить",
+                    detail: PopoverViewModel.userMessage(for: reason),
+                    action: .retry(label: "Повторить") {
+                        Task { await vm.start() }
+                    }
+                )
+            }
         }
         .padding(16)
     }

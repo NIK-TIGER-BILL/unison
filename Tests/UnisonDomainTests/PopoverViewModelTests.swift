@@ -184,3 +184,39 @@ func popoverVM_updateLanguagePair_replacesPair() {
     vm.updateLanguagePair(LanguagePair(mine: .ja, peer: .ko))
     #expect(vm.settings.languagePair == LanguagePair(mine: .ja, peer: .ko))
 }
+
+// MARK: - User-facing error messages
+
+@Test
+func popoverVM_userMessage_mapsEveryTranslationError() {
+    // Each branch should yield a non-empty Russian sentence so the
+    // ErrorRow detail line is never blank.
+    let cases: [TranslationError] = [
+        .permissionDenied(.microphone),
+        .blackHole2chMissing,
+        .blackHole16chMissing,
+        .apiKeyInvalid,
+        .rateLimited(retryAfter: 1),
+        .insufficientCredits,
+        .networkLost,
+        .inputDeviceUnavailable,
+        .outputDeviceUnavailable,
+    ]
+    for err in cases {
+        let msg = PopoverViewModel.userMessage(for: err)
+        #expect(!msg.isEmpty, "userMessage for \(err) was empty")
+    }
+}
+
+@Test
+func popoverVM_userMessage_micPermissionPointsToSystemSettings() {
+    let msg = PopoverViewModel.userMessage(for: .permissionDenied(.microphone))
+    #expect(msg.contains("Privacy"))
+    #expect(msg.contains("Microphone"))
+}
+
+@Test
+func popoverVM_userMessage_apiKeyInvalidMentionsSettings() {
+    let msg = PopoverViewModel.userMessage(for: .apiKeyInvalid)
+    #expect(msg.contains("Настройках"))
+}

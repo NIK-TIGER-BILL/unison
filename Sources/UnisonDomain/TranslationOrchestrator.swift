@@ -1,10 +1,22 @@
 import Foundation
 import Observation
+import os
 
 @MainActor
 @Observable
 public final class TranslationOrchestrator {
-    public private(set) var state: SessionState = .idle
+    /// `os.Logger` channel for the orchestrator. Every state mutation
+    /// and every guard failure writes a line here, so silent failures
+    /// in `start()` / pipeline reconnects can be traced via:
+    ///     log stream --predicate 'subsystem == "com.unison.app"' --info
+    @ObservationIgnored
+    static let log = Logger(subsystem: "com.unison.app", category: "Orchestrator")
+
+    public private(set) var state: SessionState = .idle {
+        didSet {
+            Self.log.info("state \(String(describing: oldValue), privacy: .public) → \(String(describing: self.state), privacy: .public)")
+        }
+    }
     public let transcript: TranscriptStore
 
     private let micCapture: any MicrophoneCapture
@@ -51,7 +63,11 @@ public final class TranslationOrchestrator {
     }
 
     public func start(mode: SessionMode, languages: LanguagePair, settings: Settings = .default) async {
-        guard case .idle = state else { return }
+        Self.log.info("start() — mode=\(mode.rawValue, privacy: .public), pair=\(languages.mine.rawValue, privacy: .public)→\(languages.peer.rawValue, privacy: .public)")
+        guard case .idle = state else {
+            Self.log.error("start() rejected — state is not .idle (state=\(String(describing: self.state), privacy: .public))")
+            return
+        }
         state = .connecting(mode: mode)
         currentLanguages = languages
         currentSettings = settings
@@ -60,46 +76,72 @@ public final class TranslationOrchestrator {
 
         if mode == .call {
             let status = permissions.currentStatus(.microphone)
+            Self.log.info("start() — microphone permission currentStatus=\(String(describing: status), privacy: .public)")
             let resolved = status == .notDetermined ? await permissions.request(.microphone) : status
-            guard resolved == .granted else { state = .error(.permissionDenied(.microphone)); return }
-            guard deviceRegistry.findBlackHole2ch() != nil else { state = .error(.blackHole2chMissing); return }
+            Self.log.info("start() — microphone permission resolved=\(String(describing: resolved), privacy: .public)")
+            guard resolved == .granted else {
+                Self.log.error("start() guard failed: microphone permission denied → .error(.permissionDenied)")
+                state = .error(.permissionDenied(.microphone))
+                return
+            }
+            guard deviceRegistry.findBlackHole2ch() != nil else {
+                Self.log.error("start() guard failed: BlackHole 2ch not found → .error(.blackHole2chMissing)")
+                state = .error(.blackHole2chMissing)
+                return
+            }
         }
-        guard deviceRegistry.findBlackHole16ch() != nil else { state = .error(.blackHole16chMissing); return }
+        guard deviceRegistry.findBlackHole16ch() != nil else {
+            Self.log.error("start() guard failed: BlackHole 16ch not found → .error(.blackHole16chMissing)")
+            state = .error(.blackHole16chMissing)
+            return
+        }
 
+        Self.log.info("start() — starting output mixer (outputDeviceUID=\(settings.outputDeviceUID ?? "default", privacy: .public))")
         do {
             try await outputMixer.start(deviceUID: settings.outputDeviceUID)
             outputMixer.setOriginalGain(settings.originalMixVolume)
         } catch {
-            state = .error(.outputDeviceUnavailable); return
+            Self.log.error("start() output mixer failed: \(String(describing: error), privacy: .public) → .error(.outputDeviceUnavailable)")
+            state = .error(.outputDeviceUnavailable)
+            return
         }
 
         // Peer (incoming) stream — used in both modes
+        Self.log.info("start() — connecting peer stream (target=\(languages.mine.rawValue, privacy: .public))")
         let peer = translationFactory.make(speaker: .peer)
         peerStream = peer
         do {
             try await peer.connect(target: languages.mine)
         } catch {
-            state = .error(mapConnectError(error))
+            let mapped = mapConnectError(error)
+            Self.log.error("start() peer.connect failed: \(String(describing: error), privacy: .public) → .error(\(String(describing: mapped), privacy: .public))")
+            state = .error(mapped)
             return
         }
+        Self.log.info("start() — peer stream connected; wiring incoming pipeline")
         wireIncomingPipeline(stream: peer)
         observeConnectionState(stream: peer, speaker: .peer, target: languages.mine, mode: mode)
 
         if mode == .call {
+            Self.log.info("start() — connecting me stream (target=\(languages.peer.rawValue, privacy: .public))")
             let me = translationFactory.make(speaker: .me)
             meStream = me
             do {
                 try await me.connect(target: languages.peer)
             } catch {
-                state = .error(mapConnectError(error))
+                let mapped = mapConnectError(error)
+                Self.log.error("start() me.connect failed: \(String(describing: error), privacy: .public) → .error(\(String(describing: mapped), privacy: .public))")
+                state = .error(mapped)
                 return
             }
+            Self.log.info("start() — me stream connected; wiring outgoing pipeline")
             wireOutgoingPipeline(stream: me)
             observeConnectionState(stream: me, speaker: .me, target: languages.peer, mode: mode)
         }
 
         state = .translating(mode: mode, startedAt: clock.now())
         observeDeviceChanges()
+        Self.log.info("start() — translating session active")
     }
 
     private func observeDeviceChanges() {
@@ -119,6 +161,7 @@ public final class TranslationOrchestrator {
 
         // BlackHole 16ch is required in both modes — losing it is fatal.
         if deviceRegistry.findBlackHole16ch() == nil {
+            Self.log.error("handleDeviceChange — BlackHole 16ch disappeared mid-session → stop + .error(.blackHole16chMissing)")
             Task { @MainActor in
                 await self.stop()
                 self.state = .error(.blackHole16chMissing)
@@ -127,6 +170,7 @@ public final class TranslationOrchestrator {
         }
         // BlackHole 2ch is required only in Call mode — losing it is fatal there.
         if mode == .call, deviceRegistry.findBlackHole2ch() == nil {
+            Self.log.error("handleDeviceChange — BlackHole 2ch disappeared mid-call → stop + .error(.blackHole2chMissing)")
             Task { @MainActor in
                 await self.stop()
                 self.state = .error(.blackHole2chMissing)
@@ -182,9 +226,11 @@ public final class TranslationOrchestrator {
         target: Language,
         mode: SessionMode
     ) async {
+        Self.log.error("handleStreamFailure — speaker=\(String(describing: speaker), privacy: .public), error=\(String(describing: error), privacy: .public)")
         // Don't try to recover from terminal errors
         switch error {
         case .apiKeyInvalid, .insufficientCredits, .permissionDenied:
+            Self.log.error("handleStreamFailure — terminal error, surfacing as .error(\(String(describing: error), privacy: .public))")
             state = .error(error)
             return
         default:
@@ -253,10 +299,12 @@ public final class TranslationOrchestrator {
             }
         }
         // All retries failed
+        Self.log.error("handleStreamFailure — all reconnect attempts exhausted → .error(.networkLost)")
         state = .error(.networkLost)
     }
 
     public func stop() async {
+        Self.log.info("stop() — tearing down session from state=\(String(describing: self.state), privacy: .public)")
         for t in globalTasks { t.cancel() }
         for (_, tasks) in pipelineTasksBySpeaker {
             for t in tasks { t.cancel() }

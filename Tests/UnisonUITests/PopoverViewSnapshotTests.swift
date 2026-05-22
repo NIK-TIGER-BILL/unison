@@ -72,4 +72,12 @@ struct PopoverViewSnapshotTests {
         let vm = makeVM(state: .idle, bh16chPresent: false)
         snap(darkFloor(PopoverView(vm: vm), size: SnapSize.popover), size: SnapSize.popover)
     }
+
+    /// Regression guard for the silent-failure bug: when the orchestrator
+    /// surfaces a `.error(...)` state the popover must render an inline
+    /// `ErrorRow` so the user knows what went wrong.
+    @Test func popover_errorSurfaced() throws {
+        let vm = makeVM(state: .error(.networkLost))
+        snap(darkFloor(PopoverView(vm: vm), size: SnapSize.popover), size: SnapSize.popover)
+    }
 }
