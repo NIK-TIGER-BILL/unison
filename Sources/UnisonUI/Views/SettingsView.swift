@@ -66,6 +66,7 @@ public struct SettingsView: View {
             blackHoleSection
             behaviorSection
             aboutSection
+            howToUseSection
         }
         .formStyle(.grouped)
         .frame(minWidth: SettingsLayout.windowWidth, minHeight: SettingsLayout.minWindowHeight)
@@ -106,31 +107,43 @@ public struct SettingsView: View {
 
     private var audioSection: some View {
         Section("Аудио") {
-            Picker("Микрофон", selection: Binding(
-                get: { vm.settings.inputDeviceUID ?? Self.defaultDeviceTag },
-                set: { uid in
-                    vm.setInputDeviceUID(uid == Self.defaultDeviceTag ? nil : uid)
+            VStack(alignment: .leading, spacing: 4) {
+                Picker("Микрофон", selection: Binding(
+                    get: { vm.settings.inputDeviceUID ?? Self.defaultDeviceTag },
+                    set: { uid in
+                        vm.setInputDeviceUID(uid == Self.defaultDeviceTag ? nil : uid)
+                    }
+                )) {
+                    Text("По умолчанию").tag(Self.defaultDeviceTag)
+                    ForEach(vm.availableMics, id: \.uid) { device in
+                        Text(device.name).tag(device.uid)
+                    }
                 }
-            )) {
-                Text("По умолчанию").tag(Self.defaultDeviceTag)
-                ForEach(vm.availableMics, id: \.uid) { device in
-                    Text(device.name).tag(device.uid)
-                }
-            }
-            .pickerStyle(.menu)
+                .pickerStyle(.menu)
 
-            Picker("Динамик", selection: Binding(
-                get: { vm.settings.outputDeviceUID ?? Self.defaultDeviceTag },
-                set: { uid in
-                    vm.setOutputDeviceUID(uid == Self.defaultDeviceTag ? nil : uid)
-                }
-            )) {
-                Text("По умолчанию").tag(Self.defaultDeviceTag)
-                ForEach(vm.availableSpeakers, id: \.uid) { device in
-                    Text(device.name).tag(device.uid)
-                }
+                Text("Ваш реальный микрофон. В Zoom выберите «BlackHole 2ch» как mic.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
-            .pickerStyle(.menu)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Picker("Динамик", selection: Binding(
+                    get: { vm.settings.outputDeviceUID ?? Self.defaultDeviceTag },
+                    set: { uid in
+                        vm.setOutputDeviceUID(uid == Self.defaultDeviceTag ? nil : uid)
+                    }
+                )) {
+                    Text("По умолчанию").tag(Self.defaultDeviceTag)
+                    ForEach(vm.availableSpeakers, id: \.uid) { device in
+                        Text(device.name).tag(device.uid)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Text("Куда играть перевод. Системный output должен быть «BlackHole 16ch».")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
 
             LabeledContent {
                 HStack(spacing: 8) {
@@ -373,6 +386,118 @@ public struct SettingsView: View {
     private func aboutLink(_ text: String, url: URL) -> some View {
         MutedLink(text) {
             onOpenURL(url)
+        }
+    }
+
+    // MARK: - Section: How to use
+
+    /// "Как пользоваться" — final section at the bottom of Settings.
+    /// Explains the Two-BlackHole architecture so users understand
+    /// which device to pick where in their calling app.
+    private var howToUseSection: some View {
+        Section("Как пользоваться") {
+            flowDiagramRow
+            zoomSetupRow
+            launchStepsRow
+        }
+    }
+
+    /// Sub-row A — bidirectional flow diagram built from SF Symbols.
+    /// Two rows of compact icon+caption cells separated by arrows.
+    private var flowDiagramRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Поток звука")
+                .font(.subheadline.weight(.medium))
+
+            VStack(alignment: .leading, spacing: 12) {
+                // Outgoing: real mic → Unison → BlackHole 2ch → Zoom mic.
+                HStack(spacing: 6) {
+                    flowItem(icon: "mic.fill", label: "Ваш\nмикрофон")
+                    flowArrow
+                    flowItem(icon: "waveform.path.ecg", label: "Unison\nперевод")
+                    flowArrow
+                    flowItem(icon: "speaker.wave.2.fill", label: "BlackHole\n2ch")
+                    flowArrow
+                    flowItem(icon: "phone.fill", label: "Zoom\nmic")
+                }
+
+                // Incoming: Zoom audio → BlackHole 16ch → Unison → headphones.
+                HStack(spacing: 6) {
+                    flowItem(icon: "phone.fill", label: "Zoom\naudio")
+                    flowArrow
+                    flowItem(icon: "speaker.wave.2.fill", label: "BlackHole\n16ch")
+                    flowArrow
+                    flowItem(icon: "waveform.path.ecg", label: "Unison\nперевод")
+                    flowArrow
+                    flowItem(icon: "speaker.wave.3.fill", label: "Ваши\nнаушники")
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// One cell in the flow diagram: 24-pt SF Symbol + 2-line 11-pt label.
+    private func flowItem(icon: String, label: String) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+            Text(label)
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Small separator arrow between flow cells.
+    private var flowArrow: some View {
+        Image(systemName: "arrow.right")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.tertiary)
+    }
+
+    /// Sub-row B — numbered Zoom/Meet setup checklist.
+    private var zoomSetupRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Настройка Zoom / Meet")
+                .font(.subheadline.weight(.medium))
+            stepRow(index: 1, text: "Откройте настройки звука в Zoom (или Google Meet, Discord и т. д.)")
+            stepRow(index: 2, text: "Микрофон → BlackHole 2ch")
+            stepRow(index: 3, text: "Динамик → System Default или BlackHole 16ch")
+            stepRow(index: 4, text: "В Системных настройках macOS выход → BlackHole 16ch")
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// Sub-row C — final launch checklist after setup.
+    private var launchStepsRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Запуск")
+                .font(.subheadline.weight(.medium))
+            stepRow(index: 1, text: "Выберите выше ваш реальный микрофон и динамик")
+            stepRow(index: 2, text: "В popover на menubar выберите языки")
+            stepRow(index: 3, text: "Нажмите «Начать перевод»")
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// One numbered step row used by both setup checklists.
+    /// Renders a circled monospace digit + the instruction text.
+    private func stepRow(index: Int, text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(index).")
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 18, alignment: .trailing)
+            Text(text)
+                .font(.callout)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
     }
 }

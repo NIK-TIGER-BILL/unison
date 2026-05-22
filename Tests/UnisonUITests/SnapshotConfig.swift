@@ -19,7 +19,7 @@ import Testing
 public enum SnapSize {
     public static let popover = CGSize(width: 340, height: 420)
     public static let onboarding = CGSize(width: 440, height: 620)
-    public static let settings = CGSize(width: 560, height: 1040)
+    public static let settings = CGSize(width: 560, height: 1620)
     public static let transcript = CGSize(width: 600, height: 360)
     public static let logo = CGSize(width: 256, height: 256)
 }
