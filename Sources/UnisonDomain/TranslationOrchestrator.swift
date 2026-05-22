@@ -290,13 +290,27 @@ public final class TranslationOrchestrator {
                 guard let self else { return }
                 switch connState {
                 case .failed(let err, let receivedAnyData):
-                    await self.handleStreamFailure(
-                        error: err,
-                        speaker: speaker,
-                        target: target,
-                        mode: mode,
-                        receivedAnyData: receivedAnyData
-                    )
+                    // Only react to stream failures while the session is
+                    // still active. Without this guard, a user clicking
+                    // Stop quickly (before any audio delta) caused the
+                    // server's normalClosure → handleClose → .failed(.apiKeyInvalid)
+                    // race to flip the already-settled `.idle` to
+                    // `.error(.apiKeyInvalid)`. Mirrors the `.disconnected`
+                    // branch's existing state guard. `.reconnecting`
+                    // is included so a second speaker's mid-reconnect
+                    // failure still triggers its own retry cycle.
+                    switch self.state {
+                    case .translating, .reconnecting:
+                        await self.handleStreamFailure(
+                            error: err,
+                            speaker: speaker,
+                            target: target,
+                            mode: mode,
+                            receivedAnyData: receivedAnyData
+                        )
+                    case .idle, .connecting, .error:
+                        break
+                    }
                 case .disconnected:
                     // Treat ungraceful disconnect as failure while translating.
                     // We have no visibility into whether the stream ever
