@@ -14,6 +14,17 @@ public struct SecretInput: View {
     @SwiftUI.State private var isVisible = false
     @FocusState private var fieldFocused: Bool
 
+    /// Empty string when `text` is non-empty — guards against the macOS
+    /// 26 TextField/SecureField behaviour where the placeholder remains
+    /// visible alongside the rendered value (the two strings stack
+    /// vertically inside the field, which is what the user observed:
+    /// `sk-proj-…` above the revealed `sk-proj-tSCoTW…`). Passing an
+    /// empty placeholder string once there's a value makes the field
+    /// render only the actual text.
+    private var effectivePlaceholder: String {
+        text.isEmpty ? placeholder : ""
+    }
+
     public var body: some View {
         // HIG Materials: vibrant `.primary` for the typed mono key
         // text and `.secondary` for the inline "Показать / Скрыть"
@@ -31,9 +42,9 @@ public struct SecretInput: View {
         HStack(spacing: 8) {
             Group {
                 if isVisible {
-                    TextField(placeholder, text: $text)
+                    TextField(effectivePlaceholder, text: $text)
                 } else {
-                    SecureField(placeholder, text: $text)
+                    SecureField(effectivePlaceholder, text: $text)
                 }
             }
             .textFieldStyle(.plain)
