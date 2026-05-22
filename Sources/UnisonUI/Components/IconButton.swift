@@ -22,6 +22,9 @@ public struct IconButton<Icon: View>: View {
     public let action: () -> Void
     public let icon: () -> Icon
 
+    @SwiftUI.State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     public init(
         label: String,
         size: CGFloat = 28,
@@ -53,6 +56,21 @@ public struct IconButton<Icon: View>: View {
         // reachable via Tab (`.focusable(true)`) but the ring isn't
         // drawn at rest.
         .focusEffectDisabled()
+        // Explicit hover affordance. The system's `.buttonStyle(.glass)`
+        // does animate its glass material on hover, but for SF Symbol-only
+        // icon buttons on a dark popover background the system change is
+        // too subtle to read as an affordance — so we layer a small
+        // brightness lift + scale bump on top to make the cursor's
+        // presence unmistakable. Same pattern as `PrimaryGlassButton`.
+        .brightness(isHovered ? 0.10 : 0)
+        .scaleEffect(isHovered ? 1.06 : 1.0)
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.12),
+            value: isHovered
+        )
+        .onHover { hovering in
+            isHovered = hovering
+        }
         .accessibilityLabel(label)
         .help(label)
     }

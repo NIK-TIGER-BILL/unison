@@ -274,16 +274,16 @@ public struct OnboardingView: View {
                 .tracking(0.66)
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
-            PrimaryGlassButton(
+            // "Готово" is the same minimalist `.glass` button as the
+            // per-step actions ("Установить" / "Разрешить" / "Сохранить")
+            // — the user asked for a subtler, more native look across
+            // the whole onboarding flow.
+            compactPrimaryButton(
                 title: "Готово",
-                action: onClose
+                action: onClose,
+                isLoading: false,
+                isDisabled: !vm.allDone
             )
-            // Same `minWidth: 100` as the per-step buttons so the
-            // footer "Готово" reads at the same visual width as
-            // "Установить" / "Разрешить" / "Сохранить" above.
-            .frame(minWidth: 100)
-            .fixedSize(horizontal: true, vertical: false)
-            .disabled(!vm.allDone)
         }
     }
 
@@ -332,19 +332,15 @@ public struct OnboardingView: View {
         }
     }
 
-    /// Small primary button used inside cards. Wraps
-    /// `PrimaryGlassButton` so we can constrain its width and disable
-    /// the full-width stretch. The button hugs its content (no
-    /// `maxWidth: .infinity` stretch) so titles like "Сохранить" /
-    /// "Установить" / "Разрешить" render without right-edge clipping
-    /// when the row's flexible column (hint text or `SecretInput`) has
-    /// already claimed available space.
-    ///
-    /// A consistent `minWidth` of 100pt is enforced so the three step
-    /// actions ("Установить" / "Разрешить" / "Сохранить") AND the
-    /// footer ("Готово") line up visually, matching the System
-    /// Settings convention where all primary action buttons share a
-    /// uniform width regardless of their label length.
+    /// Small primary button used inside cards and in the footer. Uses
+    /// Apple's native `.buttonStyle(.glass)` for a minimalist,
+    /// translucent look — the user explicitly asked for a subtler
+    /// affordance than the custom raised `PrimaryGlassButton` and away
+    /// from the vivid blue tint of `.glassProminent`. The button hugs
+    /// its content via `.fixedSize(horizontal: true)` so loading-state
+    /// labels like "Установка…" (which are wider than the resting
+    /// "Установить") never overflow the button bounds — the hosting
+    /// container stretches naturally to fit the longest string.
     @ViewBuilder
     private func compactPrimaryButton(
         title: String,
@@ -352,14 +348,61 @@ public struct OnboardingView: View {
         isLoading: Bool,
         isDisabled: Bool
     ) -> some View {
-        PrimaryGlassButton(
+        CompactPrimaryButton(
             title: title,
             isLoading: isLoading,
+            isDisabled: isDisabled,
             action: action
         )
-        .frame(minWidth: 100)
+    }
+}
+
+/// Compact primary action button used across `OnboardingView`. Wraps
+/// the native `.buttonStyle(.glass)` and carries its own hover state so
+/// the cursor's presence is visible — the system glass material on its
+/// own animates too subtly against the dark onboarding panel.
+///
+/// The `title` is whatever copy the caller wants visible (callers swap
+/// to a loading-state label like "Установка…" themselves). When
+/// `isLoading` is true the button also shows a leading spinner.
+private struct CompactPrimaryButton: View {
+    let title: String
+    let isLoading: Bool
+    let isDisabled: Bool
+    let action: () -> Void
+
+    @SwiftUI.State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+            }
+        }
+        .buttonStyle(.glass)
+        .controlSize(.regular)
+        // Natural width — the button hugs the widest label it might
+        // ever show. Without `.fixedSize` a long loading-state label
+        // ("Установка…") would either truncate or push the row to
+        // overflow.
         .fixedSize(horizontal: true, vertical: false)
-        .disabled(isDisabled)
+        .disabled(isDisabled || isLoading)
+        // Hover affordance layered on top of the system glass.
+        .brightness(isHovered && !isDisabled && !isLoading ? 0.06 : 0)
+        .scaleEffect(isHovered && !isDisabled && !isLoading ? 1.02 : 1.0)
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.12),
+            value: isHovered
+        )
+        .onHover { hovering in
+            isHovered = hovering
+        }
     }
 }
 

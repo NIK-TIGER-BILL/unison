@@ -38,7 +38,7 @@ public struct ErrorRow: View {
             }
             Spacer(minLength: 0)
             if let action = action {
-                actionButton(for: action)
+                ErrorActionButton(action: action)
             }
         }
         .padding(.vertical, 10)
@@ -50,15 +50,27 @@ public struct ErrorRow: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
+}
 
-    private func actionButton(for action: Action) -> some View {
+/// Inline coral action button for `ErrorRow` ("Повторить" /
+/// "Открыть Настройки"). Hover lifts brightness + scale so the affordance
+/// is visible against the coral row background — the bare `.plain`
+/// button style provides none. Extracted from `ErrorRow` so it can carry
+/// its own `@State` for the hover flag.
+private struct ErrorActionButton: View {
+    let action: ErrorRow.Action
+
+    @SwiftUI.State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
         let (label, handler): (String, () -> Void) = {
             switch action {
             case .retry(let label, let handler):        return (label, handler)
             case .openSettings(let label, let handler): return (label, handler)
             }
         }()
-        return Button(action: handler) {
+        Button(action: handler) {
             HStack(spacing: 4) {
                 Text(label)
                     .font(.system(size: 11.5))
@@ -71,10 +83,10 @@ public struct ErrorRow: View {
             .padding(.vertical, 4)
             .padding(.horizontal, 9)
             .foregroundStyle(UnisonColors.error)
-            .background(UnisonColors.error.opacity(0.08))
+            .background(UnisonColors.error.opacity(isHovered ? 0.14 : 0.08))
             .overlay(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(UnisonColors.error.opacity(0.20), lineWidth: 0.5)
+                    .strokeBorder(UnisonColors.error.opacity(isHovered ? 0.34 : 0.20), lineWidth: 0.5)
             )
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             // Keep the button's natural width so its label is never
@@ -82,6 +94,14 @@ public struct ErrorRow: View {
             .fixedSize(horizontal: true, vertical: false)
         }
         .buttonStyle(.plain)
+        .scaleEffect(isHovered ? 1.03 : 1.0)
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 0.12),
+            value: isHovered
+        )
+        .onHover { hovering in
+            isHovered = hovering
+        }
     }
 }
 
