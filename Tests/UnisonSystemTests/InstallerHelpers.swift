@@ -14,11 +14,14 @@ func makeAsset(name: String, url: String) -> GitHubRelease.Asset {
     )
 }
 
-func makeReleaseJSON(assets: [(name: String, url: String)]) -> Data {
+func makeReleaseJSON(
+    tag: String = "v0.6.1",
+    assets: [(name: String, url: String)] = []
+) -> Data {
     let assetEntries = assets
         .map { #"{"name":"\#($0.name)","browser_download_url":"\#($0.url)"}"# }
         .joined(separator: ",")
-    return #"{"assets":[\#(assetEntries)]}"#.data(using: .utf8)!
+    return #"{"tag_name":"\#(tag)","assets":[\#(assetEntries)]}"#.data(using: .utf8)!
 }
 
 func makeHTTPResponse(url: URL, status: Int) -> URLResponse {

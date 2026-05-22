@@ -94,8 +94,23 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
             throw BlackHoleInstallError.releaseFetchFailed(-1)
         }
 
-        // 2. Pick the 2ch + 16ch pkg assets out of the release.
-        guard let (asset2ch, asset16ch) = Self.selectAssets(from: release.assets) else {
+        // 2. Build download URLs from the release tag.
+        //
+        // BlackHole upstream stopped attaching .pkg files to GitHub releases
+        // since v0.6.0 — `release.assets` is empty. Instead, the maintainer
+        // hosts pkgs directly on existential.audio CDN at a predictable
+        // URL pattern (the same one Homebrew Cask uses):
+        //
+        //   https://existential.audio/downloads/BlackHole2ch-{version}.pkg
+        //   https://existential.audio/downloads/BlackHole16ch-{version}.pkg
+        //
+        // We read `tag_name` from the GitHub API ("v0.6.1") and strip the
+        // "v" prefix to build the version segment.
+        let version = Self.normalizeVersion(release.tagName)
+        guard
+            let url2ch = URL(string: "https://existential.audio/downloads/BlackHole2ch-\(version).pkg"),
+            let url16ch = URL(string: "https://existential.audio/downloads/BlackHole16ch-\(version).pkg")
+        else {
             throw BlackHoleInstallError.assetsNotFound
         }
 
@@ -105,8 +120,8 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         let pkg16chURL = tmp.appendingPathComponent("Unison-BlackHole16ch.pkg")
 
         do {
-            try await downloadFile(asset2ch.browserDownloadURL, pkg2chURL)
-            try await downloadFile(asset16ch.browserDownloadURL, pkg16chURL)
+            try await downloadFile(url2ch, pkg2chURL)
+            try await downloadFile(url16ch, pkg16chURL)
         } catch let error as BlackHoleInstallError {
             throw error
         } catch {
@@ -149,6 +164,14 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         }
         guard let twoCh, let sixteenCh else { return nil }
         return (twoCh, sixteenCh)
+    }
+
+    /// Strips a leading "v" from a release tag and returns the bare
+    /// version segment. `"v0.6.1"` → `"0.6.1"`, `"0.6.1"` → `"0.6.1"`.
+    /// Used to build existential.audio download URLs.
+    static func normalizeVersion(_ tag: String) -> String {
+        guard tag.hasPrefix("v") else { return tag }
+        return String(tag.dropFirst())
     }
 
     // MARK: - pkgutil / osascript helpers
@@ -223,7 +246,14 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
 // MARK: - GitHub release JSON model
 
 struct GitHubRelease: Decodable {
+    let tagName: String
     let assets: [Asset]
+
+    enum CodingKeys: String, CodingKey {
+        case tagName = "tag_name"
+        case assets
+    }
+
     struct Asset: Decodable, Equatable {
         let name: String
         let browserDownloadURL: URL

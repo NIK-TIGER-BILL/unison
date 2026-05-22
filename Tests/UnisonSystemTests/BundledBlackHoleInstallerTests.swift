@@ -71,12 +71,11 @@ func githubRelease_decodesAssetUrlsFromSnakeCase() throws {
 
 @Test
 func install_happyPath_invokesPkgutilAndInstaller() async throws {
-    let pkg2UrlString = "https://example.com/BlackHole2ch.pkg"
-    let pkg16UrlString = "https://example.com/BlackHole16ch.pkg"
-    let releaseJSON = makeReleaseJSON(assets: [
-        (name: "BlackHole2ch.v0.6.0.pkg", url: pkg2UrlString),
-        (name: "BlackHole16ch.v0.6.0.pkg", url: pkg16UrlString),
-    ])
+    // Release tag `v0.6.1` drives the existential.audio URL build.
+    // Assets are intentionally empty — upstream stopped attaching .pkgs
+    // to GitHub releases since v0.6.0, so the installer must NOT rely
+    // on `assets[]` and instead construct URLs from `tag_name`.
+    let releaseJSON = makeReleaseJSON(tag: "v0.6.1", assets: [])
 
     let downloadedURLs = Mutex<[String]>([])
     let processCalls = Mutex<[(String, [String])]>([])
@@ -103,7 +102,22 @@ func install_happyPath_invokesPkgutilAndInstaller() async throws {
     #expect(script.contains("installer -pkg"))
 
     let urls = downloadedURLs.withLock { $0 }
-    #expect(urls == [pkg2UrlString, pkg16UrlString])
+    #expect(urls == [
+        "https://existential.audio/downloads/BlackHole2ch-0.6.1.pkg",
+        "https://existential.audio/downloads/BlackHole16ch-0.6.1.pkg",
+    ])
+}
+
+@Test
+func normalizeVersion_stripsLeadingV() {
+    #expect(BundledBlackHoleInstaller.normalizeVersion("v0.6.1") == "0.6.1")
+    #expect(BundledBlackHoleInstaller.normalizeVersion("v1.0.0") == "1.0.0")
+}
+
+@Test
+func normalizeVersion_leavesUnprefixedVersionsAlone() {
+    #expect(BundledBlackHoleInstaller.normalizeVersion("0.6.1") == "0.6.1")
+    #expect(BundledBlackHoleInstaller.normalizeVersion("") == "")
 }
 
 @Test
@@ -151,28 +165,10 @@ func install_releaseFetchTransportError_throwsReleaseFetchFailedMinusOne() async
     #expect(runnerHit.withLock { $0 } == false)
 }
 
-@Test
-func install_emptyAssets_throwsAssetsNotFound() async {
-    let emptyReleaseJSON = makeReleaseJSON(assets: [])
-    let downloaderHit = Mutex<Bool>(false)
-    let runnerHit = Mutex<Bool>(false)
-    let installer = makeFakeInstaller(.init(
-        fetchData: makeFetcher(returning: emptyReleaseJSON),
-        downloadFile: makeForbiddenDownloader(sink: downloaderHit),
-        runProcess: makeForbiddenRunner(sink: runnerHit)
-    ))
-
-    do {
-        try await installer.runBundledInstaller()
-        Issue.record("expected throw")
-    } catch let error as BlackHoleInstallError {
-        #expect(error == .assetsNotFound)
-    } catch {
-        Issue.record("unexpected error: \(error)")
-    }
-    #expect(downloaderHit.withLock { $0 } == false)
-    #expect(runnerHit.withLock { $0 } == false)
-}
+// `install_emptyAssets_throwsAssetsNotFound` removed: the installer no
+// longer relies on `assets[]` from the GitHub release (upstream stopped
+// attaching .pkg assets since v0.6.0). URLs are built from `tag_name`
+// against the existential.audio CDN.
 
 @Test
 func install_signatureCheckFails_throwsSignatureInvalid() async {
