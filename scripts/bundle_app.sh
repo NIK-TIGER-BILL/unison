@@ -24,11 +24,9 @@ mkdir -p "$MACOS" "$RESOURCES"
 cp "$EXEC_PATH" "$MACOS/Unison"
 cp Resources/Info.plist "$CONTENTS/Info.plist"
 
-# Copy bundled BlackHole pkgs into Resources/ (if present)
-if [ -d "Resources/blackhole" ]; then
-  echo "Bundling BlackHole installers..."
-  cp Resources/blackhole/*.pkg "$RESOURCES/" 2>/dev/null || true
-fi
+# BlackHole installers are no longer bundled — the app downloads the
+# latest release from GitHub at runtime when the user clicks
+# "Установить" in onboarding. See BundledBlackHoleInstaller.swift.
 
 # Optional signing
 if [ "${DEVELOPER_ID:-}" != "" ]; then

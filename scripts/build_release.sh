@@ -6,10 +6,8 @@ APPLE_ID="${APPLE_ID:?APPLE_ID required}"
 APP_PASSWORD="${APP_PASSWORD:?APP_PASSWORD required (app-specific password)}"
 TEAM_ID="${TEAM_ID:?TEAM_ID required}"
 
-# 1. Fetch BlackHole pkgs
-./scripts/fetch_blackhole.sh
-
-# 2. Build and bundle
+# 1. Build and bundle (BlackHole is downloaded at runtime — nothing
+# to fetch at build time anymore).
 CONFIG=release ./scripts/bundle_app.sh
 
 APP_PATH="build/Unison.app"
