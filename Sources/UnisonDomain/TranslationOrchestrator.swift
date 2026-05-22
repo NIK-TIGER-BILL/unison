@@ -449,6 +449,12 @@ public final class TranslationOrchestrator {
                 cancelReconnectWatchdog()
                 return
             } catch {
+                // Close the half-connected stream before retrying. Without
+                // this, every failed attempt leaks the WS + its URLSession
+                // + the receive/closeReason tasks — connect() opens the WS
+                // before sending session.update, so if session.update is
+                // what threw, the WS is alive with no owner.
+                await newStream.close()
                 continue // try next backoff iteration
             }
         }

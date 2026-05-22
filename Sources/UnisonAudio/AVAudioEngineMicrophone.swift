@@ -6,16 +6,34 @@ import UnisonDomain
 public final class AVAudioEngineMicrophone: MicrophoneCapture, @unchecked Sendable {
     private let engine = AVAudioEngine()
     private var continuation: AsyncStream<AudioFrame>.Continuation?
+    /// Latches while a tap is installed on `engine.inputNode`. Apple
+    /// docs: "Installing a tap with the same format throws an
+    /// exception" — and `AVAudioNode` exceptions are Obj-C, so they
+    /// kill the process. `wireOutgoingPipeline` in the orchestrator
+    /// calls `start()` on every reconnect, so without this guard a
+    /// transient WS drop mid-call would CRASH the app on the second
+    /// installTap. Idempotency keeps us safe.
+    private var started = false
 
     public init() {}
 
     public func start(deviceUID: String?) -> AsyncStream<AudioFrame> {
-        AsyncStream { [weak self] c in
+        // If a previous start() didn't go through a stop() (e.g. the
+        // orchestrator's reconnect path re-wires the pipeline without
+        // tearing down the mic), reset so the new installTap doesn't
+        // throw against the lingering one. The previous AsyncStream
+        // consumer was cancelled by the orchestrator before this
+        // call, so finishing it here is harmless.
+        if started {
+            stop()
+        }
+        return AsyncStream { [weak self] c in
             guard let self else { c.finish(); return }
             self.continuation = c
             do {
                 try self.bindInputDevice(uid: deviceUID)
                 try self.startEngine()
+                self.started = true
             } catch {
                 c.finish()
             }
@@ -27,6 +45,7 @@ public final class AVAudioEngineMicrophone: MicrophoneCapture, @unchecked Sendab
         engine.stop()
         continuation?.finish()
         continuation = nil
+        started = false
     }
 
     private func bindInputDevice(uid: String?) throws {

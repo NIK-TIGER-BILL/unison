@@ -7,19 +7,32 @@ public final class BlackHoleSinkCapture: PeerAudioCapture, @unchecked Sendable {
     private let engine = AVAudioEngine()
     private let registry: CoreAudioDeviceRegistry
     private var continuation: AsyncStream<AudioFrame>.Continuation?
+    /// Same idempotency latch as `AVAudioEngineMicrophone.started`.
+    /// Orchestrator's `wireIncomingPipeline` re-runs on every peer-
+    /// stream reconnect, calling `start()` without first calling
+    /// `stop()`. Without this guard the second installTap throws an
+    /// Obj-C exception and crashes the app.
+    private var started = false
 
     public init(registry: CoreAudioDeviceRegistry) {
         self.registry = registry
     }
 
     public func start() -> AsyncStream<AudioFrame> {
-        AsyncStream { [weak self] c in
+        // Reset if a previous start didn't go through a paired stop.
+        // See `started` doc-comment for why this matters under
+        // reconnect.
+        if started {
+            stop()
+        }
+        return AsyncStream { [weak self] c in
             guard let self else { c.finish(); return }
             self.continuation = c
             do {
                 guard let bh16 = self.registry.findBlackHole16ch() else { c.finish(); return }
                 try self.bindInput(uid: bh16.uid)
                 try self.startTap()
+                self.started = true
             } catch {
                 c.finish()
             }
@@ -31,6 +44,7 @@ public final class BlackHoleSinkCapture: PeerAudioCapture, @unchecked Sendable {
         engine.stop()
         continuation?.finish()
         continuation = nil
+        started = false
     }
 
     private func bindInput(uid: String) throws {

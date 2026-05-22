@@ -84,6 +84,18 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
         receiveContinuation?.finish()
         closeContinuation?.yield(.normal)
         closeContinuation?.finish()
+        // Break the URLSession ↔ delegate reference cycle. `URLSession`
+        // strongly retains its delegate (per Apple docs: "the session
+        // object keeps a strong reference to this delegate until the
+        // session is explicitly invalidated"). Because the delegate
+        // is `self`, and `self` holds the session in a stored property,
+        // neither side ever deallocates unless we explicitly invalidate.
+        // Without this, every reconnect attempt and every stop-restart
+        // cycle leaks one URLSession + its operation queue forever.
+        // `invalidateAndCancel` is fire-and-forget; we already cancelled
+        // the task above, so this just releases the delegate retention.
+        session?.invalidateAndCancel()
+        session = nil
     }
 
     private func startReceiveLoop() {

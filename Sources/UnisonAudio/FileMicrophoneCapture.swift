@@ -62,6 +62,15 @@ public final class FileMicrophoneCapture: MicrophoneCapture, @unchecked Sendable
 
     public func start(deviceUID: String?) -> AsyncStream<AudioFrame> {
         Self.log.info("start(deviceUID=\(deviceUID ?? "<nil>")) — reading from \(fileURL.path)")
+        // Mirror the real-mic idempotency guard: orchestrator's reconnect
+        // path calls `wireOutgoingPipeline → micCapture.start()` without
+        // a paired stop, so a second start without reset would leave
+        // *two* `runLoop` tasks emitting frames in parallel — both
+        // pumping into the same continuation, doubling the apparent
+        // mic rate and confusing the OpenAI batcher. Reset on re-entry.
+        if task != nil {
+            stop()
+        }
         return AsyncStream<AudioFrame> { [weak self] cont in
             guard let self else { cont.finish(); return }
             self.continuation = cont
