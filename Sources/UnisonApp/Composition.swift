@@ -249,8 +249,13 @@ extension Composition {
     /// - Otherwise: use `BundledBlackHoleInstaller`, which fetches the
     ///   latest BlackHole release from GitHub at runtime.
     static func makeInstaller(force: UnisonForceState? = UnisonForceState.current) -> any BlackHoleInstaller {
-        if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen || force == .startTranslation {
-            print("[Unison] UNISON_FORCE_STATE=\(force!.rawValue) — using pre-installed MockBlackHoleInstaller")
+        if let force, force == .onboardingDone
+            || force == .transcriptDemo
+            || force == .popoverOpen
+            || force == .startTranslation
+            || force == .startStopStart
+        {
+            print("[Unison] UNISON_FORCE_STATE=\(force.rawValue) — using pre-installed MockBlackHoleInstaller")
             return MockBlackHoleInstaller(preInstalled: true)
         }
         let env = ProcessInfo.processInfo.environment
@@ -279,7 +284,12 @@ extension Composition {
     /// - Otherwise the real `MacPermissions` (prompts the user via
     ///   AVFoundation).
     static func makePermissions(force: UnisonForceState? = UnisonForceState.current) -> any PermissionsService {
-        if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen || force == .startTranslation {
+        if force == .onboardingDone
+            || force == .transcriptDemo
+            || force == .popoverOpen
+            || force == .startTranslation
+            || force == .startStopStart
+        {
             return ForcedGrantedPermissions()
         }
         return MacPermissions()
@@ -295,13 +305,14 @@ extension Composition {
         if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen {
             return InMemoryKeychain(seeded: "sk-unison-vm-screenshot-placeholder-key")
         }
-        // `startTranslation` runs the *real* translation pipeline, so it
-        // needs a real OpenAI key. The integration script pre-seeds the
-        // macOS keychain via `security add-generic-password` before
-        // launching, so the production `MacKeychain` resolves correctly.
-        // Falling back here to `MacKeychain` (no seed) makes the auth-
-        // failed path observable when the key is missing/revoked.
-        if force == .startTranslation {
+        // `startTranslation` and `startStopStart` run the *real*
+        // translation pipeline, so they need a real OpenAI key. The
+        // integration script pre-seeds the macOS keychain via
+        // `security add-generic-password` before launching, so the
+        // production `MacKeychain` resolves correctly. Falling back here
+        // to `MacKeychain` (no seed) makes the auth-failed path
+        // observable when the key is missing/revoked.
+        if force == .startTranslation || force == .startStopStart {
             return MacKeychain()
         }
         return MacKeychain()
