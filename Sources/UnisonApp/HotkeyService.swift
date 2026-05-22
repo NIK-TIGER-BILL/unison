@@ -1,5 +1,7 @@
 import AppKit
+import ApplicationServices
 import Foundation
+import UnisonDomain
 import UnisonUI
 
 /// Bridges the value-level `Hotkey` configured in `SettingsViewModel` to a
@@ -10,10 +12,15 @@ import UnisonUI
 /// because:
 /// - it avoids importing `Carbon.HIToolbox` (deprecated for some symbols
 ///   on macOS 26),
-/// - both `addGlobalMonitorForEvents` and `addLocalMonitorForEvents` work
-///   today without Accessibility permission for the modifier-rich combos
-///   the design ships (`⌃⌥U`, `⌃⌥T`),
 /// - it keeps the surface area tiny and testable.
+///
+/// **Accessibility permission caveat.**
+/// `NSEvent.addGlobalMonitorForEvents(matching: .keyDown)` only delivers
+/// events when the app has Accessibility access (`AXIsProcessTrusted`).
+/// Without it the monitor installs cleanly but the hotkey silently never
+/// fires — which is a confusing failure mode. `start()` logs the
+/// trusted-state up front so a missing grant is at least visible in
+/// `unison.log` and the diagnostic.
 ///
 /// The service exposes two responsibilities:
 /// 1. **Global registration** of currently-configured hotkeys
@@ -27,6 +34,11 @@ import UnisonUI
 @MainActor
 public final class HotkeyService {
     public typealias Action = @MainActor () -> Void
+
+    /// Diagnostic logger. Routes to `~/Library/Logs/Unison/unison.log`
+    /// so a silent global-monitor failure (missing Accessibility grant)
+    /// becomes visible in the diagnostic copy.
+    private static let log = UnisonLog(category: "HotkeyService")
 
     /// Invoked when the start/stop combo fires globally.
     public var onStartStop: Action?
@@ -52,6 +64,17 @@ public final class HotkeyService {
     /// Install the global key-down monitor. Safe to call multiple times —
     /// subsequent calls are no-ops if a monitor is already installed.
     public func start() {
+        let trusted = AXIsProcessTrusted()
+        if !trusted {
+            // Global keyDown events are gated by Accessibility permission
+            // on macOS. The monitor installs without error either way,
+            // but events are only delivered when trusted. Surface the
+            // mismatch to the file log so users hitting "Hotkey does
+            // nothing" can self-diagnose via the diagnostic copy.
+            Self.log.error("start() — AXIsProcessTrusted=false; global hotkey will not fire until user grants Accessibility in System Settings → Privacy & Security → Accessibility")
+        } else {
+            Self.log.info("start() — AXIsProcessTrusted=true; global key monitor active")
+        }
         if globalMonitor == nil {
             globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 Task { @MainActor in self?.handleGlobalKeyDown(event) }
