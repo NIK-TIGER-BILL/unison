@@ -162,13 +162,55 @@ public final class OnboardingViewModel {
     /// Runs the bundled BlackHole installer; reflects progress in
     /// `status[.blackHole]`. On failure the error message is the one
     /// the design specifies under the BlackHole error row.
+    ///
+    /// The installer is contractually required to verify that BlackHole
+    /// devices actually appear in CoreAudio before returning success —
+    /// see `BundledBlackHoleInstaller.runBundledInstaller` step 7.
+    /// That means on a no-throw return we can trust `is2chInstalled()`
+    /// to also be `true`, so we read the status straight from the
+    /// installer rather than blindly setting `.done` (which a later
+    /// `refresh()` would clobber back to `.pending` if the devices
+    /// hadn't actually shown up).
     public func installBlackHole() async {
         status[.blackHole] = .inProgress
         do {
             try await installer.runBundledInstaller()
-            status[.blackHole] = .done
+            // Re-read from the installer (which checks CoreAudio). If
+            // it returned without throwing, the post-install
+            // verification inside `runBundledInstaller` passed, so this
+            // should be `true`. Belt-and-braces guard against a future
+            // installer regression.
+            if installer.is2chInstalled() && installer.is16chInstalled() {
+                status[.blackHole] = .done
+            } else {
+                status[.blackHole] = .error("Установка завершилась, но BlackHole не появился среди аудиоустройств.")
+            }
+        } catch let error as BlackHoleInstallError {
+            switch error {
+            case .verificationFailed:
+                status[.blackHole] = .error("BlackHole не появился среди аудиоустройств. Перезапустите Unison или установите вручную.")
+            case .installFailed(let detail):
+                // `detail` is captured stderr from osascript — usually
+                // either "User canceled." or an `installer(8)` error.
+                // Most common path is the user dismissing the auth
+                // prompt, hence the existing copy.
+                let lower = detail.lowercased()
+                if lower.contains("canceled") || lower.contains("cancelled") || lower.contains("отмен") {
+                    status[.blackHole] = .error("Установка отменена. Введите пароль администратора, чтобы установить BlackHole.")
+                } else {
+                    status[.blackHole] = .error("Не удалось установить BlackHole. Подробности в Console.app (subsystem com.unison.app).")
+                }
+            case .downloadFailed:
+                status[.blackHole] = .error("Не удалось скачать BlackHole. Проверьте подключение к интернету.")
+            case .releaseFetchFailed:
+                status[.blackHole] = .error("Не удалось получить информацию о последнем релизе BlackHole с GitHub.")
+            case .signatureInvalid:
+                status[.blackHole] = .error("Подпись пакета BlackHole не прошла проверку.")
+            case .assetsNotFound:
+                status[.blackHole] = .error("Не удалось найти пакеты BlackHole для последнего релиза.")
+            }
         } catch {
-            status[.blackHole] = .error("Не удалось установить. Скорее всего не введён пароль администратора.")
+            status[.blackHole] = .error("Не удалось установить BlackHole. Подробности в Console.app (subsystem com.unison.app).")
         }
         refresh()
     }

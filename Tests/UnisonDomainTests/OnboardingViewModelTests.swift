@@ -185,6 +185,88 @@ func onboarding_installBlackHole_failureSetsErrorStatus() async {
     }
 }
 
+// MARK: - Silent-install regression (the bug this PR fixes)
+
+@MainActor
+@Test
+func onboarding_installBlackHole_verificationFailedShowsExplicitError() async {
+    // Regression for the original bug: installer returns success
+    // but the devices never appear in CoreAudio. The installer
+    // contract is now to throw `verificationFailed` so the VM can
+    // render a specific error row. Previously this silently flipped
+    // back to `.pending` with no message — the user couldn't tell
+    // anything went wrong.
+    final class VerificationFailingInstaller: BlackHoleInstaller, @unchecked Sendable {
+        func is2chInstalled() -> Bool { false }
+        func is16chInstalled() -> Bool { false }
+        func runBundledInstaller() async throws {
+            throw BlackHoleInstallError.verificationFailed
+        }
+    }
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: VerificationFailingInstaller(),
+        keychain: MockKeychain()
+    )
+    await vm.installBlackHole()
+    let message = vm.status[.blackHole]?.errorMessage ?? ""
+    #expect(!message.isEmpty, "verification failure must surface a non-empty error")
+    #expect(
+        message.contains("BlackHole") || message.contains("аудиоустройств"),
+        "error must mention BlackHole / audio devices, got: \(message)"
+    )
+}
+
+@MainActor
+@Test
+func onboarding_installBlackHole_userCanceledAuthShowsCancelError() async {
+    // When `osascript ... with administrator privileges` is
+    // dismissed by the user, the installer surfaces
+    // `installFailed("User canceled.")`. The VM should branch on
+    // this and show a cancel-specific message rather than the
+    // generic "see Console.app" copy.
+    final class CancelingInstaller: BlackHoleInstaller, @unchecked Sendable {
+        func is2chInstalled() -> Bool { false }
+        func is16chInstalled() -> Bool { false }
+        func runBundledInstaller() async throws {
+            throw BlackHoleInstallError.installFailed("0:0: execution error: User canceled. (-128)")
+        }
+    }
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: CancelingInstaller(),
+        keychain: MockKeychain()
+    )
+    await vm.installBlackHole()
+    let message = vm.status[.blackHole]?.errorMessage ?? ""
+    #expect(
+        message.lowercased().contains("отмен") || message.lowercased().contains("пароль"),
+        "cancellation must produce a cancel/password-specific message, got: \(message)"
+    )
+}
+
+@MainActor
+@Test
+func onboarding_installBlackHole_successKeepsStatusDoneAfterRefresh() async {
+    // The original bug had the VM blindly set `.done`, then the
+    // `refresh()` call at the end of `installBlackHole()` would see
+    // `is2chInstalled() == false` and overwrite back to `.pending`.
+    // With the installer now responsible for post-install
+    // verification, success means the devices ARE installed — so
+    // refresh() should leave the status at `.done`.
+    let installer = MockInstaller()
+    installer.installed2ch = false
+    installer.installed16ch = false
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: installer,
+        keychain: MockKeychain()
+    )
+    await vm.installBlackHole()
+    #expect(vm.status[.blackHole] == .done)
+    #expect(vm.steps.first { $0.kind == .blackHole }?.isDone == true)
+}
+
 @MainActor
 @Test
 func onboarding_requestMicPermission_grantedTransitionsToDone() async {

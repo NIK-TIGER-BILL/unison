@@ -1,5 +1,6 @@
 import Foundation
 @testable import UnisonSystem
+@testable import UnisonDomain
 
 // Helpers in this file deliberately avoid `import Testing` so the
 // `_Testing_Foundation` cross-import overlay (missing from the
@@ -56,17 +57,24 @@ final class Mutex<Value>: @unchecked Sendable {
 /// Builds an installer wired with fake closures. Kept in a
 /// no-Testing helper so the `URL` / `URLResponse` types live outside
 /// any `#expect(...)` macro context.
+///
+/// `verifyInstalled` simulates the post-install CoreAudio probe.
+/// Default is `{ true }` so happy-path tests don't trip the new
+/// `verificationFailed` guard. Pre-existing failure-path tests can
+/// leave it untouched because they short-circuit before verification.
 struct FakeInstallerConfig {
     var fetchData: BundledBlackHoleInstaller.DataFetcher
     var downloadFile: BundledBlackHoleInstaller.FileDownloader
     var runProcess: BundledBlackHoleInstaller.ProcessRunner
+    var verifyInstalled: BundledBlackHoleInstaller.DeviceVerifier = { true }
 }
 
 func makeFakeInstaller(_ config: FakeInstallerConfig) -> BundledBlackHoleInstaller {
     BundledBlackHoleInstaller(
         fetchData: config.fetchData,
         downloadFile: config.downloadFile,
-        runProcess: config.runProcess
+        runProcess: config.runProcess,
+        verifyInstalled: config.verifyInstalled
     )
 }
 
@@ -137,8 +145,14 @@ func makeForbiddenDownloader(sink: Mutex<Bool>) -> FakeDownloader {
 }
 
 /// A `runProcess` fake that always returns the given exit code.
-func makeRunner(returningStatus status: Int32) -> FakeRunner {
-    return { _, _ in status }
+/// Stdout/stderr are empty by default; pass non-default values to
+/// simulate captured streams.
+func makeRunner(
+    returningStatus status: Int32,
+    stdout: String = "",
+    stderr: String = ""
+) -> FakeRunner {
+    return { _, _ in (status, stdout, stderr) }
 }
 
 /// A `runProcess` fake that records each invocation as
@@ -146,7 +160,7 @@ func makeRunner(returningStatus status: Int32) -> FakeRunner {
 func makeRecordingRunner(into sink: Mutex<[(String, [String])]>) -> FakeRunner {
     return { executable, arguments in
         sink.withLock { $0.append((executable, arguments)) }
-        return 0
+        return (0, "", "")
     }
 }
 
@@ -159,14 +173,17 @@ func makeStatusByExecutable(
     otherwise: Int32 = 0
 ) -> FakeRunner {
     return { executable, _ in
-        if executable.hasSuffix("pkgutil") { return pkgutil }
-        if executable.hasSuffix("osascript") { return osascript }
-        return otherwise
+        if executable.hasSuffix("pkgutil") { return (pkgutil, "", "") }
+        if executable.hasSuffix("osascript") { return (osascript, "", "") }
+        return (otherwise, "", "")
     }
 }
 
 /// A `runProcess` fake that records whether it was invoked. Returns
 /// `0` on each call.
 func makeForbiddenRunner(sink: Mutex<Bool>) -> FakeRunner {
-    return { _, _ in sink.withLock { $0 = true }; return 0 }
+    return { _, _ in
+        sink.withLock { $0 = true }
+        return (0, "", "")
+    }
 }

@@ -1,5 +1,6 @@
 import Testing
 @testable import UnisonSystem
+@testable import UnisonDomain
 
 // MARK: - Asset-selection unit tests
 
@@ -241,4 +242,139 @@ func install_downloadFailure_throwsDownloadFailed() async {
         Issue.record("unexpected error: \(error)")
     }
     #expect(runnerHit.withLock { $0 } == false)
+}
+
+// MARK: - Post-install verification (the bug this PR fixes)
+
+@Test
+func install_osascriptSucceedsButDevicesNeverAppear_throwsVerificationFailed() async {
+    // Regression for the silent-failure bug: `osascript` returns 0
+    // (auth succeeded, `installer` ran) but BlackHole devices never
+    // show up in CoreAudio. Previously this returned silently, the
+    // ViewModel set `.done`, and the next `refresh()` flipped status
+    // back to `.pending` with no error shown to the user. Now we
+    // must throw `verificationFailed` so the UI can surface a real
+    // error message.
+    let releaseJSON = makeReleaseJSON(tag: "v0.6.1", assets: [])
+
+    let installer = makeFakeInstaller(.init(
+        fetchData: makeFetcher(returning: releaseJSON),
+        downloadFile: makeNoOpDownloader(),
+        runProcess: makeStatusByExecutable(pkgutil: 0, osascript: 0),
+        verifyInstalled: { false }  // devices never appear
+    ))
+
+    do {
+        try await installer.runBundledInstaller()
+        Issue.record("expected verificationFailed throw")
+    } catch let error as BlackHoleInstallError {
+        #expect(error == .verificationFailed)
+    } catch {
+        Issue.record("unexpected error: \(error)")
+    }
+}
+
+@Test
+func install_osascriptSucceedsAndDevicesAppear_returnsCleanly() async throws {
+    // Happy path with explicit `verifyInstalled` returning true. This
+    // is what `install_happyPath_invokesPkgutilAndInstaller` already
+    // exercises (the default `verifyInstalled` is `{ true }`), but
+    // we make the contract explicit here.
+    let releaseJSON = makeReleaseJSON(tag: "v0.6.1", assets: [])
+    let installer = makeFakeInstaller(.init(
+        fetchData: makeFetcher(returning: releaseJSON),
+        downloadFile: makeNoOpDownloader(),
+        runProcess: makeStatusByExecutable(pkgutil: 0, osascript: 0),
+        verifyInstalled: { true }
+    ))
+    try await installer.runBundledInstaller()
+    // No throw — success.
+}
+
+// MARK: - osascript exit code carries captured stderr
+
+@Test
+func install_osascriptNonZero_propagatesStderrInInstallFailed() async {
+    // When `do shell script` fails, osascript writes the reason
+    // (e.g., "User canceled.") to stderr and exits nonzero. The
+    // installer must surface that text in the `installFailed`
+    // associated value so the ViewModel can branch on
+    // "user cancelled auth" vs "installer crashed".
+    let releaseJSON = makeReleaseJSON(tag: "v0.6.1", assets: [])
+    let installer = makeFakeInstaller(.init(
+        fetchData: makeFetcher(returning: releaseJSON),
+        downloadFile: makeNoOpDownloader(),
+        runProcess: { executable, _ in
+            if executable.hasSuffix("pkgutil") { return (0, "", "") }
+            // osascript: simulate "User canceled."
+            return (1, "", "0:0: execution error: User canceled. (-128)\n")
+        }
+    ))
+
+    do {
+        try await installer.runBundledInstaller()
+        Issue.record("expected throw")
+    } catch let error as BlackHoleInstallError {
+        if case .installFailed(let detail) = error {
+            #expect(detail.contains("User canceled"))
+        } else {
+            Issue.record("expected .installFailed, got \(error)")
+        }
+    } catch {
+        Issue.record("unexpected error: \(error)")
+    }
+}
+
+// MARK: - Shell / AppleScript quoting
+
+@Test
+func shellQuote_wrapsPlainPathInSingleQuotes() {
+    #expect(BundledBlackHoleInstaller.shellQuote("/tmp/Unison.pkg") == "'/tmp/Unison.pkg'")
+}
+
+@Test
+func shellQuote_escapesEmbeddedSingleQuotes() {
+    // bash-safe single-quote escape: close, escape, reopen.
+    // `O'Reilly` → `'O'\''Reilly'`
+    #expect(BundledBlackHoleInstaller.shellQuote("O'Reilly") == "'O'\\''Reilly'")
+    // Path with a single quote in the directory name.
+    #expect(
+        BundledBlackHoleInstaller.shellQuote("/tmp/some'dir/a.pkg")
+            == "'/tmp/some'\\''dir/a.pkg'"
+    )
+}
+
+@Test
+func appleScriptQuote_escapesBackslashAndDoubleQuote() {
+    #expect(BundledBlackHoleInstaller.appleScriptQuote("plain") == "\"plain\"")
+    #expect(
+        BundledBlackHoleInstaller.appleScriptQuote("a\"b")
+            == "\"a\\\"b\""
+    )
+    #expect(
+        BundledBlackHoleInstaller.appleScriptQuote("a\\b")
+            == "\"a\\\\b\""
+    )
+}
+
+@Test
+func install_scriptPath_isAppleScriptQuotedNotRawConcatenated() async throws {
+    // The osascript `-e` argument the installer passes should be an
+    // AppleScript expression where the `do shell script` string is
+    // properly quoted with escaped backslashes/quotes. We sanity-
+    // check that the script string starts with `do shell script "`
+    // (i.e., not `do shell script '`).
+    let releaseJSON = makeReleaseJSON(tag: "v0.6.1", assets: [])
+    let processCalls = Mutex<[(String, [String])]>([])
+    let installer = makeFakeInstaller(.init(
+        fetchData: makeFetcher(returning: releaseJSON),
+        downloadFile: makeNoOpDownloader(),
+        runProcess: makeRecordingRunner(into: processCalls)
+    ))
+    try await installer.runBundledInstaller()
+    let calls = processCalls.withLock { $0 }
+    let osascriptCall = calls.first(where: { $0.0.hasSuffix("osascript") })
+    let script = osascriptCall?.1.last ?? ""
+    #expect(script.hasPrefix("do shell script \""))
+    #expect(script.hasSuffix("with administrator privileges"))
 }

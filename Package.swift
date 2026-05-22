@@ -33,7 +33,7 @@ let package = Package(
         .testTarget(name: "UnisonTranslationTests", dependencies: ["UnisonTranslation"]),
         .testTarget(name: "UnisonAudioTests", dependencies: ["UnisonAudio"],
                     resources: [.copy("Fixtures")]),
-        .testTarget(name: "UnisonSystemTests", dependencies: ["UnisonSystem"]),
+        .testTarget(name: "UnisonSystemTests", dependencies: ["UnisonSystem", "UnisonDomain"]),
         .testTarget(
             name: "UnisonUITests",
             dependencies: [

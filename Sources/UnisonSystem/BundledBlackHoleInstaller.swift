@@ -1,5 +1,6 @@
 import Foundation
 import CoreAudio
+import os
 import UnisonDomain
 
 /// Installer that fetches the **latest** BlackHole release from GitHub
@@ -20,6 +21,13 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         string: "https://api.github.com/repos/ExistentialAudio/BlackHole/releases/latest"
     )!
 
+    /// `os.Logger` subsystem so the install flow is observable via
+    /// `log stream --predicate 'subsystem == "com.unison.app"' --info --debug`.
+    /// Every step writes a line at `.info` (or `.error`), which lets the
+    /// user or a maintainer pinpoint exactly where a silent failure
+    /// happened.
+    static let log = Logger(subsystem: "com.unison.app", category: "BlackHoleInstaller")
+
     /// Indirection so tests can swap in fixture JSON without hitting
     /// the network.
     public typealias DataFetcher = @Sendable (URL) async throws -> (Data, URLResponse)
@@ -27,14 +35,29 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
     /// Indirection so tests can swap in a fake downloader.
     public typealias FileDownloader = @Sendable (URL, URL) async throws -> Void
 
+    /// Tuple result from a `runProcess` invocation: exit status plus
+    /// captured stdout / stderr text. We log all three so silent
+    /// failures stop being silent — pkgutil and osascript both report
+    /// useful diagnostics on stderr.
+    public typealias ProcessResult = (status: Int32, stdout: String, stderr: String)
+
     /// Indirection so tests can stub out the `pkgutil --check-signature`
     /// + `osascript` invocations. The default implementation shells out
-    /// for real.
-    public typealias ProcessRunner = @Sendable (String, [String]) throws -> Int32
+    /// for real and captures both streams.
+    public typealias ProcessRunner = @Sendable (String, [String]) throws -> ProcessResult
+
+    /// Indirection so tests can stub the post-install CoreAudio check.
+    /// Returns `true` if both BlackHole devices are present. Production
+    /// uses `hasDevice(named:)` against `kAudioHardwarePropertyDevices`;
+    /// tests pass a closure that flips to `true` to simulate a
+    /// successful install or stays `false` to exercise the
+    /// `verificationFailed` path.
+    public typealias DeviceVerifier = @Sendable () -> Bool
 
     private let fetchData: DataFetcher
     private let downloadFile: FileDownloader
     private let runProcess: ProcessRunner
+    private let verifyInstalledOverride: DeviceVerifier?
 
     public init() {
         self.fetchData = { url in try await URLSession.shared.data(from: url) }
@@ -52,45 +75,70 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
             let process = Process()
             process.executableURL = URL(fileURLWithPath: executable)
             process.arguments = arguments
-            let stderr = Pipe()
-            process.standardError = stderr
+            let stdoutPipe = Pipe()
+            let stderrPipe = Pipe()
+            process.standardOutput = stdoutPipe
+            process.standardError = stderrPipe
             do {
                 try process.run()
+                // `readDataToEndOfFile` blocks until the process closes
+                // the pipe, which it does on exit. Reading before
+                // `waitUntilExit` avoids the pipe-buffer-fills-and-
+                // child-blocks deadlock (~64KB on Darwin) that the
+                // previous implementation was vulnerable to. We then
+                // call `waitUntilExit` to be sure `terminationStatus`
+                // is final.
+                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
-                return process.terminationStatus
+                let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+                let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+                return (process.terminationStatus, stdout, stderr)
             } catch {
                 throw BlackHoleInstallError.installFailed(error.localizedDescription)
             }
         }
+        self.verifyInstalledOverride = nil
     }
 
     /// Test seam — accepts injected `fetchData` / `downloadFile` /
-    /// `runProcess` closures.
+    /// `runProcess` closures. `verifyInstalled` defaults to `nil`
+    /// (meaning: use the real CoreAudio probe); passing a closure lets
+    /// the test simulate "drivers present" / "drivers missing"
+    /// independent of the host machine's actual audio setup.
     init(
         fetchData: @escaping DataFetcher,
         downloadFile: @escaping FileDownloader,
-        runProcess: @escaping ProcessRunner
+        runProcess: @escaping ProcessRunner,
+        verifyInstalled: DeviceVerifier? = nil
     ) {
         self.fetchData = fetchData
         self.downloadFile = downloadFile
         self.runProcess = runProcess
+        self.verifyInstalledOverride = verifyInstalled
     }
 
     public func is2chInstalled() -> Bool { hasDevice(named: "BlackHole 2ch") }
     public func is16chInstalled() -> Bool { hasDevice(named: "BlackHole 16ch") }
 
     public func runBundledInstaller() async throws {
+        Self.log.info("runBundledInstaller — start")
+
         // 1. Fetch latest release JSON.
         let release: GitHubRelease
         do {
+            Self.log.info("Fetching latest release JSON from \(Self.latestReleaseURL, privacy: .public)")
             let (data, response) = try await fetchData(Self.latestReleaseURL)
             if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                Self.log.error("GitHub releases API returned HTTP \(http.statusCode)")
                 throw BlackHoleInstallError.releaseFetchFailed(http.statusCode)
             }
             release = try JSONDecoder().decode(GitHubRelease.self, from: data)
+            Self.log.info("Latest BlackHole release tag: \(release.tagName, privacy: .public)")
         } catch let error as BlackHoleInstallError {
             throw error
         } catch {
+            Self.log.error("Release fetch transport error: \(error.localizedDescription, privacy: .public)")
             throw BlackHoleInstallError.releaseFetchFailed(-1)
         }
 
@@ -111,8 +159,11 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
             let url2ch = URL(string: "https://existential.audio/downloads/BlackHole2ch-\(version).pkg"),
             let url16ch = URL(string: "https://existential.audio/downloads/BlackHole16ch-\(version).pkg")
         else {
+            Self.log.error("Failed to construct download URLs for version \(version, privacy: .public)")
             throw BlackHoleInstallError.assetsNotFound
         }
+        Self.log.info("Download URL 2ch: \(url2ch.absoluteString, privacy: .public)")
+        Self.log.info("Download URL 16ch: \(url16ch.absoluteString, privacy: .public)")
 
         // 3. Download both to temp.
         let tmp = FileManager.default.temporaryDirectory
@@ -120,22 +171,36 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         let pkg16chURL = tmp.appendingPathComponent("Unison-BlackHole16ch.pkg")
 
         do {
+            Self.log.info("Downloading 2ch pkg to \(pkg2chURL.path, privacy: .public)")
             try await downloadFile(url2ch, pkg2chURL)
+            let size2ch = (try? FileManager.default.attributesOfItem(atPath: pkg2chURL.path)[.size] as? Int) ?? -1
+            Self.log.info("2ch pkg downloaded: \(size2ch) bytes")
+
+            Self.log.info("Downloading 16ch pkg to \(pkg16chURL.path, privacy: .public)")
             try await downloadFile(url16ch, pkg16chURL)
+            let size16ch = (try? FileManager.default.attributesOfItem(atPath: pkg16chURL.path)[.size] as? Int) ?? -1
+            Self.log.info("16ch pkg downloaded: \(size16ch) bytes")
         } catch let error as BlackHoleInstallError {
+            Self.log.error("Download failed: \(String(describing: error), privacy: .public)")
             throw error
         } catch {
+            Self.log.error("Download failed (untyped): \(error.localizedDescription, privacy: .public)")
             throw BlackHoleInstallError.downloadFailed
         }
 
         // 4. Verify signatures.
+        Self.log.info("Verifying 2ch pkg signature")
         try verifySignature(at: pkg2chURL)
+        Self.log.info("Verifying 16ch pkg signature")
         try verifySignature(at: pkg16chURL)
 
         // 5. Install both under one admin prompt.
         do {
+            Self.log.info("Invoking installer under osascript admin prompt")
             try runInstaller(pkgs: [pkg2chURL, pkg16chURL])
+            Self.log.info("osascript installer call returned success")
         } catch {
+            Self.log.error("Installer invocation failed: \(String(describing: error), privacy: .public)")
             // Cleanup even on failure so we don't litter temp.
             try? FileManager.default.removeItem(at: pkg2chURL)
             try? FileManager.default.removeItem(at: pkg16chURL)
@@ -145,6 +210,33 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         // 6. Cleanup.
         try? FileManager.default.removeItem(at: pkg2chURL)
         try? FileManager.default.removeItem(at: pkg16chURL)
+
+        // 7. Post-install verification.
+        //
+        // CRITICAL: even when `osascript ... with administrator privileges`
+        // returns exit code 0, the underlying `installer(8)` call may
+        // have completed without actually adding the audio drivers
+        // (e.g., the pkg payload was malformed, or CoreAudio hadn't
+        // refreshed device enumeration yet). Without this check, the
+        // `OnboardingViewModel` would set status to `.done`, then its
+        // `refresh()` would observe `is2chInstalled() == false` and
+        // silently flip back to `.pending` — exactly the bug the user
+        // reported.
+        //
+        // We poll for up to ~3 seconds because CoreAudio's
+        // `kAudioHardwarePropertyDevices` list does not refresh
+        // synchronously with the kext-load that BlackHole's installer
+        // triggers; there's a brief window where `installer` has
+        // exited but the device hasn't yet appeared in the property
+        // list. 6 × 500 ms gives us comfortable headroom on slow
+        // machines without making a happy-path install feel laggy.
+        Self.log.info("Verifying BlackHole devices via CoreAudio")
+        let verified = await verifyDevicesAppeared(maxAttempts: 6, delayMs: 500)
+        if !verified {
+            Self.log.error("Post-install verification FAILED — BlackHole devices not in CoreAudio enumeration")
+            throw BlackHoleInstallError.verificationFailed
+        }
+        Self.log.info("Post-install verification OK — BlackHole 2ch + 16ch present")
     }
 
     // MARK: - Asset selection
@@ -174,16 +266,46 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         return String(tag.dropFirst())
     }
 
+    /// Bash-safe single-quote escaping. Wraps the input in `'...'`,
+    /// replacing each embedded `'` with `'\''` (close, escape, reopen).
+    /// Used by `runInstaller` to build `do shell script` commands that
+    /// can survive unusual characters in the temp-pkg path.
+    static func shellQuote(_ s: String) -> String {
+        let escaped = s.replacingOccurrences(of: "'", with: "'\\''")
+        return "'\(escaped)'"
+    }
+
+    /// AppleScript-safe quoting for the *outer* layer of `do shell script "..."`.
+    /// AppleScript string literals use double quotes and escape `\` and
+    /// `"` with backslashes. The osascript `-e` argument we pass is an
+    /// AppleScript expression, so any `"` or `\` inside the shell
+    /// command (e.g., from bash single-quote escaping above) needs to
+    /// be re-escaped here.
+    static func appleScriptQuote(_ s: String) -> String {
+        let escaped = s
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "\"\(escaped)\""
+    }
+
     // MARK: - pkgutil / osascript helpers
 
     private func verifySignature(at url: URL) throws {
-        let status: Int32
+        let result: ProcessResult
         do {
-            status = try runProcess("/usr/sbin/pkgutil", ["--check-signature", url.path])
+            result = try runProcess("/usr/sbin/pkgutil", ["--check-signature", url.path])
         } catch {
+            Self.log.error("pkgutil invocation threw: \(error.localizedDescription, privacy: .public)")
             throw BlackHoleInstallError.signatureInvalid
         }
-        if status != 0 {
+        if !result.stdout.isEmpty {
+            Self.log.debug("pkgutil stdout: \(result.stdout, privacy: .public)")
+        }
+        if !result.stderr.isEmpty {
+            Self.log.debug("pkgutil stderr: \(result.stderr, privacy: .public)")
+        }
+        if result.status != 0 {
+            Self.log.error("pkgutil exited with status \(result.status) for \(url.lastPathComponent, privacy: .public)")
             throw BlackHoleInstallError.signatureInvalid
         }
     }
@@ -192,25 +314,76 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         // Single admin prompt covers both installs — `&&` chains them
         // inside one `do shell script`, which `osascript` runs as root
         // after one authentication.
+        //
+        // Paths are wrapped in bash-safe single quotes (each embedded
+        // `'` becomes `'\''`) before being embedded in the AppleScript
+        // string literal — defensive against weird tempdir paths even
+        // though the standard `FileManager.default.temporaryDirectory`
+        // path doesn't contain quotes.
         let installCmds = pkgs
-            .map { "installer -pkg '\($0.path)' -target /" }
+            .map { "installer -pkg \(Self.shellQuote($0.path)) -target /" }
             .joined(separator: " && ")
-        let script = "do shell script \"\(installCmds)\" with administrator privileges"
+        let script = "do shell script \(Self.appleScriptQuote(installCmds)) with administrator privileges"
+        Self.log.debug("osascript script: \(script, privacy: .public)")
 
-        let status: Int32
+        let result: ProcessResult
         do {
-            status = try runProcess("/usr/bin/osascript", ["-e", script])
+            result = try runProcess("/usr/bin/osascript", ["-e", script])
         } catch let error as BlackHoleInstallError {
             throw error
         } catch {
             throw BlackHoleInstallError.installFailed(error.localizedDescription)
         }
-        if status != 0 {
-            throw BlackHoleInstallError.installFailed("installer exited with status \(status)")
+        if !result.stdout.isEmpty {
+            Self.log.info("osascript stdout: \(result.stdout, privacy: .public)")
+        }
+        if !result.stderr.isEmpty {
+            // osascript writes "User canceled." here when the auth
+            // prompt is dismissed, and `installer`'s own progress lines
+            // when authentication succeeded. We log at .info so QA can
+            // distinguish the two.
+            Self.log.info("osascript stderr: \(result.stderr, privacy: .public)")
+        }
+        if result.status != 0 {
+            Self.log.error("osascript exited with status \(result.status)")
+            // Surface the captured stderr so the UI / Console can see
+            // what `do shell script` was unhappy about.
+            let detail = result.stderr.isEmpty
+                ? "installer exited with status \(result.status)"
+                : result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw BlackHoleInstallError.installFailed(detail)
         }
     }
 
     // MARK: - CoreAudio device check
+
+    /// Poll CoreAudio until both BlackHole devices appear, or give up.
+    /// CoreAudio's device list doesn't refresh synchronously when
+    /// `installer(8)` finishes loading the kext, so we re-check a few
+    /// times with a small sleep between attempts.
+    ///
+    /// When a `verifyInstalled` override is wired (test seam), the
+    /// override fully replaces the per-device CoreAudio probe — useful
+    /// for hermetic unit tests that don't want to depend on the host
+    /// machine's audio device list.
+    private func verifyDevicesAppeared(maxAttempts: Int, delayMs: UInt64) async -> Bool {
+        for attempt in 1...maxAttempts {
+            let installed: Bool
+            if let override = verifyInstalledOverride {
+                installed = override()
+            } else {
+                installed = is2chInstalled() && is16chInstalled()
+            }
+            Self.log.info("Verification attempt \(attempt)/\(maxAttempts): installed=\(installed)")
+            if installed {
+                return true
+            }
+            if attempt < maxAttempts {
+                try? await Task.sleep(nanoseconds: delayMs * 1_000_000)
+            }
+        }
+        return false
+    }
 
     private func hasDevice(named name: String) -> Bool {
         var addr = AudioObjectPropertyAddress(
@@ -265,23 +438,6 @@ struct GitHubRelease: Decodable {
     }
 }
 
-// MARK: - Errors
-
-public enum BlackHoleInstallError: Error, Equatable {
-    /// The GitHub API call failed (non-200 or transport error). The
-    /// associated value is the HTTP status when available, `-1`
-    /// otherwise.
-    case releaseFetchFailed(Int)
-    /// The latest release does not expose a 2ch + 16ch `.pkg` pair.
-    /// Upstream has been known to remove `.pkg` assets from GitHub
-    /// releases (https://existential.audio/blackhole/).
-    case assetsNotFound
-    /// Downloading one of the `.pkg` files failed.
-    case downloadFailed
-    /// `pkgutil --check-signature` rejected one of the downloaded
-    /// installers.
-    case signatureInvalid
-    /// `installer` (run via `osascript`) returned a non-zero status, or
-    /// the user dismissed the admin auth prompt.
-    case installFailed(String)
-}
+// `BlackHoleInstallError` moved to `UnisonDomain` so the UI layer can
+// pattern-match cases for localized copy without importing
+// `UnisonSystem`. See `Sources/UnisonDomain/Protocols/BlackHoleInstaller.swift`.
