@@ -236,6 +236,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Re-probe environment state every time the app comes forward.
+    /// Catches the case where the user task-switched out to System
+    /// Settings (to grant mic permission or install something),
+    /// granted it, and switched back — the on-screen windows stayed
+    /// open the whole time, so neither `show()` (only called on
+    /// initial open) nor the CoreAudio listener (no event for TCC
+    /// grants) fires. Without this the onboarding card keeps showing
+    /// "Микрофон не разрешён" until the user clicks somewhere that
+    /// triggers a refresh.
+    public func applicationDidBecomeActive(_ notification: Notification) {
+        composition.onboardingVM.refresh()
+        composition.popoverVM.refreshEnvironment()
+        composition.settingsVM.refreshDeviceList()
+        composition.settingsVM.refreshBlackHoleStatus()
+    }
+
     public func applicationWillTerminate(_ notification: Notification) {
         FileLogStore.shared.write(
             category: "AppDelegate",

@@ -28,6 +28,19 @@ import UnisonDomain
 public struct SettingsView: View {
     @Bindable var vm: SettingsViewModel
 
+    /// Read from `Info.plist` once at view-construction. The previous
+    /// version of the About section hardcoded "1.0.0 · build 42",
+    /// which drifts the moment the bundle ships a real version (and
+    /// also disagrees with DiagnosticCollector, which DOES read the
+    /// bundle). Fall back to a non-zero default so previews and unit
+    /// tests outside an .app bundle still render something.
+    fileprivate static let bundleShortVersion: String = {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }()
+    fileprivate static let bundleBuild: String = {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
+    }()
+
     /// Caller-provided URL opener (license, GitHub, OpenAI keys page).
     let onOpenURL: (URL) -> Void
 
@@ -370,10 +383,10 @@ public struct SettingsView: View {
         Section("О приложении") {
             LabeledContent("Версия") {
                 HStack(spacing: 4) {
-                    Text("1.0.0")
+                    Text(Self.bundleShortVersion)
                         .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(.primary)
-                    Text("· build 42")
+                    Text("· build \(Self.bundleBuild)")
                         .font(.system(size: 11.5))
                         .foregroundStyle(.secondary)
                 }
