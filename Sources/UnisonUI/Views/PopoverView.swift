@@ -191,7 +191,12 @@ public struct PopoverView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             Picker("", selection: selection) {
-                ForEach(Language.allCases, id: \.self) { lang in
+                // Restrict to the 13 supported output targets — both
+                // sides of `LanguagePair` are used as `session.audio.
+                // output.language` (peer-incoming uses `.mine`,
+                // me-outgoing uses `.peer`), so neither slot may carry
+                // a non-target language.
+                ForEach(Language.supportedTargets, id: \.self) { lang in
                     Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
                 }
             }

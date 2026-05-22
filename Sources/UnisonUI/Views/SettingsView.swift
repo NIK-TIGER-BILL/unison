@@ -177,6 +177,10 @@ public struct SettingsView: View {
 
     private var languagesSection: some View {
         Section("Языки по умолчанию") {
+            // Restrict to the 13 supported output targets — both sides
+            // of `LanguagePair` get sent as `session.audio.output.language`
+            // (peer-incoming stream targets `.mine`, me-outgoing targets
+            // `.peer`), so neither slot may carry a non-target language.
             Picker("Я говорю", selection: Binding(
                 get: { vm.settings.languagePair.mine },
                 set: { newLang in
@@ -184,7 +188,7 @@ public struct SettingsView: View {
                     vm.setLanguagePair(pair)
                 }
             )) {
-                ForEach(Language.allCases, id: \.self) { lang in
+                ForEach(Language.supportedTargets, id: \.self) { lang in
                     Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
                 }
             }
@@ -197,7 +201,7 @@ public struct SettingsView: View {
                     vm.setLanguagePair(pair)
                 }
             )) {
-                ForEach(Language.allCases, id: \.self) { lang in
+                ForEach(Language.supportedTargets, id: \.self) { lang in
                     Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
                 }
             }

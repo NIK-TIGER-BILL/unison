@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import IOKit
 import os
 import UnisonDomain
 
@@ -29,6 +31,14 @@ public actor OpenAIRealtimeStream: TranslationStream {
     private var receiveTask: Task<Void, Never>?
     private var closeReasonTask: Task<Void, Never>?
     private var currentEntryId = UUID()
+    /// Signal raised when `session.closed` arrives from the server.
+    /// `close()` awaits this (with a short timeout) so any audio the
+    /// server flushes between our `session.close` and the actual close
+    /// is still delivered downstream. Per OpenAI cookbook: "send
+    /// `session.close`, then continue reading events until
+    /// `session.closed` confirmation — system flushes pending audio."
+    private var sessionClosedContinuation: CheckedContinuation<Void, Never>?
+    private var sawSessionClosed = false
     /// Tracks whether the server ever sent us a translated chunk before
     /// closing. A close with `.normalClosure` *before* any data is the
     /// classic OpenAI "your request was rejected on the first message"
@@ -54,7 +64,14 @@ public actor OpenAIRealtimeStream: TranslationStream {
         client: any WSClient,
         clock: any Clock,
         speaker: Speaker = .peer,
-        url: URL = URL(string: "wss://api.openai.com/v1/realtime?model=gpt-realtime-translate")!
+        // Canonical GA URL per OpenAI cookbook:
+        //   wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate
+        // The translation-specific endpoint sets `session.type: "translation"`
+        // server-side, which is the documented best-practice path. The
+        // generic `/v1/realtime` endpoint still works but produces
+        // `session.type: "realtime"` — fine in practice but not the
+        // canonical shape.
+        url: URL = URL(string: "wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate")!
     ) {
         self.apiKey = apiKey
         self.client = client
@@ -76,12 +93,19 @@ public actor OpenAIRealtimeStream: TranslationStream {
     public func connect(target: Language) async throws {
         connectionContinuation.yield(.connecting)
         // GA Realtime API — no `OpenAI-Beta` header. The Beta endpoint
-        // (`/v1/realtime/translations` + `OpenAI-Beta: realtime=v1`) was
-        // retired and now returns `beta_api_shape_disabled`. The GA
-        // endpoint authenticates with a plain Bearer token only.
-        try await client.connect(url: url, headers: [
+        // (`OpenAI-Beta: realtime=v1`) was retired and now returns
+        // `beta_api_shape_disabled`. The GA endpoint authenticates with
+        // a plain Bearer token. We also send `OpenAI-Safety-Identifier`
+        // (recommended per docs) so OpenAI can rate-limit per-install
+        // without us shipping PII — the value is a SHA-256 hash of the
+        // bundle ID + host UUID and is stable across launches.
+        var headers: [String: String] = [
             "Authorization": "Bearer \(apiKey)",
-        ])
+        ]
+        if let safetyId = Self.safetyIdentifier() {
+            headers["OpenAI-Safety-Identifier"] = safetyId
+        }
+        try await client.connect(url: url, headers: headers)
         connectionContinuation.yield(.connected)
 
         let stream = client.receive()
@@ -117,6 +141,22 @@ public actor OpenAIRealtimeStream: TranslationStream {
            let str = String(data: data, encoding: .utf8) {
             try? await client.send(.text(str))
         }
+        // Graceful close per cookbook: wait briefly for `session.closed`
+        // so the server has a chance to flush in-flight translated audio
+        // before we yank the socket. If the server doesn't confirm within
+        // the grace window we proceed anyway — the alternative is hanging
+        // the UI on stop. The grace is short (max ~500ms) because by the
+        // time the user clicked Stop, any worthwhile audio is already
+        // queued on the network.
+        if !sawSessionClosed {
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                sessionClosedContinuation = cont
+                Task {
+                    try? await clock.sleep(for: 0.5)
+                    await self.fireSessionClosedWaiterIfPending()
+                }
+            }
+        }
         receiveTask?.cancel()
         closeReasonTask?.cancel()
         await client.close()
@@ -124,6 +164,15 @@ public actor OpenAIRealtimeStream: TranslationStream {
         transcriptContinuation.finish()
         outputContinuation.finish()
         connectionContinuation.finish()
+    }
+
+    /// Resume the `close()` waiter if it's still parked. Called from
+    /// both the receive path (when `session.closed` arrives) and the
+    /// timeout path. Either branch resumes at most once.
+    private func fireSessionClosedWaiterIfPending() {
+        guard let cont = sessionClosedContinuation else { return }
+        sessionClosedContinuation = nil
+        cont.resume()
     }
 
     /// Mirror the close-code/reason payload to the diagnostic logger
@@ -247,6 +296,11 @@ public actor OpenAIRealtimeStream: TranslationStream {
             receivedAnyData = true
             transcriptContinuation.yield(delta)
         case .sessionClosed:
+            // Server confirmed it has flushed any pending output. Wake
+            // `close()` if it is parked on the grace continuation so we
+            // exit immediately instead of riding out the timeout.
+            sawSessionClosed = true
+            fireSessionClosedWaiterIfPending()
             connectionContinuation.yield(.disconnected)
         case .error(let e):
             let mapped: TranslationError = {
@@ -262,5 +316,45 @@ public actor OpenAIRealtimeStream: TranslationStream {
         case .unknown:
             break
         }
+    }
+
+    /// Build the `OpenAI-Safety-Identifier` header value.
+    ///
+    /// **Privacy contract — read this before touching the implementation:**
+    ///
+    /// - Input ingredients are limited to (a) the app's bundle identifier
+    ///   (a constant compiled into the binary) and (b) the macOS
+    ///   `IOPlatformUUID` from IORegistry. Neither is user-supplied PII.
+    /// - The two values are concatenated and SHA-256-hashed. We send only
+    ///   the lowercase hex digest to OpenAI — the raw UUID never leaves
+    ///   the device.
+    /// - The result is stable across launches on the same machine
+    ///   (so OpenAI can rate-limit / fingerprint abuse per install)
+    ///   but cannot be reversed to a Mac or a user.
+    /// - If `IOPlatformUUID` is unavailable (sandboxed Swift Package
+    ///   tests, virtualized CI, etc.) we return `nil` and skip the
+    ///   header rather than fabricate or persist anything.
+    static func safetyIdentifier() -> String? {
+        guard let uuid = platformUUID() else { return nil }
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.unison.app"
+        let composite = bundleID + "|" + uuid
+        let digest = SHA256.hash(data: Data(composite.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Read the IOPlatformUUID from IORegistry.
+    /// Returns `nil` outside macOS or when the platform expert is
+    /// inaccessible (sandbox, hypervisor without DMG passthrough).
+    private static func platformUUID() -> String? {
+        let entry = IORegistryEntryFromPath(kIOMainPortDefault, "IOService:/")
+        guard entry != 0 else { return nil }
+        defer { IOObjectRelease(entry) }
+        let prop = IORegistryEntryCreateCFProperty(
+            entry,
+            "IOPlatformUUID" as CFString,
+            kCFAllocatorDefault,
+            0
+        )
+        return prop?.takeRetainedValue() as? String
     }
 }

@@ -32,7 +32,8 @@ import Testing
     let b64 = pcm.base64EncodedString()
     let event = RealtimeClientEvent.inputAudioBufferAppend(.init(audio: b64))
     let str = try encodeToJSONString(event)
-    #expect(str.contains("\"type\":\"input_audio_buffer.append\""))
+    // GA event name has the `session.` prefix per OpenAI cookbook.
+    #expect(str.contains("\"type\":\"session.input_audio_buffer.append\""))
     #expect(str.contains("\"audio\":\"\(b64)\""))
 }
 

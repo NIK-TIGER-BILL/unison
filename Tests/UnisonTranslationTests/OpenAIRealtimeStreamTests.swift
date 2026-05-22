@@ -12,8 +12,18 @@ import Testing
     // rejects the Beta shape entirely.
     #expect(ws.connectCalls[0].1["Authorization"] == "Bearer sk-test")
     #expect(ws.connectCalls[0].1["OpenAI-Beta"] == nil)
-    // URL must hit the GA endpoint with the translate model in the query.
-    #expect(ws.connectCalls[0].0.absoluteString == "wss://api.openai.com/v1/realtime?model=gpt-realtime-translate")
+    // URL must hit the GA *translations* endpoint with the translate
+    // model in the query — `/v1/realtime/translations` sets the
+    // session.type to "translation" server-side, the canonical shape.
+    #expect(ws.connectCalls[0].0.absoluteString == "wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate")
+    // OpenAI-Safety-Identifier (hashed bundle ID + host UUID — no PII)
+    // is recommended per docs to reduce abuse risk. In CI / SPM tests
+    // the IORegistry may be unavailable, in which case we skip the
+    // header rather than fabricate one — both cases are valid.
+    if let id = ws.connectCalls[0].1["OpenAI-Safety-Identifier"] {
+        #expect(id.count == 64) // SHA-256 hex digest
+        #expect(id.allSatisfy { $0.isHexDigit })
+    }
 
     if case .text(let json) = ws.sentMessages.first {
         #expect(json.contains("session.update"))
@@ -38,7 +48,8 @@ import Testing
     await stream.send(frame)
 
     if case .text(let json) = ws.sentMessages.first {
-        #expect(json.contains("input_audio_buffer.append"))
+        // GA event name carries `session.` prefix per cookbook.
+        #expect(json.contains("session.input_audio_buffer.append"))
         #expect(json.contains(pcm.base64EncodedString()))
     } else {
         Issue.record("Expected append text message")
@@ -275,4 +286,38 @@ import Testing
     }
     #expect(hasClose)
     #expect(ws.closeCalls == 1)
+}
+
+@Test func stream_close_waitsForSessionClosedBeforeShuttingDown() async throws {
+    // Per OpenAI cookbook: "send `session.close`, then continue reading
+    // events until `session.closed` confirmation — system flushes pending
+    // audio." Our `close()` parks on a grace continuation that wakes when
+    // a `session.closed` event arrives. Push one in flight to confirm the
+    // graceful path resolves promptly instead of riding the 500ms timeout.
+    let ws = FakeWSClient()
+    let stream = OpenAIRealtimeStream(apiKey: "sk-test", client: ws, clock: SystemClock())
+    try await stream.connect(target: .en)
+
+    // Push `session.closed` *before* calling close — the receive task will
+    // process it ahead of close()'s grace wait and resolve the waiter
+    // immediately.
+    ws.push(.text(#"{"type":"session.closed"}"#))
+    // Give the receive task a moment to consume the event.
+    try? await Task.sleep(nanoseconds: 50_000_000)
+
+    // Wall-clock the close() call using stdlib `ContinuousClock` —
+    // avoids importing Foundation/Date here so we don't trigger the
+    // missing `_Testing_Foundation` cross-import overlay on Command
+    // Line Tools setups (same trick `Helpers.swift` uses).
+    let clock = ContinuousClock()
+    let start = clock.now
+    await stream.close()
+    let elapsed = start.duration(to: clock.now)
+    // Should finish well before the 500ms grace timeout when the server
+    // confirms closure ahead of time. `Duration` only exposes
+    // `components.seconds + attoseconds`; cast to Double via the seconds
+    // component since 400ms ≪ 1s never overflows.
+    let elapsedSec = Double(elapsed.components.seconds) +
+        Double(elapsed.components.attoseconds) / 1e18
+    #expect(elapsedSec < 0.4, "close() should resolve quickly when session.closed already arrived (took \(elapsedSec)s)")
 }

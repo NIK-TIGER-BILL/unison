@@ -20,6 +20,9 @@ public extension Language {
         case .zh: "🇨🇳"
         case .ja: "🇯🇵"
         case .ko: "🇰🇷"
+        case .hi: "🇮🇳"
+        case .id: "🇮🇩"
+        case .vi: "🇻🇳"
         }
     }
 }

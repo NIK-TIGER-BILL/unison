@@ -14,7 +14,13 @@ public enum RealtimeClientEvent: Encodable, Sendable {
         case .sessionUpdate(let p):
             try p.encodeWrapped(to: encoder, type: "session.update")
         case .inputAudioBufferAppend(let p):
-            try p.encodeWrapped(to: encoder, type: "input_audio_buffer.append")
+            // GA event name per OpenAI cookbook
+            // (`examples/voice_solutions/realtime_translation_guide.mdx`):
+            // `session.input_audio_buffer.append`. The Beta API used the
+            // unprefixed `input_audio_buffer.append`, which still works on
+            // the generic `/v1/realtime` endpoint for backwards-compat but
+            // is not the canonical shape for `/v1/realtime/translations`.
+            try p.encodeWrapped(to: encoder, type: "session.input_audio_buffer.append")
         case .sessionClose:
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode("session.close", forKey: .type)
@@ -136,11 +142,21 @@ extension RealtimeServerEvent: Decodable {
         default:
             // Lifecycle / informational events we don't act on:
             //   session.created, session.updated,
-            //   session.input_transcript.delta (source captions — unused),
             //   conversation.item.created, response.created, response.done,
             //   input_audio_buffer.{committed,speech_started,speech_stopped},
             //   rate_limits.updated, etc.
             // Forwarded as `.unknown(type)` so the handler can skip silently.
+            //
+            // TODO(transcript-confirmation): `session.input_transcript.delta`
+            // carries the auto-detected source language captions. We could
+            // surface these alongside translations as a "what we heard"
+            // confirmation row, which would help users notice when source
+            // detection drifts (e.g. a fast Russian/English code-switch).
+            // Not a blocker for the current feature; tracked here so it's
+            // visible to anyone reading the decoder. Implementation
+            // sketch: add a `.inputTranscriptDelta(...)` case, wire it to
+            // a new TranscriptDelta.kind, and render in the UI as a
+            // muted line under each bubble.
             self = .unknown(type)
         }
     }
