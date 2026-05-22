@@ -6,6 +6,14 @@ import Observation
 public final class TranscriptStore {
     public private(set) var entries: [TranscriptEntry] = []
     public var currentLanguagePair: LanguagePair?
+    /// Fires after each delta is folded into `entries`. The view-model
+    /// uses this to bump the "live" typing-dots timer — without this
+    /// hook, the live indicator that the design ships (and that the
+    /// unit tests exercise) never appears in production because the
+    /// orchestrator calls `apply()` directly and never touched the
+    /// `setLive` / `extendLive` API. Composition wires the callback to
+    /// `TranscriptViewModel.extendLive(entryId:)`.
+    public var onDeltaApplied: (@MainActor (UUID) -> Void)?
 
     public init() {}
 
@@ -33,6 +41,7 @@ public final class TranscriptStore {
             )
             entries.append(entry)
         }
+        onDeltaApplied?(delta.entryId)
     }
 
     public func clear() { entries.removeAll() }

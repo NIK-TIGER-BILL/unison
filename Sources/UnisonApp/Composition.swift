@@ -208,6 +208,14 @@ public final class Composition {
             store: orchestrator.transcript,
             orchestrator: orchestrator
         )
+        // Wire the live-typing-dots pipeline. Without this, the bubble
+        // group's `liveEntryId` is always nil → the animated dots that
+        // mark "this bubble is still being received" never appear in
+        // production, even though the unit tests + design call for it.
+        let transcriptVMRef = self.transcriptVM
+        orchestrator.transcript.onDeltaApplied = { entryId in
+            transcriptVMRef.extendLive(entryId: entryId)
+        }
         // Project the persisted original-mix volume into the transcript VM
         // so the popover slider opens at the saved value. The VM stores it
         // as an Int 0-100; settings hold a 0.0-1.0 Float.
