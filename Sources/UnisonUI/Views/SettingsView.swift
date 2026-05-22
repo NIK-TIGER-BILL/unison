@@ -398,7 +398,11 @@ private struct SecretInputBound: View {
 
 private enum SettingsLayout {
     static let windowWidth: CGFloat = 560
-    static let windowHeight: CGFloat = 540
+    // 1040pt fits every section of the Form (Аудио / Языки / OpenAI /
+    // Hotkeys / BlackHole / Поведение / О приложении) without the
+    // user needing to scroll. The previous value (540pt) clipped
+    // BlackHole status and the behaviour toggles below the fold.
+    static let windowHeight: CGFloat = 1040
 }
 
 // MARK: - External URLs

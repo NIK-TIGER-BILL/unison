@@ -63,8 +63,14 @@ public final class SettingsWindowController {
             // band on its own and the form starts directly below it,
             // matching every other System Settings-style window on
             // Tahoe.
+            // Height 800 fits the entire form (Аудио, Языки, OpenAI,
+            // Hotkeys, BlackHole, Поведение, О приложении) in a single
+            // view at the default size, so the user does not have to
+            // scroll to reach BlackHole status, behaviour toggles, or
+            // the About section. Matches System Settings panes that
+            // ship tall by default.
             let w = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 560, height: 540),
+                contentRect: NSRect(x: 0, y: 0, width: 560, height: 1040),
                 styleMask: [.titled, .closable, .miniaturizable],
                 backing: .buffered,
                 defer: false
@@ -100,9 +106,9 @@ public final class SettingsWindowController {
             // content-hugging doesn't shrink the window. Without this,
             // SwiftUI Form.grouped collapses to ~200pt wide.
             host.sizingOptions = [.preferredContentSize]
-            host.preferredContentSize = NSSize(width: 560, height: 540)
+            host.preferredContentSize = NSSize(width: 560, height: 1040)
             w.contentViewController = host
-            w.setContentSize(NSSize(width: 560, height: 540))
+            w.setContentSize(NSSize(width: 560, height: 1040))
             w.center()
             window = w
         }
