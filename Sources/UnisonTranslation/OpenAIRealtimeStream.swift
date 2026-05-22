@@ -162,7 +162,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
                 sessionClosedContinuation = cont
                 Task {
                     try? await clock.sleep(for: 0.5)
-                    await self.fireSessionClosedWaiterIfPending()
+                    self.fireSessionClosedWaiterIfPending()
                 }
             }
         }
