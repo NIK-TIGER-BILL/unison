@@ -51,6 +51,12 @@ public final class Composition {
     public let keychain: any KeychainService
     private let settingsStore = SettingsStore()
 
+    /// Boot-time diagnostic logger — mirrors to unified logging + the
+    /// rotating file logger. Used to surface things that happen during
+    /// composition root construction (force-state detection, api-key
+    /// source, etc.).
+    static let bootLog = UnisonLog(category: "Composition")
+
     public init() {
         self.registry = CoreAudioDeviceRegistry()
         // UI-test escape hatch: when `UNISON_DEV_MODE=1` is set (or the
@@ -67,9 +73,25 @@ public final class Composition {
         self.installer = Self.makeInstaller(force: force)
         self.keychain = Self.makeKeychain(force: force)
 
+        // `UNISON_API_KEY=sk-...` env override sidesteps the keychain
+        // entirely. Used by `scripts/vm-integration-test.sh` because
+        // `security add-generic-password` in a Tart VM appears to seed
+        // the entry into a partition the app process can't read (the
+        // entry IS present — verified — but `SecItemCopyMatching` returns
+        // `errSecItemNotFound`). Env passthrough also makes ad-hoc
+        // smoke-testing trivial: `UNISON_API_KEY=... open Unison.app`.
         let kc = self.keychain
+        let envOverride = ProcessInfo.processInfo.environment["UNISON_API_KEY"]
         let factory = OpenAIRealtimeStreamFactory(
-            apiKeyProvider: { kc.loadAPIKey() ?? "" },
+            apiKeyProvider: {
+                if let env = envOverride, !env.isEmpty {
+                    Self.bootLog.info("apiKey source=env UNISON_API_KEY length=\(env.count) first10=\(env.prefix(10))")
+                    return env
+                }
+                let stored = kc.loadAPIKey() ?? ""
+                Self.bootLog.info("apiKey source=keychain length=\(stored.count) first10=\(stored.prefix(10))")
+                return stored
+            },
             clock: SystemClock()
         )
 

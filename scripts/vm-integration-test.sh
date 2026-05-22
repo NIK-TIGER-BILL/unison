@@ -138,12 +138,19 @@ echo "keychain seed ok"
 EOF
 
 # --- 4. Launch Unison with the integration force-state -----------------------
-log "Launching Unison with UNISON_FORCE_STATE=start-translation + UNISON_TEST_AUDIO…"
+log "Launching Unison with UNISON_FORCE_STATE=start-translation + UNISON_TEST_AUDIO + UNISON_API_KEY…"
+# Pass the API key through env (UNISON_API_KEY) in addition to seeding
+# the keychain. The Composition prefers env when set — sidesteps the
+# observed Tart-VM keychain access quirk where SecItemCopyMatching can't
+# find the entry added via `security add-generic-password` even though
+# `security find-generic-password` confirms it's stored. Real-world
+# launches still read from keychain via the Onboarding flow.
 ssh_vm "
   nohup env \
     UNISON_DEV_MODE=1 \
     UNISON_FORCE_STATE=start-translation \
     UNISON_TEST_AUDIO=/Users/$VM_USER/test_speech_ru.wav \
+    UNISON_API_KEY='$OPENAI_KEY' \
     /Users/$VM_USER/Unison.app/Contents/MacOS/Unison >/tmp/unison.log 2>&1 &
   disown
   for i in \$(seq 1 10); do
