@@ -1,12 +1,39 @@
 import Foundation
+import os
 import UnisonDomain
 
-public struct ResamplerAdapter: AudioFormatTransformer {
+/// Bridge between the domain `AudioFormatTransformer` protocol and the
+/// concrete `Resampler` helpers in this module.
+///
+/// Logs the first conversion in each direction so the diagnostic dump
+/// can confirm the pipeline really is converting `Int16 @ 24kHz ↔
+/// Float32 @ 48kHz` (the silent-no-audio bug class is "wire format
+/// reached `BlackHole2chPlayer.schedule` unconverted and was dropped
+/// by the `.float32` guard"). The per-frame hot path stays log-free —
+/// `loggedX` flags latch on first crossing.
+public final class ResamplerAdapter: AudioFormatTransformer, @unchecked Sendable {
+    private static let log = Logger(subsystem: "com.unison.app", category: "Resampler")
+    private let lock = NSLock()
+    private var loggedToWire = false
+    private var loggedFromWire = false
+
     public init() {}
+
     public func toWire(_ frame: AudioFrame) -> AudioFrame {
-        Resampler.toOpenAIWire(frame)
+        let out = Resampler.toOpenAIWire(frame)
+        lock.lock(); let shouldLog = !loggedToWire; if shouldLog { loggedToWire = true }; lock.unlock()
+        if shouldLog {
+            Self.log.info("toWire — first call: in=\(frame.sampleRate)Hz \(String(describing: frame.format), privacy: .public) → out=\(out.sampleRate)Hz \(String(describing: out.format), privacy: .public)")
+        }
+        return out
     }
+
     public func fromWire(_ frame: AudioFrame, targetSampleRate: Int) -> AudioFrame {
-        Resampler.fromOpenAIWire(frame, targetSampleRate: targetSampleRate)
+        let out = Resampler.fromOpenAIWire(frame, targetSampleRate: targetSampleRate)
+        lock.lock(); let shouldLog = !loggedFromWire; if shouldLog { loggedFromWire = true }; lock.unlock()
+        if shouldLog {
+            Self.log.info("fromWire — first call: in=\(frame.sampleRate)Hz \(String(describing: frame.format), privacy: .public) → out=\(out.sampleRate)Hz \(String(describing: out.format), privacy: .public)")
+        }
+        return out
     }
 }

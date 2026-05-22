@@ -58,6 +58,15 @@ public actor OpenAIRealtimeStream: TranslationStream {
     /// session quickly. If a non-data event ever toggles this, the
     /// user gets stuck in an endless `.reconnecting` flap.
     private var receivedAnyData = false
+    /// First-audio-delta latch — fires `Logger.info` exactly once per
+    /// stream so the diagnostic dump can confirm that the server
+    /// actually delivered translated audio. The per-delta hot path
+    /// stays log-free after that.
+    private var loggedFirstAudioDelta = false
+    /// First-transcript-delta latch — same idea, but for the transcript
+    /// channel. Helps tell apart "server is silent" vs "audio path
+    /// broken but transcript landed".
+    private var loggedFirstTranscriptDelta = false
 
     public init(
         apiKey: String,
@@ -287,6 +296,11 @@ public actor OpenAIRealtimeStream: TranslationStream {
             guard let pcm = Data(base64Encoded: p.delta) else { return }
             let frame = AudioFrame(pcm: pcm, sampleRate: 24_000, channels: 1, format: .int16)
             receivedAnyData = true
+            if !loggedFirstAudioDelta {
+                loggedFirstAudioDelta = true
+                let speakerLabel = String(describing: speaker)
+                Self.log.info("\(speakerLabel, privacy: .public) first session.output_audio.delta received — \(pcm.count) bytes (24kHz int16 PCM, ~\(pcm.count / 48)ms)")
+            }
             outputContinuation.yield(frame)
         case .outputTranscriptDelta(let p):
             let delta = TranscriptDelta(
@@ -294,6 +308,11 @@ public actor OpenAIRealtimeStream: TranslationStream {
                 kind: .translated, text: p.delta, isFinal: false
             )
             receivedAnyData = true
+            if !loggedFirstTranscriptDelta {
+                loggedFirstTranscriptDelta = true
+                let speakerLabel = String(describing: speaker)
+                Self.log.info("\(speakerLabel, privacy: .public) first session.output_transcript.delta received — \(p.delta.count) chars")
+            }
             transcriptContinuation.yield(delta)
         case .sessionClosed:
             // Server confirmed it has flushed any pending output. Wake
