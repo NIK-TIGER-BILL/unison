@@ -28,7 +28,6 @@ set -euo pipefail
 VM_NAME="${VM_NAME:-unison-test}"
 VM_USER="${VM_USER:-admin}"
 VM_PASS="${VM_PASS:-admin}"
-WAIT_SECONDS="${WAIT_SECONDS:-25}"
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR)
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PATH="$REPO_DIR/build/Unison.app"
@@ -38,6 +37,30 @@ LOG_OUT="$REPO_DIR/vm-integration-test.log"
 log() { printf '\033[1;36m[vm-integ]\033[0m %s\n' "$*" >&2; }
 warn(){ printf '\033[1;33m[vm-integ]\033[0m %s\n' "$*" >&2; }
 err() { printf '\033[1;31m[vm-integ]\033[0m %s\n' "$*" >&2; }
+
+# SCENARIO drives `UNISON_FORCE_STATE`. Valid values:
+#   start              — single start at +2s (default; ~25s wait covers
+#                        the full translation burst).
+#   start-stop-start   — start@2s, stop@10s, start@14s, drains audio
+#                        for both sessions. ~30s wait so the second
+#                        session has time to emit audio deltas.
+SCENARIO="${SCENARIO:-start}"
+case "$SCENARIO" in
+  start)
+    FORCE_STATE="start-translation"
+    DEFAULT_WAIT=25
+    ;;
+  start-stop-start)
+    FORCE_STATE="start-stop-start"
+    DEFAULT_WAIT=30
+    ;;
+  *)
+    err "Unknown SCENARIO=$SCENARIO. Valid: start, start-stop-start."
+    exit 2
+    ;;
+esac
+WAIT_SECONDS="${WAIT_SECONDS:-$DEFAULT_WAIT}"
+log "SCENARIO=$SCENARIO (FORCE_STATE=$FORCE_STATE, WAIT=${WAIT_SECONDS}s)"
 
 # --- 0. Sanity checks ---------------------------------------------------------
 if [ -z "${OPENAI_KEY:-}" ]; then
@@ -138,7 +161,7 @@ echo "keychain seed ok"
 EOF
 
 # --- 4. Launch Unison with the integration force-state -----------------------
-log "Launching Unison with UNISON_FORCE_STATE=start-translation + UNISON_TEST_AUDIO + UNISON_API_KEY + UNISON_DUMP_OUTPUT_WAV…"
+log "Launching Unison with UNISON_FORCE_STATE=$FORCE_STATE + UNISON_TEST_AUDIO + UNISON_API_KEY + UNISON_DUMP_OUTPUT_WAV…"
 # Pass the API key through env (UNISON_API_KEY) in addition to seeding
 # the keychain. The Composition prefers env when set — sidesteps the
 # observed Tart-VM keychain access quirk where SecItemCopyMatching can't
@@ -154,10 +177,11 @@ ssh_vm "
   rm -f /tmp/unison_output.wav 2>/dev/null
   nohup env \
     UNISON_DEV_MODE=1 \
-    UNISON_FORCE_STATE=start-translation \
+    UNISON_FORCE_STATE=$FORCE_STATE \
     UNISON_TEST_AUDIO=/Users/$VM_USER/test_speech_ru.wav \
     UNISON_API_KEY='$OPENAI_KEY' \
     UNISON_DUMP_OUTPUT_WAV=/tmp/unison_output.wav \
+    UNISON_MOCK_PERMISSION_GRANTED=microphone \
     /Users/$VM_USER/Unison.app/Contents/MacOS/Unison >/tmp/unison.log 2>&1 &
   disown
   for i in \$(seq 1 10); do
@@ -224,8 +248,8 @@ EXPECTED=(
   "Unison log file opened"
   # FileMicrophoneCapture was substituted via UNISON_TEST_AUDIO
   "UNISON_TEST_AUDIO=.* substituting FileMicrophoneCapture"
-  # AppDelegate scheduled the auto-start
-  "UNISON_FORCE_STATE=start-translation"
+  # AppDelegate scheduled the auto-start (matches both force-states)
+  "UNISON_FORCE_STATE=$FORCE_STATE"
   # PopoverVM.start() reached
   "PopoverVM:info.*start.*called"
   # Orchestrator entered start()
@@ -314,6 +338,51 @@ else
   for p in "${EXPECTED_HAPPY[@]}"; do
     assert_pattern "$p" || PASS=0
   done
+
+  # Scenario-specific assertions on top of the always-required happy-path.
+  if [ "$SCENARIO" = "start-stop-start" ]; then
+    log "  start-stop-start lifecycle:"
+    SCENARIO_ASSERTS=(
+      # AppDelegate logged the scenario marker
+      "UNISON_FORCE_STATE=start-stop-start"
+      # First start fired
+      "auto-start \[start#1\]"
+      # Stop fired between sessions
+      "auto-stop \[stop#1\]"
+      # Orchestrator transitioned back to idle (proves clean teardown)
+      "translating.*→ idle"
+      # Second start fired
+      "auto-start \[start#2\]"
+    )
+    for p in "${SCENARIO_ASSERTS[@]}"; do
+      assert_pattern "$p" || PASS=0
+    done
+    # Per-pattern count assertion: re-entry into the state machine.
+    # We expect at least 2 "idle → connecting" transitions (one per
+    # start) and at least 2 "→ translating" transitions. Counting
+    # avoids the brittle multi-line regex used previously.
+    n_connecting=$(grep -cE "state idle → connecting" "$LOG_OUT" || true)
+    n_translating=$(grep -cE "→ translating\(mode:" "$LOG_OUT" || true)
+    n_dump_open=$(grep -cE "dump — (opened|reopened)" "$LOG_OUT" || true)
+    if [ "$n_connecting" -ge 2 ]; then
+      printf '\033[1;32m  ✓\033[0m %d idle→connecting transitions (≥2 expected)\n' "$n_connecting"
+    else
+      printf '\033[1;31m  ✗\033[0m only %d idle→connecting transitions (expected ≥2)\n' "$n_connecting"
+      PASS=0
+    fi
+    if [ "$n_translating" -ge 2 ]; then
+      printf '\033[1;32m  ✓\033[0m %d →translating transitions (≥2 expected)\n' "$n_translating"
+    else
+      printf '\033[1;31m  ✗\033[0m only %d →translating transitions (expected ≥2)\n' "$n_translating"
+      PASS=0
+    fi
+    if [ "$n_dump_open" -ge 2 ]; then
+      printf '\033[1;32m  ✓\033[0m WAV dump opened+reopened (%d times; append confirmed)\n' "$n_dump_open"
+    else
+      printf '\033[1;31m  ✗\033[0m WAV dump opened only %d time(s); append across sessions failed\n' "$n_dump_open"
+      PASS=0
+    fi
+  fi
 
   # Verify the WAV dump captured real audio (not silence) — the "schedule
   # was called" log line alone doesn't prove samples have signal. Python

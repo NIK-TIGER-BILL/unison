@@ -6,7 +6,28 @@ import UnisonDomain
 public final class MacPermissions: PermissionsService, @unchecked Sendable {
     public init() {}
 
+    /// Test-only escape hatch. `UNISON_MOCK_PERMISSION_GRANTED=microphone`
+    /// (or `=microphone,…` once more kinds exist) returns `.granted`
+    /// without ever touching TCC. Used by the VM integration suite —
+    /// TCC entries are bound to the code-signature hash, which changes
+    /// every rebuild, so the script would otherwise hit
+    /// notDetermined→denied on each fresh binary (no UI to consent).
+    /// Production launches never set this env var.
+    nonisolated(unsafe) private static let mockedGrants: Set<PermissionKind> = {
+        guard let raw = ProcessInfo.processInfo.environment["UNISON_MOCK_PERMISSION_GRANTED"],
+              !raw.isEmpty else { return [] }
+        var grants: Set<PermissionKind> = []
+        for token in raw.split(separator: ",") {
+            switch token.trimmingCharacters(in: .whitespaces) {
+            case "microphone": grants.insert(.microphone)
+            default: break
+            }
+        }
+        return grants
+    }()
+
     public func currentStatus(_ kind: PermissionKind) -> PermissionStatus {
+        if Self.mockedGrants.contains(kind) { return .granted }
         switch kind {
         case .microphone:
             switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -19,6 +40,7 @@ public final class MacPermissions: PermissionsService, @unchecked Sendable {
     }
 
     public func request(_ kind: PermissionKind) async -> PermissionStatus {
+        if Self.mockedGrants.contains(kind) { return .granted }
         switch kind {
         case .microphone:
             let granted = await AVCaptureDevice.requestAccess(for: .audio)

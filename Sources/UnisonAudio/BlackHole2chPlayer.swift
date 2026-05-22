@@ -158,18 +158,34 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
     }
 
     private func openDumpFile(path: String, sampleRate: UInt32, channels: UInt16) {
-        FileManager.default.createFile(atPath: path, contents: nil)
-        guard let handle = try? FileHandle(forWritingTo: URL(fileURLWithPath: path)) else {
+        let url = URL(fileURLWithPath: path)
+        let existed = FileManager.default.fileExists(atPath: path)
+        if !existed {
+            FileManager.default.createFile(atPath: path, contents: nil)
+        }
+        guard let handle = try? FileHandle(forWritingTo: url) else {
             Self.log.error("dump — failed to open \(path) for WAV capture")
             return
         }
-        // Placeholder header — sizes are patched on `stop()`. If the
-        // process is killed first, host analysis still works by reading
-        // from offset 44 as raw float32 LE.
-        handle.write(Self.buildWAVHeader(sampleRate: sampleRate, channels: channels, dataSize: 0xFFFF_FFFF))
+        if existed {
+            // Reopen after stop() (e.g. start-stop-start lifecycle test):
+            // seek to end so session #2's samples concatenate onto
+            // session #1's, then recover the running byte count from
+            // file size so the next closeDumpFileIfNeeded patches both
+            // chunks correctly.
+            let endOffset = (try? handle.seekToEnd()) ?? 44
+            dumpedByteCount = UInt32(max(0, Int64(endOffset) - 44))
+            Self.log.info("dump — reopened \(path), continuing at offset \(endOffset) (\(dumpedByteCount) data bytes preserved from previous session)")
+        } else {
+            // Fresh file: write placeholder header (sizes patched on
+            // `stop()`). If the process is killed before stop runs,
+            // host analysis still works by reading from offset 44 as
+            // raw float32 LE.
+            handle.write(Self.buildWAVHeader(sampleRate: sampleRate, channels: channels, dataSize: 0xFFFF_FFFF))
+            dumpedByteCount = 0
+            Self.log.info("dump — opened \(path) for WAV capture (\(sampleRate)Hz × \(channels)ch float32 LE)")
+        }
         dumpHandle = handle
-        dumpedByteCount = 0
-        Self.log.info("dump — opened \(path) for WAV capture (\(sampleRate)Hz × \(channels)ch float32 LE)")
     }
 
     private func closeDumpFileIfNeeded() {

@@ -29,6 +29,12 @@ public enum UnisonForceState: String, Sendable {
     /// `UNISON_TEST_AUDIO=/tmp/speech.wav`, sleep, then pull the
     /// log file back to assert pipeline events fired.
     case startTranslation = "start-translation"
+    /// Lifecycle test: auto-start at +2s, auto-stop at +10s, auto-start
+    /// again at +14s. Used by the integration suite to prove the
+    /// state machine survives a full stop-restart cycle (the most
+    /// likely place to find lingering Tasks, audio engine that didn't
+    /// release its device, half-closed WS streams, etc.).
+    case startStopStart = "start-stop-start"
 
     /// Resolve from `ProcessInfo.processInfo.environment["UNISON_FORCE_STATE"]`.
     public static var current: UnisonForceState? {

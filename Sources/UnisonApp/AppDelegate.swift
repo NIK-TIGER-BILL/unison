@@ -178,8 +178,61 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     await vm.start()
                 }
             }
+        case .startStopStart:
+            // Lifecycle scenario: full stop-restart cycle. The interesting
+            // failure modes this catches:
+            //   - Audio engine that didn't release BlackHole 2ch device,
+            //     so the second start() can't bind to it.
+            //   - WS that wasn't fully closed, so the second connect
+            //     races against the lingering one.
+            //   - Tasks from session #1 that survive into session #2 and
+            //     interfere with the new pipeline (e.g. old micCapture
+            //     iterator still draining into the closed-but-not-nil
+            //     stream).
+            //   - WAV dump file: confirm it captures audio from BOTH
+            //     sessions (the dump is re-opened on each first frame
+            //     and appended; the file is closed on app terminate, so
+            //     the WAV should span both translation bursts).
+            FileLogStore.shared.write(
+                category: "AppDelegate",
+                level: "info",
+                message: "UNISON_FORCE_STATE=start-stop-start — start@2s, stop@10s, start@14s"
+            )
+            scheduleAutoStart(at: 2.0, tag: "start#1")
+            scheduleAutoStop(at: 10.0, tag: "stop#1")
+            scheduleAutoStart(at: 14.0, tag: "start#2")
         case .onboardingDone:
             break
+        }
+    }
+
+    /// Helper for force-state lifecycle scenarios. Logs at fire time so
+    /// the integration test's assertion regex can grep for the tag.
+    private func scheduleAutoStart(at delay: TimeInterval, tag: String) {
+        let vm = composition.popoverVM
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            Task { @MainActor in
+                FileLogStore.shared.write(
+                    category: "AppDelegate",
+                    level: "info",
+                    message: "auto-start [\(tag)]: invoking popoverVM.start()"
+                )
+                await vm.start()
+            }
+        }
+    }
+
+    private func scheduleAutoStop(at delay: TimeInterval, tag: String) {
+        let vm = composition.popoverVM
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            Task { @MainActor in
+                FileLogStore.shared.write(
+                    category: "AppDelegate",
+                    level: "info",
+                    message: "auto-stop [\(tag)]: invoking popoverVM.stop()"
+                )
+                await vm.stop()
+            }
         }
     }
 
