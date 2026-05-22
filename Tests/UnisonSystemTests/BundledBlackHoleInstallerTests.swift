@@ -102,8 +102,12 @@ func install_happyPath_invokesPkgutilAndInstaller() async throws {
     #expect(script.contains("&&"))
     #expect(script.contains("installer -pkg"))
     // After the installs we kickstart coreaudiod so BlackHole is
-    // immediately discoverable by CoreAudio without a reboot.
+    // immediately discoverable by CoreAudio without a reboot. The
+    // kickstart is wrapped in `( ... || ... || true )` so a failure
+    // doesn't abort the `&&`-chained install commands.
     #expect(script.contains("launchctl kickstart -k system/com.apple.audio.coreaudiod"))
+    #expect(script.contains("killall coreaudiod"))
+    #expect(script.contains("|| true"))
 
     let urls = downloadedURLs.withLock { $0 }
     #expect(urls == [

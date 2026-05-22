@@ -223,15 +223,18 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         // silently flip back to `.pending` — exactly the bug the user
         // reported.
         //
-        // We poll for up to ~3 seconds because CoreAudio's
+        // We poll for up to ~12 seconds because CoreAudio's
         // `kAudioHardwarePropertyDevices` list does not refresh
         // synchronously with the kext-load that BlackHole's installer
         // triggers; there's a brief window where `installer` has
         // exited but the device hasn't yet appeared in the property
-        // list. 6 × 500 ms gives us comfortable headroom on slow
-        // machines without making a happy-path install feel laggy.
+        // list. Even after the kickstart/killall of coreaudiod the
+        // daemon may take a few seconds to come back up and
+        // re-enumerate plug-ins. 24 × 500 ms gives comfortable
+        // headroom without making a happy-path install feel laggy
+        // (most installs verify on the first or second poll).
         Self.log.info("Verifying BlackHole devices via CoreAudio")
-        let verified = await verifyDevicesAppeared(maxAttempts: 6, delayMs: 500)
+        let verified = await verifyDevicesAppeared(maxAttempts: 24, delayMs: 500)
         if !verified {
             Self.log.error("Post-install verification FAILED — BlackHole devices not in CoreAudio enumeration")
             throw BlackHoleInstallError.verificationFailed
@@ -336,7 +339,18 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         var commands = pkgs.map {
             "installer -pkg \(Self.shellQuote($0.path)) -target /"
         }
-        commands.append("launchctl kickstart -k system/com.apple.audio.coreaudiod")
+        // After installing both pkgs we kickstart coreaudiod so the new
+        // CoreAudio HAL plug-in is immediately discoverable (otherwise
+        // the daemon's cached device list hides BlackHole until reboot).
+        // The kickstart is **best-effort**: wrapped in `( ... ) || true`
+        // so a kickstart failure (different macOS version, sandbox
+        // restriction, daemon state weirdness) does NOT abort the whole
+        // `&&` chain after a successful install. Two fallbacks:
+        //   1) launchctl kickstart (preferred — clean restart)
+        //   2) killall coreaudiod (launchd respawns it automatically)
+        // If both fail, post-install verification polls for ~10s during
+        // which coreaudiod may pick up the new plug-in on its own.
+        commands.append("( /bin/launchctl kickstart -k system/com.apple.audio.coreaudiod || /usr/bin/killall coreaudiod || true )")
         let installCmds = commands.joined(separator: " && ")
         let script = "do shell script \(Self.appleScriptQuote(installCmds)) with administrator privileges"
         Self.log.debug("osascript script: \(script, privacy: .public)")
