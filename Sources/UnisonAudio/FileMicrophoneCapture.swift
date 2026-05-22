@@ -1,5 +1,11 @@
 import Foundation
-import AVFoundation
+// `@preconcurrency` because `AVAudioConverter.convert(...)` takes a
+// `@Sendable` input-provider closure that, by design, returns the
+// non-Sendable `AVAudioPCMBuffer` we feed it. AVFoundation hasn't
+// audited its types for Swift 6 strict concurrency yet — gating the
+// import demotes the unfixable-from-our-side warning to a compatibility
+// note so the build stays clean.
+@preconcurrency import AVFoundation
 import UnisonDomain
 
 /// `MicrophoneCapture` implementation that reads frames from a WAV file

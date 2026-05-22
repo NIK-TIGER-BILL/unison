@@ -144,7 +144,11 @@ public final class FileLogStore: @unchecked Sendable {
         let url = currentFileURL
         if let handle = try? FileHandle(forWritingTo: url) {
             defer { try? handle.close() }
-            try? handle.seekToEnd()
+            // `seekToEnd()` returns the new offset; we don't need it.
+            // The explicit `_ =` silences the "result of 'try?' is
+            // unused" warning while keeping the failure tolerance
+            // (broken seeks don't crash the log path).
+            _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: data)
         } else {
             // First write to a non-existent file. Create it.

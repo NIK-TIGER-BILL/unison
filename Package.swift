@@ -39,7 +39,14 @@ let package = Package(
             dependencies: [
                 "UnisonUI",
                 "UnisonDomain",
-            ]
+            ],
+            // swift-snapshot-testing writes/reads `__Snapshots__/*.png`
+            // through `#file`-based disk paths at runtime — never via
+            // `Bundle.module`. So bundling them as resources is a waste
+            // (inflates the test binary) AND SwiftPM emits an
+            // "unhandled file" warning per snapshot. Explicit exclude
+            // mutes the warning and keeps the test binary small.
+            exclude: ["__Snapshots__"]
         ),
     ]
 )

@@ -13,7 +13,7 @@ public final class MacPermissions: PermissionsService, @unchecked Sendable {
     /// every rebuild, so the script would otherwise hit
     /// notDetermined→denied on each fresh binary (no UI to consent).
     /// Production launches never set this env var.
-    nonisolated(unsafe) private static let mockedGrants: Set<PermissionKind> = {
+    private static let mockedGrants: Set<PermissionKind> = {
         guard let raw = ProcessInfo.processInfo.environment["UNISON_MOCK_PERMISSION_GRANTED"],
               !raw.isEmpty else { return [] }
         var grants: Set<PermissionKind> = []
