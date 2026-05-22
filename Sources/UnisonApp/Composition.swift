@@ -231,6 +231,19 @@ public final class Composition {
             settingsVMRef.setOriginalMixVolume(volume)
         }
 
+        // Refresh SettingsViewModel's device + BlackHole state whenever
+        // CoreAudio reports the hardware roster changed. Without this
+        // the input/output pickers stayed frozen on the snapshot taken
+        // at app launch — plug in a new mic and it never appeared.
+        // The CoreAudio listener fires on `.main` (DispatchQueue), so
+        // hop to MainActor before touching the @Observable VM.
+        registry.onDeviceListChanged = { [weak settingsVMRef] in
+            Task { @MainActor in
+                settingsVMRef?.refreshDeviceList()
+                settingsVMRef?.refreshBlackHoleStatus()
+            }
+        }
+
         // Apply `UNISON_FORCE_STATE` overrides that need to mutate the
         // already-constructed view models / stores. Other overrides
         // (mock installer, granted permissions, pre-seeded keychain)

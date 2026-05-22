@@ -6,6 +6,15 @@ public final class CoreAudioDeviceRegistry: AudioDeviceRegistry, @unchecked Send
     private var changesContinuation: AsyncStream<Void>.Continuation?
     public let deviceChanges: AsyncStream<Void>
 
+    /// Extra fan-out callback for device-change events. Composition
+    /// wires this so SettingsViewModel can refresh its device list
+    /// when the user plugs in / unplugs hardware after the app
+    /// launched. The orchestrator consumes `deviceChanges`
+    /// (AsyncStream is single-subscriber); this callback exists so a
+    /// second observer doesn't compete for the same events.
+    /// Fires on the CoreAudio listener's main-thread dispatch.
+    public var onDeviceListChanged: (@Sendable () -> Void)?
+
     public init() {
         var c: AsyncStream<Void>.Continuation!
         self.deviceChanges = AsyncStream { c = $0 }
@@ -106,6 +115,7 @@ public final class CoreAudioDeviceRegistry: AudioDeviceRegistry, @unchecked Send
         )
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             self?.changesContinuation?.yield()
+            self?.onDeviceListChanged?()
         }
         listenerBlock = block
         AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &addr, .main, block)

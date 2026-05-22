@@ -62,6 +62,17 @@ public final class SettingsViewModel {
     public var blackHole2chStatus: BlackHoleStatus = .ready
     public var blackHole16chStatus: BlackHoleStatus = .ready
 
+    /// Stored mirrors of the input / output device lists. These were
+    /// previously *computed* properties that called into the registry
+    /// on every access — which meant SwiftUI's Observation tracking
+    /// had nothing to watch and the picker dropdown never refreshed
+    /// when the user plugged in a new mic / speaker after launch.
+    /// Storing them lets Observation invalidate the view on
+    /// `refreshDeviceList()` calls (wired by Composition to the
+    /// CoreAudio device-list listener).
+    public private(set) var availableInputs: [AudioDevice] = []
+    public private(set) var availableOutputs: [AudioDevice] = []
+
     /// Set while a re-install is in flight — disables the inline
     /// button and swaps its label to "Установка…".
     public var isReinstallingBlackHole: Bool = false
@@ -111,16 +122,24 @@ public final class SettingsViewModel {
         // Seed BlackHole status from the registry.
         self.blackHole2chStatus = (deviceRegistry.findBlackHole2ch() != nil) ? .ready : .error
         self.blackHole16chStatus = (deviceRegistry.findBlackHole16ch() != nil) ? .ready : .error
+
+        // Seed device lists. Composition rewires `onDeviceListChanged`
+        // immediately after construction to keep them fresh while the
+        // app is open.
+        refreshDeviceList()
     }
 
-    public var availableInputs: [AudioDevice] {
-        deviceRegistry.availableInputDevices().filter {
+    /// Re-read the device lists from the registry. Called once at init
+    /// (to seed the stored properties) and again from Composition's
+    /// `registry.onDeviceListChanged` hook whenever CoreAudio reports
+    /// the hardware roster changed. Filters out BlackHole devices —
+    /// they're internal plumbing, never user-selectable as mic or
+    /// speaker.
+    public func refreshDeviceList() {
+        availableInputs = deviceRegistry.availableInputDevices().filter {
             !$0.name.lowercased().contains("blackhole")
         }
-    }
-
-    public var availableOutputs: [AudioDevice] {
-        deviceRegistry.availableOutputDevices().filter {
+        availableOutputs = deviceRegistry.availableOutputDevices().filter {
             !$0.name.lowercased().contains("blackhole")
         }
     }

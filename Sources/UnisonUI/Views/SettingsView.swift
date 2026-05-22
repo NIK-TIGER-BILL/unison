@@ -382,7 +382,7 @@ public struct SettingsView: View {
                 aboutLink("MIT", url: SettingsLinks.license)
             }
             LabeledContent("Исходный код") {
-                aboutLink("github.com/unison", url: SettingsLinks.source)
+                aboutLink("GitHub", url: SettingsLinks.source)
             }
         }
     }
@@ -544,5 +544,9 @@ private enum SettingsLayout {
 private enum SettingsLinks {
     static let openAIKeys = URL(string: "https://platform.openai.com/api-keys")!
     static let license = URL(string: "https://opensource.org/licenses/MIT")!
-    static let source = URL(string: "https://github.com")!
+    // Repo URL — previously pointed at github.com root, which was a
+    // dead-end placeholder. The label below this link reads
+    // "github.com/unison" but the destination has to match the *real*
+    // repo to be useful. Update if the canonical home moves.
+    static let source = URL(string: "https://github.com/NIK-TIGER-BILL/unison")!
 }

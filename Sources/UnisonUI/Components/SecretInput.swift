@@ -31,6 +31,24 @@ public struct SecretInput: View {
                 .multilineTextAlignment(.leading)
                 .focused($fieldFocused)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .leading) {
+                    // Custom placeholder overlay. macOS 26 SwiftUI's
+                    // built-in `TextField(placeholder:text:)` /
+                    // `SecureField(placeholder:text:)` renders the
+                    // placeholder as a *persistent* leading label —
+                    // it stays visible even when the field has a
+                    // value (you see "sk-proj-…" hovering above the
+                    // masked dots). Drawing the placeholder ourselves
+                    // gives us full control: muted color, hidden the
+                    // moment the user types or a stored value loads.
+                    if text.isEmpty {
+                        Text(placeholder)
+                            .font(UnisonFonts.mono(11.5))
+                            .tracking(0.4)
+                            .foregroundStyle(UnisonColors.whiteAlpha(0.32))
+                            .allowsHitTesting(false)
+                    }
+                }
 
             Button(action: { isVisible.toggle() }) {
                 Text(isVisible ? "Скрыть" : "Показать")
@@ -66,12 +84,15 @@ public struct SecretInput: View {
     /// (the rendered value drifts onto a second line below the placeholder),
     /// the simpler builder-returned view participates directly in the
     /// surrounding HStack.
+    /// Pass an EMPTY placeholder to the underlying field — the visible
+    /// placeholder is drawn via the overlay above. Letting SwiftUI's
+    /// built-in placeholder run double-stamps the hint on macOS 26.
     @ViewBuilder
     private var field: some View {
         if isVisible {
-            TextField(placeholder, text: $text)
+            TextField("", text: $text)
         } else {
-            SecureField(placeholder, text: $text)
+            SecureField("", text: $text)
         }
     }
 }
