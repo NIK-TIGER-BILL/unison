@@ -12,6 +12,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public var transcriptWindow: TranscriptWindowController!
     public var onboardingWindow: OnboardingWindowController!
     public var settingsWindow: SettingsWindowController!
+    public var diagnosticWindow: DiagnosticWindowController!
     public var hotkeyService: HotkeyService!
 
     /// The last `MenubarState` we pushed to the status item. Cached so
@@ -35,6 +36,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
 
+        // Diagnostic window — built before StatusItemController so the
+        // context-menu callback can capture it. The collector pulls
+        // OSLog entries + device state at the moment `show()` is called,
+        // so there's no per-event recomputation cost at init time.
+        diagnosticWindow = DiagnosticWindowController(
+            collector: DiagnosticCollector(composition: composition)
+        )
+
         statusItem = StatusItemController(
             popoverVM: composition.popoverVM,
             onOpenSettings: { [weak self] in
@@ -45,6 +54,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             onShowTranscript: { [weak self] in
                 self?.transcriptWindow.show()
+            },
+            onShowDiagnostic: { [weak self] in
+                self?.diagnosticWindow.show()
             },
             onShowAbout: { [weak self] in
                 self?.showAbout()

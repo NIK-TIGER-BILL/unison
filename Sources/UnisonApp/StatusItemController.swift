@@ -28,6 +28,7 @@ public final class StatusItemController {
     public var onStartStop: (() -> Void)?
     public var onShowTranscript: (() -> Void)?
     public var onOpenSettings: (() -> Void)?
+    public var onShowDiagnostic: (() -> Void)?
     public var onShowAbout: (() -> Void)?
     public var onQuit: (() -> Void)?
 
@@ -45,6 +46,7 @@ public final class StatusItemController {
         onOpenSettings: @escaping () -> Void = {},
         onStartStop: @escaping () -> Void = {},
         onShowTranscript: @escaping () -> Void = {},
+        onShowDiagnostic: @escaping () -> Void = {},
         onShowAbout: @escaping () -> Void = {},
         onQuit: @escaping () -> Void = { NSApp.terminate(nil) }
     ) {
@@ -52,6 +54,7 @@ public final class StatusItemController {
         self.onOpenSettings = onOpenSettings
         self.onStartStop = onStartStop
         self.onShowTranscript = onShowTranscript
+        self.onShowDiagnostic = onShowDiagnostic
         self.onShowAbout = onShowAbout
         self.onQuit = onQuit
 
@@ -69,12 +72,21 @@ public final class StatusItemController {
         // overlay expands the SwiftUI hierarchy.
         let popoverRef = popover
         let host = NSHostingController(
-            rootView: PopoverView(vm: popoverVM, onOpenSettings: { [popoverRef] in
-                // Dismiss the popover before opening Settings so it
-                // doesn't sit on top of the new window.
-                popoverRef.performClose(nil)
-                onOpenSettings()
-            })
+            rootView: PopoverView(
+                vm: popoverVM,
+                onOpenSettings: { [popoverRef] in
+                    // Dismiss the popover before opening Settings so it
+                    // doesn't sit on top of the new window.
+                    popoverRef.performClose(nil)
+                    onOpenSettings()
+                },
+                onShowDiagnostic: { [popoverRef, weak self] in
+                    // Same pattern as Settings — dismiss the popover so
+                    // the diagnostic window doesn't sit behind it.
+                    popoverRef.performClose(nil)
+                    self?.onShowDiagnostic?()
+                }
+            )
         )
         host.sizingOptions = [.preferredContentSize]
         popover.contentSize = NSSize(width: 340, height: 320)
@@ -224,6 +236,18 @@ public final class StatusItemController {
         settings.target = self
         menu.addItem(settings)
 
+        // "Диагностика…" sits between Settings and About so it's
+        // discoverable but not the first thing users see. Wired to a
+        // callback so AppDelegate (the only place that knows about
+        // `DiagnosticWindowController`) does the actual presentation.
+        let diagnostic = NSMenuItem(
+            title: "Диагностика…",
+            action: #selector(menuShowDiagnostic(_:)),
+            keyEquivalent: ""
+        )
+        diagnostic.target = self
+        menu.addItem(diagnostic)
+
         let about = NSMenuItem(
             title: "О приложении",
             action: #selector(menuShowAbout(_:)),
@@ -266,6 +290,7 @@ public final class StatusItemController {
     @objc private func menuStartStop(_ sender: NSMenuItem) { onStartStop?() }
     @objc private func menuShowTranscript(_ sender: NSMenuItem) { onShowTranscript?() }
     @objc private func menuOpenSettings(_ sender: NSMenuItem) { onOpenSettings?() }
+    @objc private func menuShowDiagnostic(_ sender: NSMenuItem) { onShowDiagnostic?() }
     @objc private func menuShowAbout(_ sender: NSMenuItem) { onShowAbout?() }
     @objc private func menuQuit(_ sender: NSMenuItem) { onQuit?() }
 

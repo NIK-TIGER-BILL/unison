@@ -112,12 +112,94 @@ import Testing
         return nil
     }
 
-    ws.pushClose(.abnormal(code: 1006))
+    ws.pushClose(.abnormal(code: 1006, reason: nil))
     let state = await collector.value
     if case .failed(let e) = state {
         #expect(e == .networkLost)
     } else {
         Issue.record("Expected .failed(.networkLost), got \(String(describing: state))")
+    }
+}
+
+// MARK: - Close-code classifier
+
+@Test func classifyClose_policyViolation1008_isAuthFailure() {
+    let err = OpenAIRealtimeStream.classifyClose(code: 1008, reason: nil, receivedData: false)
+    #expect(err == .apiKeyInvalid)
+}
+
+@Test func classifyClose_rateLimit1013() {
+    let err = OpenAIRealtimeStream.classifyClose(code: 1013, reason: nil, receivedData: false)
+    if case .rateLimited = err {} else {
+        Issue.record("Expected .rateLimited, got \(err)")
+    }
+}
+
+@Test func classifyClose_appRange4001NoData_isAuth() {
+    let err = OpenAIRealtimeStream.classifyClose(code: 4001, reason: nil, receivedData: false)
+    #expect(err == .apiKeyInvalid)
+}
+
+@Test func classifyClose_appRange4001WithData_isNetwork() {
+    let err = OpenAIRealtimeStream.classifyClose(code: 4001, reason: nil, receivedData: true)
+    #expect(err == .networkLost)
+}
+
+@Test func classifyClose_reasonInvalidAPIKey() {
+    let err = OpenAIRealtimeStream.classifyClose(
+        code: 1011,
+        reason: #"{"error":{"code":"invalid_api_key","message":"Incorrect API key provided"}}"#,
+        receivedData: false
+    )
+    #expect(err == .apiKeyInvalid)
+}
+
+@Test func classifyClose_reasonInsufficientQuota() {
+    let err = OpenAIRealtimeStream.classifyClose(
+        code: 1011,
+        reason: #"{"error":{"code":"insufficient_quota"}}"#,
+        receivedData: false
+    )
+    #expect(err == .insufficientCredits)
+}
+
+@Test func classifyClose_reasonRateLimit() {
+    let err = OpenAIRealtimeStream.classifyClose(
+        code: 1011,
+        reason: "Too Many Requests — rate_limit_exceeded",
+        receivedData: false
+    )
+    if case .rateLimited = err {} else {
+        Issue.record("Expected .rateLimited, got \(err)")
+    }
+}
+
+@Test func classifyClose_protocolError1002_isNetwork() {
+    let err = OpenAIRealtimeStream.classifyClose(code: 1002, reason: nil, receivedData: false)
+    #expect(err == .networkLost)
+}
+
+@Test func stream_normalCloseBeforeData_treatedAsAuthFailure() async throws {
+    let ws = FakeWSClient()
+    let stream = OpenAIRealtimeStream(apiKey: "sk-test", client: ws, clock: SystemClock())
+    try await stream.connect(target: .en)
+
+    let collector = Task { () -> ConnectionState? in
+        for await s in stream.connectionState where s != .connected && s != .connecting {
+            return s
+        }
+        return nil
+    }
+
+    // Server accepted the handshake then closed cleanly before sending
+    // a single byte of translation. This is OpenAI's auth-rejection
+    // signature — treat as `.apiKeyInvalid`, not `.networkLost`.
+    ws.pushClose(.normal)
+    let state = await collector.value
+    if case .failed(let e) = state {
+        #expect(e == .apiKeyInvalid)
+    } else {
+        Issue.record("Expected .failed(.apiKeyInvalid), got \(String(describing: state))")
     }
 }
 

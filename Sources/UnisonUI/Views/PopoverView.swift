@@ -18,13 +18,16 @@ import UnisonDomain
 public struct PopoverView: View {
     @Bindable var vm: PopoverViewModel
     let onOpenSettings: () -> Void
+    let onShowDiagnostic: () -> Void
 
     public init(
         vm: PopoverViewModel,
-        onOpenSettings: @escaping () -> Void = {}
+        onOpenSettings: @escaping () -> Void = {},
+        onShowDiagnostic: @escaping () -> Void = {}
     ) {
         self.vm = vm
         self.onOpenSettings = onOpenSettings
+        self.onShowDiagnostic = onShowDiagnostic
     }
 
     public var body: some View {
@@ -59,6 +62,21 @@ public struct PopoverView: View {
                         Task { await vm.start() }
                     }
                 )
+                // Secondary "Подробности…" link — opens the diagnostic
+                // dialog so the user can copy logs into a bug report.
+                // Kept understated (caption + soft white tint) so it
+                // doesn't compete with the primary retry button above,
+                // but stays readable on the glass surface (`.secondary`
+                // / `.tertiary` foreground styles disappear against the
+                // popover backdrop in snapshots and on Reduce
+                // Transparency surfaces).
+                HStack {
+                    Spacer()
+                    Button("Подробности…", action: onShowDiagnostic)
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(UnisonColors.whiteAlpha(0.7))
+                }
             }
         }
         .padding(16)

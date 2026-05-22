@@ -80,4 +80,15 @@ struct PopoverViewSnapshotTests {
         let vm = makeVM(state: .error(.networkLost))
         snap(darkFloor(PopoverView(vm: vm), size: SnapSize.popover), size: SnapSize.popover)
     }
+
+    /// Captures both the inline `ErrorRow` and the secondary
+    /// "Подробности…" link below it (the latter sits past the
+    /// `SnapSize.popover` 420pt cutoff in production renders). The
+    /// taller frame here exists purely to keep the diagnostic affordance
+    /// in the snapshot so regressions in that label are caught.
+    @Test func popover_errorSurfacedWithDiagnosticLink() throws {
+        let vm = makeVM(state: .error(.networkLost))
+        let size = CGSize(width: SnapSize.popover.width, height: 480)
+        snap(darkFloor(PopoverView(vm: vm), size: size), size: size)
+    }
 }
