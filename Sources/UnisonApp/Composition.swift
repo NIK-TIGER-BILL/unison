@@ -73,6 +73,24 @@ public final class Composition {
     /// source, etc.).
     static let bootLog = UnisonLog(category: "Composition")
 
+    /// Privacy-safe key-shape extractor for diagnostics. Returns only
+    /// the *type marker* (e.g. `sk-proj-` for project keys, `sk-` for
+    /// legacy) — never any random characters from the secret portion.
+    /// The DiagnosticSheet copies recent log lines verbatim, so any
+    /// random bytes we log here leak to wherever the user pastes the
+    /// diagnostic (chat, email, Slack). Type marker is enough to
+    /// distinguish "project key" vs "user key" for triage; full
+    /// disambiguation between different keys of the same type isn't
+    /// needed once we know the length, source, and prefix shape.
+    static func apiKeyPrefix(_ key: String) -> String {
+        if key.hasPrefix("sk-proj-") { return "sk-proj-***" }
+        if key.hasPrefix("sk-svcacct-") { return "sk-svcacct-***" }
+        if key.hasPrefix("sk-admin-") { return "sk-admin-***" }
+        if key.hasPrefix("sk-") { return "sk-***" }
+        if key.isEmpty { return "<empty>" }
+        return "<unknown-shape>"
+    }
+
     public init() {
         self.registry = CoreAudioDeviceRegistry()
         // UI-test escape hatch: when `UNISON_DEV_MODE=1` is set (or the
@@ -101,11 +119,11 @@ public final class Composition {
         let factory = OpenAIRealtimeStreamFactory(
             apiKeyProvider: {
                 if let env = envOverride, !env.isEmpty {
-                    Self.bootLog.info("apiKey source=env UNISON_API_KEY length=\(env.count) first10=\(env.prefix(10))")
+                    Self.bootLog.info("apiKey source=env UNISON_API_KEY length=\(env.count) prefix=\(Self.apiKeyPrefix(env))")
                     return env
                 }
                 let stored = kc.loadAPIKey() ?? ""
-                Self.bootLog.info("apiKey source=keychain length=\(stored.count) first10=\(stored.prefix(10))")
+                Self.bootLog.info("apiKey source=keychain length=\(stored.count) prefix=\(Self.apiKeyPrefix(stored))")
                 return stored
             },
             clock: SystemClock()
