@@ -1,15 +1,15 @@
 import Foundation
 import CryptoKit
 import IOKit
-import os
 import UnisonDomain
 
 public actor OpenAIRealtimeStream: TranslationStream {
-    /// `os.Logger` channel for the realtime stream. Every close-code
+    /// Diagnostic logger for the realtime stream. Every close-code
     /// mapping decision lands here (and in the diagnostic dump) so a
     /// user-reported "networkLost" loop can be traced back to the
-    /// actual WS close code + server reason payload.
-    private static let log = Logger(subsystem: "com.unison.app", category: "OpenAIRealtimeStream")
+    /// actual WS close code + server reason payload. Mirrors to
+    /// `~/Library/Logs/Unison/unison.log` — see `UnisonLog`.
+    private static let log = UnisonLog(category: "OpenAIRealtimeStream")
 
     private let apiKey: String
     private let client: any WSClient
@@ -198,18 +198,18 @@ public actor OpenAIRealtimeStream: TranslationStream {
             // any data is OpenAI's auth-rejection pattern — the handshake
             // succeeds, then the server quietly drops us. Treat as auth.
             if receivedData {
-                Self.log.info("\(speakerLabel, privacy: .public) WS closed normally after data — surfacing .disconnected")
+                Self.log.info("\(speakerLabel) WS closed normally after data — surfacing .disconnected")
                 connectionContinuation.yield(.disconnected)
             } else {
-                Self.log.error("\(speakerLabel, privacy: .public) WS closed normally before any data — likely auth/policy; surfacing .apiKeyInvalid")
+                Self.log.error("\(speakerLabel) WS closed normally before any data — likely auth/policy; surfacing .apiKeyInvalid")
                 connectionContinuation.yield(.failed(.apiKeyInvalid, receivedAnyData: false))
             }
         case .abnormal(let code, let reasonText):
             let mapped = Self.classifyClose(code: code, reason: reasonText, receivedData: receivedData)
-            Self.log.error("\(speakerLabel, privacy: .public) WS abnormal close — code=\(code) reason=\(reasonText ?? "<nil>", privacy: .public) receivedData=\(receivedData) → \(String(describing: mapped), privacy: .public)")
+            Self.log.error("\(speakerLabel) WS abnormal close — code=\(code) reason=\(reasonText ?? "<nil>") receivedData=\(receivedData) → \(String(describing: mapped))")
             connectionContinuation.yield(.failed(mapped, receivedAnyData: receivedData))
         case .error(let ns):
-            Self.log.error("\(speakerLabel, privacy: .public) WS transport error — domain=\(ns.domain, privacy: .public) code=\(ns.code) receivedData=\(receivedData) → .networkLost")
+            Self.log.error("\(speakerLabel) WS transport error — domain=\(ns.domain) code=\(ns.code) receivedData=\(receivedData) → .networkLost")
             connectionContinuation.yield(.failed(.networkLost, receivedAnyData: receivedData))
         }
     }
@@ -299,7 +299,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
             if !loggedFirstAudioDelta {
                 loggedFirstAudioDelta = true
                 let speakerLabel = String(describing: speaker)
-                Self.log.info("\(speakerLabel, privacy: .public) first session.output_audio.delta received — \(pcm.count) bytes (24kHz int16 PCM, ~\(pcm.count / 48)ms)")
+                Self.log.info("\(speakerLabel) first session.output_audio.delta received — \(pcm.count) bytes (24kHz int16 PCM, ~\(pcm.count / 48)ms)")
             }
             outputContinuation.yield(frame)
         case .outputTranscriptDelta(let p):
@@ -311,7 +311,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
             if !loggedFirstTranscriptDelta {
                 loggedFirstTranscriptDelta = true
                 let speakerLabel = String(describing: speaker)
-                Self.log.info("\(speakerLabel, privacy: .public) first session.output_transcript.delta received — \(p.delta.count) chars")
+                Self.log.info("\(speakerLabel) first session.output_transcript.delta received — \(p.delta.count) chars")
             }
             transcriptContinuation.yield(delta)
         case .sessionClosed:
@@ -330,7 +330,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
                 default: return .networkLost
                 }
             }()
-            Self.log.error("server error event code=\(e.code, privacy: .public) receivedData=\(self.receivedAnyData) → \(String(describing: mapped), privacy: .public)")
+            Self.log.error("server error event code=\(e.code) receivedData=\(self.receivedAnyData) → \(String(describing: mapped))")
             connectionContinuation.yield(.failed(mapped, receivedAnyData: self.receivedAnyData))
         case .unknown:
             break

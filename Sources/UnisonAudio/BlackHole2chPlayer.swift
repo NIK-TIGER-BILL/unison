@@ -1,15 +1,14 @@
 import Foundation
 import AVFoundation
 import CoreAudio
-import os
 import UnisonDomain
 
 public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
-    /// `os.Logger` channel for the BlackHole 2ch virtual-mic player. Logs
+    /// Diagnostic logger for the BlackHole 2ch virtual-mic player. Logs
     /// lifecycle events (engine start / device bind), and any frame format
-    /// mismatch that would silently drop audio. Stream:
-    ///   log stream --predicate 'subsystem == "com.unison.app" && category == "AudioOutput"' --info
-    private static let log = Logger(subsystem: "com.unison.app", category: "AudioOutput")
+    /// mismatch that would silently drop audio. Mirrors to
+    /// `~/Library/Logs/Unison/unison.log` — see `UnisonLog`.
+    private static let log = UnisonLog(category: "AudioOutput")
 
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
@@ -34,7 +33,7 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         do {
             try startIfNeeded()
         } catch {
-            Self.log.error("play() — startIfNeeded threw: \(String(describing: error), privacy: .public); aborting (no audio will be scheduled)")
+            Self.log.error("play() — startIfNeeded threw: \(String(describing: error)); aborting (no audio will be scheduled)")
             return
         }
         loggedFormatMismatch = false
@@ -57,7 +56,7 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
             Self.log.error("startIfNeeded — BlackHole 2ch device not found in registry")
             throw NSError(domain: "BlackHole2chPlayer", code: -1)
         }
-        Self.log.info("startIfNeeded — found BlackHole 2ch device uid=\(bh2.uid, privacy: .public)")
+        Self.log.info("startIfNeeded — found BlackHole 2ch device uid=\(bh2.uid)")
 
         engine.attach(player)
 
@@ -77,12 +76,12 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
                 &id, UInt32(MemoryLayout<AudioDeviceID>.size)
             )
             if status != noErr {
-                Self.log.error("startIfNeeded — AudioUnitSetProperty(CurrentDevice → \(bh2.uid, privacy: .public)) failed status=\(status)")
+                Self.log.error("startIfNeeded — AudioUnitSetProperty(CurrentDevice → \(bh2.uid)) failed status=\(status)")
             } else {
                 Self.log.info("startIfNeeded — output device bound to BlackHole 2ch (id=\(deviceID))")
             }
         } else {
-            Self.log.error("startIfNeeded — audioDeviceID(forUID: \(bh2.uid, privacy: .public)) returned nil; engine will route to default output")
+            Self.log.error("startIfNeeded — audioDeviceID(forUID: \(bh2.uid)) returned nil; engine will route to default output")
         }
 
         let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false)!
@@ -91,7 +90,7 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         do {
             try engine.start()
         } catch {
-            Self.log.error("startIfNeeded — engine.start() threw: \(String(describing: error), privacy: .public)")
+            Self.log.error("startIfNeeded — engine.start() threw: \(String(describing: error))")
             throw error
         }
         player.play()
@@ -103,7 +102,7 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         guard frame.format == .float32 else {
             if !loggedFormatMismatch {
                 loggedFormatMismatch = true
-                Self.log.error("schedule — DROPPING frame: expected .float32, got \(String(describing: frame.format), privacy: .public) at \(frame.sampleRate)Hz × \(frame.channels)ch (\(frame.sampleCount) samples). Subsequent drops silent until next play().")
+                Self.log.error("schedule — DROPPING frame: expected .float32, got \(String(describing: frame.format)) at \(frame.sampleRate)Hz × \(frame.channels)ch (\(frame.sampleCount) samples). Subsequent drops silent until next play().")
             }
             return
         }

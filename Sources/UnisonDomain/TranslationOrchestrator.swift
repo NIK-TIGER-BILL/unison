@@ -1,20 +1,19 @@
 import Foundation
 import Observation
-import os
 
 @MainActor
 @Observable
 public final class TranslationOrchestrator {
-    /// `os.Logger` channel for the orchestrator. Every state mutation
-    /// and every guard failure writes a line here, so silent failures
-    /// in `start()` / pipeline reconnects can be traced via:
-    ///     log stream --predicate 'subsystem == "com.unison.app"' --info
+    /// Diagnostic logger for the orchestrator. Every state mutation
+    /// and every guard failure writes a line here, which is mirrored
+    /// to both unified logging and `~/Library/Logs/Unison/unison.log`
+    /// — see `UnisonLog` for the rationale.
     @ObservationIgnored
-    static let log = Logger(subsystem: "com.unison.app", category: "Orchestrator")
+    static let log = UnisonLog(category: "Orchestrator")
 
     public private(set) var state: SessionState = .idle {
         didSet {
-            Self.log.info("state \(String(describing: oldValue), privacy: .public) → \(String(describing: self.state), privacy: .public)")
+            Self.log.info("state \(String(describing: oldValue)) → \(String(describing: self.state))")
         }
     }
     public let transcript: TranscriptStore
@@ -98,9 +97,9 @@ public final class TranslationOrchestrator {
     }
 
     public func start(mode: SessionMode, languages: LanguagePair, settings: Settings = .default) async {
-        Self.log.info("start() — mode=\(mode.rawValue, privacy: .public), pair=\(languages.mine.rawValue, privacy: .public)→\(languages.peer.rawValue, privacy: .public)")
+        Self.log.info("start() — mode=\(mode.rawValue), pair=\(languages.mine.rawValue)→\(languages.peer.rawValue)")
         guard case .idle = state else {
-            Self.log.error("start() rejected — state is not .idle (state=\(String(describing: self.state), privacy: .public))")
+            Self.log.error("start() rejected — state is not .idle (state=\(String(describing: self.state)))")
             return
         }
         state = .connecting(mode: mode)
@@ -111,9 +110,9 @@ public final class TranslationOrchestrator {
 
         if mode == .call {
             let status = permissions.currentStatus(.microphone)
-            Self.log.info("start() — microphone permission currentStatus=\(String(describing: status), privacy: .public)")
+            Self.log.info("start() — microphone permission currentStatus=\(String(describing: status))")
             let resolved = status == .notDetermined ? await permissions.request(.microphone) : status
-            Self.log.info("start() — microphone permission resolved=\(String(describing: resolved), privacy: .public)")
+            Self.log.info("start() — microphone permission resolved=\(String(describing: resolved))")
             guard resolved == .granted else {
                 Self.log.error("start() guard failed: microphone permission denied → .error(.permissionDenied)")
                 state = .error(.permissionDenied(.microphone))
@@ -131,25 +130,25 @@ public final class TranslationOrchestrator {
             return
         }
 
-        Self.log.info("start() — starting output mixer (outputDeviceUID=\(settings.outputDeviceUID ?? "default", privacy: .public))")
+        Self.log.info("start() — starting output mixer (outputDeviceUID=\(settings.outputDeviceUID ?? "default"))")
         do {
             try await outputMixer.start(deviceUID: settings.outputDeviceUID)
             outputMixer.setOriginalGain(settings.originalMixVolume)
         } catch {
-            Self.log.error("start() output mixer failed: \(String(describing: error), privacy: .public) → .error(.outputDeviceUnavailable)")
+            Self.log.error("start() output mixer failed: \(String(describing: error)) → .error(.outputDeviceUnavailable)")
             state = .error(.outputDeviceUnavailable)
             return
         }
 
         // Peer (incoming) stream — used in both modes
-        Self.log.info("start() — connecting peer stream (target=\(languages.mine.rawValue, privacy: .public))")
+        Self.log.info("start() — connecting peer stream (target=\(languages.mine.rawValue))")
         let peer = translationFactory.make(speaker: .peer)
         peerStream = peer
         do {
             try await peer.connect(target: languages.mine)
         } catch {
             let mapped = mapConnectError(error)
-            Self.log.error("start() peer.connect failed: \(String(describing: error), privacy: .public) → .error(\(String(describing: mapped), privacy: .public))")
+            Self.log.error("start() peer.connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
             state = .error(mapped)
             return
         }
@@ -158,14 +157,14 @@ public final class TranslationOrchestrator {
         observeConnectionState(stream: peer, speaker: .peer, target: languages.mine, mode: mode)
 
         if mode == .call {
-            Self.log.info("start() — connecting me stream (target=\(languages.peer.rawValue, privacy: .public))")
+            Self.log.info("start() — connecting me stream (target=\(languages.peer.rawValue))")
             let me = translationFactory.make(speaker: .me)
             meStream = me
             do {
                 try await me.connect(target: languages.peer)
             } catch {
                 let mapped = mapConnectError(error)
-                Self.log.error("start() me.connect failed: \(String(describing: error), privacy: .public) → .error(\(String(describing: mapped), privacy: .public))")
+                Self.log.error("start() me.connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
                 state = .error(mapped)
                 return
             }
@@ -328,11 +327,11 @@ public final class TranslationOrchestrator {
         mode: SessionMode,
         receivedAnyData: Bool
     ) async {
-        Self.log.error("handleStreamFailure — speaker=\(String(describing: speaker), privacy: .public), error=\(String(describing: error), privacy: .public), receivedAnyData=\(receivedAnyData)")
+        Self.log.error("handleStreamFailure — speaker=\(String(describing: speaker)), error=\(String(describing: error)), receivedAnyData=\(receivedAnyData)")
         // Don't try to recover from terminal errors
         switch error {
         case .apiKeyInvalid, .insufficientCredits, .permissionDenied:
-            Self.log.error("handleStreamFailure — terminal error, surfacing as .error(\(String(describing: error), privacy: .public))")
+            Self.log.error("handleStreamFailure — terminal error, surfacing as .error(\(String(describing: error)))")
             await stopAllStreams()
             state = .error(error)
             return
@@ -352,7 +351,7 @@ public final class TranslationOrchestrator {
             let next = (consecutiveEmptyCloses[speaker] ?? 0) + 1
             consecutiveEmptyCloses[speaker] = next
             if next >= Self.emptyCloseTerminalThreshold {
-                Self.log.error("handleStreamFailure — \(String(describing: speaker), privacy: .public) stream closed empty \(next) times in a row → treating as terminal .apiKeyInvalid")
+                Self.log.error("handleStreamFailure — \(String(describing: speaker)) stream closed empty \(next) times in a row → treating as terminal .apiKeyInvalid")
                 await stopAllStreams()
                 state = .error(.apiKeyInvalid)
                 return
@@ -483,7 +482,7 @@ public final class TranslationOrchestrator {
     }
 
     public func stop() async {
-        Self.log.info("stop() — tearing down session from state=\(String(describing: self.state), privacy: .public)")
+        Self.log.info("stop() — tearing down session from state=\(String(describing: self.state))")
         await stopAllStreams()
         consecutiveEmptyCloses = [.me: 0, .peer: 0]
         state = .idle

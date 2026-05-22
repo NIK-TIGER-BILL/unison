@@ -21,6 +21,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastMenubarState: MenubarState = .idle
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        // Touch the file-log singleton so the boot banner is written
+        // before any other component logs. The integration test greps
+        // for the banner to confirm the binary it launched is the new
+        // one (vs. an SCP-stale copy). All other components pick up
+        // the same singleton implicitly through their `UnisonLog` use.
+        FileLogStore.shared.write(
+            category: "AppDelegate",
+            level: "info",
+            message: "applicationDidFinishLaunching — pid=\(ProcessInfo.processInfo.processIdentifier)"
+        )
+
         let hotkeys = HotkeyService()
         self.hotkeyService = hotkeys
 
@@ -128,6 +139,30 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             let item = statusItem!
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 item.showPopover()
+            }
+        case .startTranslation:
+            // Integration-test entry point. Defer the start by ~2 s so
+            // every subsystem has a chance to wire up (the orchestrator
+            // observation tracker is one runloop hop late, the BlackHole
+            // 2ch player needs the engine warmed up, etc.). After the
+            // delay we tap the same path the popover's "Начать перевод"
+            // button hits — modulo the user click — so we exercise the
+            // production codepath end-to-end.
+            FileLogStore.shared.write(
+                category: "AppDelegate",
+                level: "info",
+                message: "UNISON_FORCE_STATE=start-translation — will auto-start translation in 2s"
+            )
+            let vm = composition.popoverVM
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                Task { @MainActor in
+                    FileLogStore.shared.write(
+                        category: "AppDelegate",
+                        level: "info",
+                        message: "auto-start: invoking popoverVM.start()"
+                    )
+                    await vm.start()
+                }
             }
         case .onboardingDone:
             break

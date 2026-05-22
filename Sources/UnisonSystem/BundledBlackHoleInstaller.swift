@@ -1,6 +1,5 @@
 import Foundation
 import CoreAudio
-import os
 import UnisonDomain
 
 /// Installer that fetches the **latest** BlackHole release from GitHub
@@ -21,12 +20,12 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         string: "https://api.github.com/repos/ExistentialAudio/BlackHole/releases/latest"
     )!
 
-    /// `os.Logger` subsystem so the install flow is observable via
-    /// `log stream --predicate 'subsystem == "com.unison.app"' --info --debug`.
-    /// Every step writes a line at `.info` (or `.error`), which lets the
-    /// user or a maintainer pinpoint exactly where a silent failure
-    /// happened.
-    static let log = Logger(subsystem: "com.unison.app", category: "BlackHoleInstaller")
+    /// Diagnostic logger for the install flow. Mirrors to both unified
+    /// logging (`log stream --predicate 'subsystem == "com.unison.app"'`)
+    /// and `~/Library/Logs/Unison/unison.log` — see `UnisonLog`. Every
+    /// step writes a line at `.info` (or `.error`), which lets the user
+    /// or a maintainer pinpoint exactly where a silent failure happened.
+    static let log = UnisonLog(category: "BlackHoleInstaller")
 
     /// Indirection so tests can swap in fixture JSON without hitting
     /// the network.
@@ -127,18 +126,18 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         // 1. Fetch latest release JSON.
         let release: GitHubRelease
         do {
-            Self.log.info("Fetching latest release JSON from \(Self.latestReleaseURL, privacy: .public)")
+            Self.log.info("Fetching latest release JSON from \(Self.latestReleaseURL)")
             let (data, response) = try await fetchData(Self.latestReleaseURL)
             if let http = response as? HTTPURLResponse, http.statusCode != 200 {
                 Self.log.error("GitHub releases API returned HTTP \(http.statusCode)")
                 throw BlackHoleInstallError.releaseFetchFailed(http.statusCode)
             }
             release = try JSONDecoder().decode(GitHubRelease.self, from: data)
-            Self.log.info("Latest BlackHole release tag: \(release.tagName, privacy: .public)")
+            Self.log.info("Latest BlackHole release tag: \(release.tagName)")
         } catch let error as BlackHoleInstallError {
             throw error
         } catch {
-            Self.log.error("Release fetch transport error: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("Release fetch transport error: \(error.localizedDescription)")
             throw BlackHoleInstallError.releaseFetchFailed(-1)
         }
 
@@ -159,11 +158,11 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
             let url2ch = URL(string: "https://existential.audio/downloads/BlackHole2ch-\(version).pkg"),
             let url16ch = URL(string: "https://existential.audio/downloads/BlackHole16ch-\(version).pkg")
         else {
-            Self.log.error("Failed to construct download URLs for version \(version, privacy: .public)")
+            Self.log.error("Failed to construct download URLs for version \(version)")
             throw BlackHoleInstallError.assetsNotFound
         }
-        Self.log.info("Download URL 2ch: \(url2ch.absoluteString, privacy: .public)")
-        Self.log.info("Download URL 16ch: \(url16ch.absoluteString, privacy: .public)")
+        Self.log.info("Download URL 2ch: \(url2ch.absoluteString)")
+        Self.log.info("Download URL 16ch: \(url16ch.absoluteString)")
 
         // 3. Download both to temp.
         let tmp = FileManager.default.temporaryDirectory
@@ -171,20 +170,20 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         let pkg16chURL = tmp.appendingPathComponent("Unison-BlackHole16ch.pkg")
 
         do {
-            Self.log.info("Downloading 2ch pkg to \(pkg2chURL.path, privacy: .public)")
+            Self.log.info("Downloading 2ch pkg to \(pkg2chURL.path)")
             try await downloadFile(url2ch, pkg2chURL)
             let size2ch = (try? FileManager.default.attributesOfItem(atPath: pkg2chURL.path)[.size] as? Int) ?? -1
             Self.log.info("2ch pkg downloaded: \(size2ch) bytes")
 
-            Self.log.info("Downloading 16ch pkg to \(pkg16chURL.path, privacy: .public)")
+            Self.log.info("Downloading 16ch pkg to \(pkg16chURL.path)")
             try await downloadFile(url16ch, pkg16chURL)
             let size16ch = (try? FileManager.default.attributesOfItem(atPath: pkg16chURL.path)[.size] as? Int) ?? -1
             Self.log.info("16ch pkg downloaded: \(size16ch) bytes")
         } catch let error as BlackHoleInstallError {
-            Self.log.error("Download failed: \(String(describing: error), privacy: .public)")
+            Self.log.error("Download failed: \(String(describing: error))")
             throw error
         } catch {
-            Self.log.error("Download failed (untyped): \(error.localizedDescription, privacy: .public)")
+            Self.log.error("Download failed (untyped): \(error.localizedDescription)")
             throw BlackHoleInstallError.downloadFailed
         }
 
@@ -200,7 +199,7 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
             try runInstaller(pkgs: [pkg2chURL, pkg16chURL])
             Self.log.info("osascript installer call returned success")
         } catch {
-            Self.log.error("Installer invocation failed: \(String(describing: error), privacy: .public)")
+            Self.log.error("Installer invocation failed: \(String(describing: error))")
             // Cleanup even on failure so we don't litter temp.
             try? FileManager.default.removeItem(at: pkg2chURL)
             try? FileManager.default.removeItem(at: pkg16chURL)
@@ -298,17 +297,17 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         do {
             result = try runProcess("/usr/sbin/pkgutil", ["--check-signature", url.path])
         } catch {
-            Self.log.error("pkgutil invocation threw: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("pkgutil invocation threw: \(error.localizedDescription)")
             throw BlackHoleInstallError.signatureInvalid
         }
         if !result.stdout.isEmpty {
-            Self.log.debug("pkgutil stdout: \(result.stdout, privacy: .public)")
+            Self.log.debug("pkgutil stdout: \(result.stdout)")
         }
         if !result.stderr.isEmpty {
-            Self.log.debug("pkgutil stderr: \(result.stderr, privacy: .public)")
+            Self.log.debug("pkgutil stderr: \(result.stderr)")
         }
         if result.status != 0 {
-            Self.log.error("pkgutil exited with status \(result.status) for \(url.lastPathComponent, privacy: .public)")
+            Self.log.error("pkgutil exited with status \(result.status) for \(url.lastPathComponent)")
             throw BlackHoleInstallError.signatureInvalid
         }
     }
@@ -353,7 +352,7 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         commands.append("( /bin/launchctl kickstart -k system/com.apple.audio.coreaudiod || /usr/bin/killall coreaudiod || true )")
         let installCmds = commands.joined(separator: " && ")
         let script = "do shell script \(Self.appleScriptQuote(installCmds)) with administrator privileges"
-        Self.log.debug("osascript script: \(script, privacy: .public)")
+        Self.log.debug("osascript script: \(script)")
 
         let result: ProcessResult
         do {
@@ -364,14 +363,14 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
             throw BlackHoleInstallError.installFailed(error.localizedDescription)
         }
         if !result.stdout.isEmpty {
-            Self.log.info("osascript stdout: \(result.stdout, privacy: .public)")
+            Self.log.info("osascript stdout: \(result.stdout)")
         }
         if !result.stderr.isEmpty {
             // osascript writes "User canceled." here when the auth
             // prompt is dismissed, and `installer`'s own progress lines
             // when authentication succeeded. We log at .info so QA can
             // distinguish the two.
-            Self.log.info("osascript stderr: \(result.stderr, privacy: .public)")
+            Self.log.info("osascript stderr: \(result.stderr)")
         }
         if result.status != 0 {
             Self.log.error("osascript exited with status \(result.status)")

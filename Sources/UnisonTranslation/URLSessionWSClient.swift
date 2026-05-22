@@ -1,5 +1,5 @@
 import Foundation
-import os
+import UnisonDomain
 
 /// Production `WSClient` backed by `URLSession.webSocketTask`.
 ///
@@ -9,10 +9,10 @@ import os
 /// is processed, with the actual code lost. So this client wires up a
 /// delegate just to surface those values to `closeStream()`.
 public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDelegate, @unchecked Sendable {
-    /// `os.Logger` so close-code mapping decisions show up in unified
-    /// logging with the same `com.unison.app` subsystem as the rest of
-    /// the app. The user's diagnostic copy pulls from this stream.
-    private static let log = Logger(subsystem: "com.unison.app", category: "URLSessionWSClient")
+    /// Diagnostic logger for close-code mapping decisions. Mirrors to
+    /// `~/Library/Logs/Unison/unison.log` and unified logging — see
+    /// `UnisonLog`. The user's diagnostic copy pulls from the file.
+    private static let log = UnisonLog(category: "URLSessionWSClient")
 
     private var task: URLSessionWebSocketTask?
     /// Lazily-built `URLSession` so we can install `self` as the delegate.
@@ -105,7 +105,7 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
                         break
                     }
                     let ns = error as NSError
-                    Self.log.error("receive loop error: domain=\(ns.domain, privacy: .public) code=\(ns.code) desc=\(ns.localizedDescription, privacy: .public)")
+                    Self.log.error("receive loop error: domain=\(ns.domain) code=\(ns.code) desc=\(ns.localizedDescription)")
                     self?.closeContinuation?.yield(.error(ns))
                     self?.receiveContinuation?.finish()
                     break
@@ -121,7 +121,7 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
         webSocketTask: URLSessionWebSocketTask,
         didOpenWithProtocol protocol: String?
     ) {
-        Self.log.info("WS open — protocol=\(`protocol` ?? "<none>", privacy: .public)")
+        Self.log.info("WS open — protocol=\(`protocol` ?? "<none>")")
     }
 
     public func urlSession(
@@ -140,7 +140,7 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
             return String(data: data, encoding: .utf8)
         }()
         let code = closeCode.rawValue
-        Self.log.error("WS close — code=\(code) reason=\(reasonString ?? "<nil>", privacy: .public)")
+        Self.log.error("WS close — code=\(code) reason=\(reasonString ?? "<nil>")")
         if closeCode == .normalClosure {
             closeContinuation?.yield(.normal)
         } else {

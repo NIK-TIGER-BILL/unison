@@ -1,5 +1,4 @@
 import Foundation
-import os
 import UnisonDomain
 
 /// Bridge between the domain `AudioFormatTransformer` protocol and the
@@ -12,7 +11,7 @@ import UnisonDomain
 /// by the `.float32` guard"). The per-frame hot path stays log-free —
 /// `loggedX` flags latch on first crossing.
 public final class ResamplerAdapter: AudioFormatTransformer, @unchecked Sendable {
-    private static let log = Logger(subsystem: "com.unison.app", category: "Resampler")
+    private static let log = UnisonLog(category: "Resampler")
     private let lock = NSLock()
     private var loggedToWire = false
     private var loggedFromWire = false
@@ -23,7 +22,7 @@ public final class ResamplerAdapter: AudioFormatTransformer, @unchecked Sendable
         let out = Resampler.toOpenAIWire(frame)
         lock.lock(); let shouldLog = !loggedToWire; if shouldLog { loggedToWire = true }; lock.unlock()
         if shouldLog {
-            Self.log.info("toWire — first call: in=\(frame.sampleRate)Hz \(String(describing: frame.format), privacy: .public) → out=\(out.sampleRate)Hz \(String(describing: out.format), privacy: .public)")
+            Self.log.info("toWire — first call: in=\(frame.sampleRate)Hz \(String(describing: frame.format)) → out=\(out.sampleRate)Hz \(String(describing: out.format))")
         }
         return out
     }
@@ -32,7 +31,7 @@ public final class ResamplerAdapter: AudioFormatTransformer, @unchecked Sendable
         let out = Resampler.fromOpenAIWire(frame, targetSampleRate: targetSampleRate)
         lock.lock(); let shouldLog = !loggedFromWire; if shouldLog { loggedFromWire = true }; lock.unlock()
         if shouldLog {
-            Self.log.info("fromWire — first call: in=\(frame.sampleRate)Hz \(String(describing: frame.format), privacy: .public) → out=\(out.sampleRate)Hz \(String(describing: out.format), privacy: .public)")
+            Self.log.info("fromWire — first call: in=\(frame.sampleRate)Hz \(String(describing: frame.format)) → out=\(out.sampleRate)Hz \(String(describing: out.format))")
         }
         return out
     }

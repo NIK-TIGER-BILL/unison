@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import os
 import UnisonDomain
 
 public enum StartBlockedReason: Equatable, Sendable {
@@ -19,12 +18,13 @@ public enum PopoverPrimaryIcon: Sendable {
 @MainActor
 @Observable
 public final class PopoverViewModel {
-    /// `os.Logger` channel for the popover view-model. Stream this with
-    /// `log stream --predicate 'subsystem == "com.unison.app"' --info`
-    /// to see exactly which step of `start()` is reached (or skipped)
-    /// when a click on "Начать перевод" appears to do nothing.
+    /// Diagnostic logger for the popover view-model. Mirrors to both
+    /// unified logging and `~/Library/Logs/Unison/unison.log` — see
+    /// `UnisonLog`. Lets you see exactly which step of `start()` is
+    /// reached (or skipped) when a click on "Начать перевод" appears
+    /// to do nothing.
     @ObservationIgnored
-    static let log = Logger(subsystem: "com.unison.app", category: "PopoverVM")
+    static let log = UnisonLog(category: "PopoverVM")
 
     private let orchestrator: TranslationOrchestrator?
     private let permissions: any PermissionsService
@@ -196,8 +196,8 @@ public final class PopoverViewModel {
         let bh2 = deviceRegistry.findBlackHole2ch() != nil
         let bh16 = deviceRegistry.findBlackHole16ch() != nil
         let preState = String(describing: state)
-        Self.log.info("start() called — mode=\(mode.rawValue, privacy: .public), pair=\(mineCode, privacy: .public)→\(peerCode, privacy: .public)")
-        Self.log.info("start() pre-flight — blockedReason=\(blocked, privacy: .public), mic=\(micStatus, privacy: .public), BH2ch=\(bh2 ? "present" : "missing", privacy: .public), BH16ch=\(bh16 ? "present" : "missing", privacy: .public), state=\(preState, privacy: .public)")
+        Self.log.info("start() called — mode=\(mode.rawValue), pair=\(mineCode)→\(peerCode)")
+        Self.log.info("start() pre-flight — blockedReason=\(blocked), mic=\(micStatus), BH2ch=\(bh2 ? "present" : "missing"), BH16ch=\(bh16 ? "present" : "missing"), state=\(preState)")
 
         if orchestrator == nil {
             Self.log.error("start() — orchestrator is nil (preview VM); skipping")
@@ -206,13 +206,13 @@ public final class PopoverViewModel {
 
         await orchestrator?.start(mode: mode, languages: settings.languagePair, settings: settings)
         let postState = String(describing: state)
-        Self.log.info("start() returned — state=\(postState, privacy: .public)")
+        Self.log.info("start() returned — state=\(postState)")
     }
 
     public func stop() async {
-        Self.log.info("stop() called — state=\(String(describing: self.state), privacy: .public)")
+        Self.log.info("stop() called — state=\(String(describing: self.state))")
         await orchestrator?.stop()
-        Self.log.info("stop() returned — state=\(String(describing: self.state), privacy: .public)")
+        Self.log.info("stop() returned — state=\(String(describing: self.state))")
     }
 
     /// Toggle between Call and Listen modes. Convenience for the view.
