@@ -22,6 +22,13 @@ public enum UnisonForceState: String, Sendable {
     /// surface without AppleScript-clicking the status item (which needs
     /// Accessibility permission and is fragile across notch geometries).
     case popoverOpen = "popover-open"
+    /// Mark onboarding done AND auto-invoke `popoverVM.start()` shortly
+    /// after launch. Used by `scripts/vm-integration-test.sh` to drive
+    /// a full translation cycle without an AppleScript click path —
+    /// the harness can SSH into the VM, launch with this state +
+    /// `UNISON_TEST_AUDIO=/tmp/speech.wav`, sleep, then pull the
+    /// log file back to assert pipeline events fired.
+    case startTranslation = "start-translation"
 
     /// Resolve from `ProcessInfo.processInfo.environment["UNISON_FORCE_STATE"]`.
     public static var current: UnisonForceState? {
@@ -66,7 +73,25 @@ public final class Composition {
             clock: SystemClock()
         )
 
-        let mic = AVAudioEngineMicrophone()
+        // VM/integration-test seam: `UNISON_TEST_AUDIO=/path/to.wav`
+        // substitutes a `FileMicrophoneCapture` for the real engine so
+        // the harness can pipe pre-recorded speech through the
+        // translation stack without a working input device. Production
+        // launches never set this var. See `FileMicrophoneCapture` for
+        // the format contract (24 kHz int16 mono, looped).
+        let mic: any MicrophoneCapture = {
+            if let testAudioPath = ProcessInfo.processInfo.environment["UNISON_TEST_AUDIO"],
+               !testAudioPath.isEmpty {
+                let expanded = (testAudioPath as NSString).expandingTildeInPath
+                FileLogStore.shared.write(
+                    category: "Composition",
+                    level: "info",
+                    message: "UNISON_TEST_AUDIO=\(expanded) — substituting FileMicrophoneCapture for AVAudioEngineMicrophone"
+                )
+                return FileMicrophoneCapture(fileURL: URL(fileURLWithPath: expanded))
+            }
+            return AVAudioEngineMicrophone()
+        }()
         let peerCap = BlackHoleSinkCapture(registry: registry)
         let mixer = AVAudioOutputMixer()
         let bhPlayer = BlackHole2chPlayer(registry: registry)
@@ -155,7 +180,7 @@ extension Composition {
     /// - Otherwise: use `BundledBlackHoleInstaller`, which fetches the
     ///   latest BlackHole release from GitHub at runtime.
     static func makeInstaller(force: UnisonForceState? = UnisonForceState.current) -> any BlackHoleInstaller {
-        if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen {
+        if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen || force == .startTranslation {
             print("[Unison] UNISON_FORCE_STATE=\(force!.rawValue) — using pre-installed MockBlackHoleInstaller")
             return MockBlackHoleInstaller(preInstalled: true)
         }
@@ -185,7 +210,7 @@ extension Composition {
     /// - Otherwise the real `MacPermissions` (prompts the user via
     ///   AVFoundation).
     static func makePermissions(force: UnisonForceState? = UnisonForceState.current) -> any PermissionsService {
-        if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen {
+        if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen || force == .startTranslation {
             return ForcedGrantedPermissions()
         }
         return MacPermissions()
@@ -200,6 +225,15 @@ extension Composition {
     static func makeKeychain(force: UnisonForceState? = UnisonForceState.current) -> any KeychainService {
         if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen {
             return InMemoryKeychain(seeded: "sk-unison-vm-screenshot-placeholder-key")
+        }
+        // `startTranslation` runs the *real* translation pipeline, so it
+        // needs a real OpenAI key. The integration script pre-seeds the
+        // macOS keychain via `security add-generic-password` before
+        // launching, so the production `MacKeychain` resolves correctly.
+        // Falling back here to `MacKeychain` (no seed) makes the auth-
+        // failed path observable when the key is missing/revoked.
+        if force == .startTranslation {
+            return MacKeychain()
         }
         return MacKeychain()
     }
