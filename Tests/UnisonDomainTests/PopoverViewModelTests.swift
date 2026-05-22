@@ -220,3 +220,65 @@ func popoverVM_userMessage_apiKeyInvalidMentionsSettings() {
     let msg = PopoverViewModel.userMessage(for: .apiKeyInvalid)
     #expect(msg.contains("Настройках"))
 }
+
+@Test
+func popoverVM_userMessage_apiKeyInvalidPointsToPlatformDashboard() {
+    // The terminal-empty-close escalation surfaces .apiKeyInvalid; the
+    // user-facing copy must direct the user to the OpenAI dashboard so
+    // they know exactly where to verify or rotate the key.
+    let msg = PopoverViewModel.userMessage(for: .apiKeyInvalid)
+    #expect(msg.contains("platform.openai.com"))
+}
+
+@MainActor
+@Test
+func popoverVM_elapsedSecondsString_keepsCountingDuringReconnecting() {
+    // The timer reads `state.sessionStartedAt` which must be preserved
+    // across reconnects. With a state value of `.reconnecting(...,
+    // startedAt: ~60s ago)`, the formatted string should be at least
+    // "00:60" (i.e. not "00:00").
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
+    let started = nowOffset(-60)
+    let vm = PopoverViewModel.previewing(
+        state: .reconnecting(mode: .call, since: nowDate(), startedAt: started),
+        permissions: perms,
+        deviceRegistry: registry
+    )
+    // ~60 seconds elapsed — must read "01:00" (or near it). The
+    // important guard is that it's NOT "00:00".
+    let elapsed = vm.elapsedSecondsString
+    #expect(elapsed != "00:00", "Timer should keep ticking during .reconnecting — got \(elapsed)")
+}
+
+@MainActor
+@Test
+func popoverVM_isReconnecting_trueOnlyDuringReconnecting() {
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
+    let start = nowDate()
+
+    let idle = PopoverViewModel.previewing(state: .idle, permissions: perms, deviceRegistry: registry)
+    #expect(idle.isReconnecting == false)
+
+    let translating = PopoverViewModel.previewing(
+        state: .translating(mode: .call, startedAt: start),
+        permissions: perms, deviceRegistry: registry
+    )
+    #expect(translating.isReconnecting == false)
+
+    let reconnecting = PopoverViewModel.previewing(
+        state: .reconnecting(mode: .call, since: start, startedAt: start),
+        permissions: perms, deviceRegistry: registry
+    )
+    #expect(reconnecting.isReconnecting)
+
+    let errored = PopoverViewModel.previewing(state: .error(.networkLost), permissions: perms, deviceRegistry: registry)
+    #expect(errored.isReconnecting == false)
+}

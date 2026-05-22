@@ -28,3 +28,18 @@ func epochDate(_ seconds: TimeInterval = 0) -> Date {
 func freshUUID() -> UUID {
     UUID()
 }
+
+/// Current wall-clock time. Lets test files avoid `import Foundation`
+/// (which collides with `import Testing` on the Command Line Tools
+/// install). The orchestrator's persistent-timer fix is checked against
+/// wall-clock `Date()` inside `runningTimeSeconds`, so the test fixture
+/// needs to compute a recent date too.
+func nowDate() -> Date {
+    Date()
+}
+
+/// `Date` shifted from `nowDate()` by the given delta. Negative values
+/// produce a date in the past, which is what most timer tests need.
+func nowOffset(_ delta: TimeInterval) -> Date {
+    Date().addingTimeInterval(delta)
+}

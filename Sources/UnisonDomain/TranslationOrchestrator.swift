@@ -38,6 +38,23 @@ public final class TranslationOrchestrator {
     private var globalTasks: [Task<Void, Never>] = []
     private var currentLanguages: LanguagePair = .default
     private var currentSettings: Settings = .default
+    /// `clock.now()` at the moment `start()` first entered `.translating`.
+    /// Preserved across reconnects so the popover timer counts from the
+    /// user's click instead of resetting to 00:00 each time a stream
+    /// flaps. Cleared in `stop()`.
+    private var sessionStartedAt: Date?
+    /// Per-speaker count of consecutive WS closes that happened **before**
+    /// the server delivered any translated chunk. The handshake succeeds
+    /// then the socket drops within milliseconds — the classic pattern
+    /// for a rejected API key, account not enabled for realtime, or
+    /// unsupported model. After 2 such closes in a row we stop retrying
+    /// and surface `.apiKeyInvalid` so the user gets a fast, terminal
+    /// signal instead of an endless `.translating ↔ .reconnecting` flap.
+    private var consecutiveEmptyCloses: [Speaker: Int] = [.me: 0, .peer: 0]
+    /// Threshold for the empty-close escalation above. Tuned to 2 so a
+    /// single transient bad handshake doesn't take down the session,
+    /// but a clearly broken credential surfaces within ~2-3 seconds.
+    private static let emptyCloseTerminalThreshold = 2
 
     public init(
         micCapture: any MicrophoneCapture,
@@ -139,7 +156,14 @@ public final class TranslationOrchestrator {
             observeConnectionState(stream: me, speaker: .me, target: languages.peer, mode: mode)
         }
 
-        state = .translating(mode: mode, startedAt: clock.now())
+        // Capture session start time once and reuse across reconnects so
+        // the popover timer never resets mid-session. `stop()` clears it.
+        let startedAt = clock.now()
+        sessionStartedAt = startedAt
+        // Fresh session — reset empty-close counters; a previous run's
+        // counter must not leak into the new one.
+        consecutiveEmptyCloses = [.me: 0, .peer: 0]
+        state = .translating(mode: mode, startedAt: startedAt)
         observeDeviceChanges()
         Self.log.info("start() — translating session active")
     }
@@ -203,14 +227,38 @@ public final class TranslationOrchestrator {
         let connStates = stream.connectionState
         let task = Task { @MainActor [weak self] in
             for await connState in connStates {
+                // Bail out of buffered events after this observer task
+                // was cancelled — otherwise the `.disconnected` event
+                // that `close()` yields on the way out can be picked
+                // up *after* the reconnect cycle has put us back into
+                // `.translating` on a fresh stream, which would
+                // re-fire `handleStreamFailure` and reset the
+                // empty-close counter on the wrong speaker.
+                if Task.isCancelled { return }
                 guard let self else { return }
                 switch connState {
-                case .failed(let err):
-                    await self.handleStreamFailure(error: err, speaker: speaker, target: target, mode: mode)
+                case .failed(let err, let receivedAnyData):
+                    await self.handleStreamFailure(
+                        error: err,
+                        speaker: speaker,
+                        target: target,
+                        mode: mode,
+                        receivedAnyData: receivedAnyData
+                    )
                 case .disconnected:
-                    // Treat ungraceful disconnect as failure while translating
+                    // Treat ungraceful disconnect as failure while translating.
+                    // We have no visibility into whether the stream ever
+                    // delivered data on this path, so assume `true` to keep
+                    // the orchestrator in its old behaviour for vanilla
+                    // disconnects.
                     if case .translating = self.state {
-                        await self.handleStreamFailure(error: .networkLost, speaker: speaker, target: target, mode: mode)
+                        await self.handleStreamFailure(
+                            error: .networkLost,
+                            speaker: speaker,
+                            target: target,
+                            mode: mode,
+                            receivedAnyData: true
+                        )
                     }
                 case .connecting, .connected, .reconnecting:
                     break
@@ -224,18 +272,60 @@ public final class TranslationOrchestrator {
         error: TranslationError,
         speaker: Speaker,
         target: Language,
-        mode: SessionMode
+        mode: SessionMode,
+        receivedAnyData: Bool
     ) async {
-        Self.log.error("handleStreamFailure — speaker=\(String(describing: speaker), privacy: .public), error=\(String(describing: error), privacy: .public)")
+        Self.log.error("handleStreamFailure — speaker=\(String(describing: speaker), privacy: .public), error=\(String(describing: error), privacy: .public), receivedAnyData=\(receivedAnyData)")
         // Don't try to recover from terminal errors
         switch error {
         case .apiKeyInvalid, .insufficientCredits, .permissionDenied:
             Self.log.error("handleStreamFailure — terminal error, surfacing as .error(\(String(describing: error), privacy: .public))")
+            await stopAllStreams()
             state = .error(error)
             return
         default:
             break
         }
+
+        // Endless-retry guard: a stream that connects, then closes before
+        // delivering a single chunk, is almost always a credential or
+        // model-access problem. The server happily accepts the WS upgrade
+        // (which is why we don't see it on `connect()` itself) and drops
+        // us on the first message. If we see this twice in a row on the
+        // same speaker, escalate to terminal `.apiKeyInvalid` so the user
+        // gets a clear error instead of a `.translating ↔ .reconnecting`
+        // flicker.
+        if !receivedAnyData {
+            let next = (consecutiveEmptyCloses[speaker] ?? 0) + 1
+            consecutiveEmptyCloses[speaker] = next
+            if next >= Self.emptyCloseTerminalThreshold {
+                Self.log.error("handleStreamFailure — \(String(describing: speaker), privacy: .public) stream closed empty \(next) times in a row → treating as terminal .apiKeyInvalid")
+                await stopAllStreams()
+                state = .error(.apiKeyInvalid)
+                return
+            }
+        } else {
+            // A successful data-bearing session resets the counter — a
+            // legitimate mid-call drop should not poison the next session
+            // with the previous one's empty-close debt.
+            consecutiveEmptyCloses[speaker] = 0
+        }
+
+        // Flip to `.reconnecting` BEFORE closing the stale stream so the
+        // `.disconnected` event that `close()` yields on the way out
+        // doesn't get re-interpreted as a fresh failure by any
+        // observer task that's still iterating. The observer's
+        // `.disconnected` branch only fires while `state` is
+        // `.translating`, so this prevents an accidental
+        // counter-resetting failure cascade.
+        //
+        // `sessionStartedAt` is non-nil whenever the orchestrator has
+        // entered `.translating`; falling back to `clock.now()` is a
+        // belt-and-braces guard so this code path is always well-formed
+        // even if the failure observer somehow runs before `start()`
+        // completed (it shouldn't).
+        let startedAt = sessionStartedAt ?? clock.now()
+        state = .reconnecting(mode: mode, since: clock.now(), startedAt: startedAt)
 
         // Cancel the failed speaker's tasks and close the stale stream so we
         // don't leak Tasks or orphan a still-open WebSocket on repeated reconnects.
@@ -249,8 +339,6 @@ public final class TranslationOrchestrator {
             await peerStream?.close()
             peerStream = nil
         }
-
-        state = .reconnecting(mode: mode, since: clock.now())
         var backoff = BackoffPolicy(initial: 1, cap: 30)
         var firstAttempt = true
         // Re-create the stream and try again, up to 5 attempts then give up
@@ -292,7 +380,13 @@ public final class TranslationOrchestrator {
                     wireOutgoingPipeline(stream: newStream)
                 }
                 observeConnectionState(stream: newStream, speaker: speaker, target: target, mode: mode)
-                state = .translating(mode: mode, startedAt: clock.now())
+                // Preserve the original session start time across reconnects
+                // so the popover timer keeps counting from the user's click
+                // instead of bouncing back to 00:00. `sessionStartedAt` is
+                // guaranteed non-nil here because `start()` set it before
+                // ever transitioning to .translating.
+                let startedAt = sessionStartedAt ?? clock.now()
+                state = .translating(mode: mode, startedAt: startedAt)
                 return
             } catch {
                 continue // try next backoff iteration
@@ -300,11 +394,15 @@ public final class TranslationOrchestrator {
         }
         // All retries failed
         Self.log.error("handleStreamFailure — all reconnect attempts exhausted → .error(.networkLost)")
+        await stopAllStreams()
         state = .error(.networkLost)
     }
 
-    public func stop() async {
-        Self.log.info("stop() — tearing down session from state=\(String(describing: self.state), privacy: .public)")
+    /// Tear down all active streams and pipeline tasks without flipping
+    /// state to `.idle`. Used by the terminal-error paths so we leave the
+    /// state at `.error(...)` instead of clobbering it back to `.idle`,
+    /// which would hide the failure from the popover.
+    private func stopAllStreams() async {
         for t in globalTasks { t.cancel() }
         for (_, tasks) in pipelineTasksBySpeaker {
             for t in tasks { t.cancel() }
@@ -319,6 +417,13 @@ public final class TranslationOrchestrator {
         await peerStream?.close()
         meStream = nil
         peerStream = nil
+        sessionStartedAt = nil
+    }
+
+    public func stop() async {
+        Self.log.info("stop() — tearing down session from state=\(String(describing: self.state), privacy: .public)")
+        await stopAllStreams()
+        consecutiveEmptyCloses = [.me: 0, .peer: 0]
         state = .idle
     }
 

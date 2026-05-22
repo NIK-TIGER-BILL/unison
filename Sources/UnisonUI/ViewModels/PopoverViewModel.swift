@@ -93,10 +93,22 @@ public final class PopoverViewModel {
     }
 
     public var runningTimeSeconds: TimeInterval {
-        if case .translating(_, let startedAt) = state {
+        // Read through `sessionStartedAt` so the timer keeps ticking
+        // during `.reconnecting` instead of snapping back to 00:00 every
+        // time a flapping stream forces a reconnect. The session start is
+        // preserved by the orchestrator across reconnect attempts.
+        if let startedAt = state.sessionStartedAt {
             return Date().timeIntervalSince(startedAt)
         }
         return 0
+    }
+
+    /// `true` while the popover should render the "Переподключение…"
+    /// affordance instead of the regular active state. Kept on the VM so
+    /// the view stays a thin renderer.
+    public var isReconnecting: Bool {
+        if case .reconnecting = state { return true }
+        return false
     }
 
     /// `mm:ss` formatted version of `runningTimeSeconds`.
@@ -229,7 +241,7 @@ public final class PopoverViewModel {
         case .networkLost:
             return "Нет связи с серверами OpenAI. Проверьте интернет."
         case .apiKeyInvalid:
-            return "Ключ OpenAI отклонён. Проверьте в Настройках."
+            return "OpenAI ключ невалидный. Проверьте на platform.openai.com/api-keys или вставьте новый в Настройках."
         case .rateLimited:
             return "Превышен лимит запросов OpenAI. Повторите позже."
         case .insufficientCredits:

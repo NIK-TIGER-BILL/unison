@@ -91,4 +91,16 @@ struct PopoverViewSnapshotTests {
         let size = CGSize(width: SnapSize.popover.width, height: 480)
         snap(darkFloor(PopoverView(vm: vm), size: size), size: size)
     }
+
+    /// During `.reconnecting` the popover must keep showing the timer +
+    /// Stop button (so the UI doesn't flicker when a flapping stream
+    /// oscillates between `.translating` and `.reconnecting`) and surface
+    /// a small "Переподключение…" hint below. The taller frame captures
+    /// the hint label which sits past the normal 420pt cutoff.
+    @Test func popover_reconnecting() throws {
+        let started = Date().addingTimeInterval(-14)
+        let vm = makeVM(state: .reconnecting(mode: .call, since: Date(), startedAt: started))
+        let size = CGSize(width: SnapSize.popover.width, height: 480)
+        snap(darkFloor(PopoverView(vm: vm), size: size), size: size)
+    }
 }

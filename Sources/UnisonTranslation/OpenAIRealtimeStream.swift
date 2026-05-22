@@ -130,15 +130,15 @@ public actor OpenAIRealtimeStream: TranslationStream {
                 connectionContinuation.yield(.disconnected)
             } else {
                 Self.log.error("\(speakerLabel, privacy: .public) WS closed normally before any data — likely auth/policy; surfacing .apiKeyInvalid")
-                connectionContinuation.yield(.failed(.apiKeyInvalid))
+                connectionContinuation.yield(.failed(.apiKeyInvalid, receivedAnyData: false))
             }
         case .abnormal(let code, let reasonText):
             let mapped = Self.classifyClose(code: code, reason: reasonText, receivedData: receivedData)
-            Self.log.error("\(speakerLabel, privacy: .public) WS abnormal close — code=\(code) reason=\(reasonText ?? "<nil>", privacy: .public) → \(String(describing: mapped), privacy: .public)")
-            connectionContinuation.yield(.failed(mapped))
+            Self.log.error("\(speakerLabel, privacy: .public) WS abnormal close — code=\(code) reason=\(reasonText ?? "<nil>", privacy: .public) receivedData=\(receivedData) → \(String(describing: mapped), privacy: .public)")
+            connectionContinuation.yield(.failed(mapped, receivedAnyData: receivedData))
         case .error(let ns):
-            Self.log.error("\(speakerLabel, privacy: .public) WS transport error — domain=\(ns.domain, privacy: .public) code=\(ns.code) → .networkLost")
-            connectionContinuation.yield(.failed(.networkLost))
+            Self.log.error("\(speakerLabel, privacy: .public) WS transport error — domain=\(ns.domain, privacy: .public) code=\(ns.code) receivedData=\(receivedData) → .networkLost")
+            connectionContinuation.yield(.failed(.networkLost, receivedAnyData: receivedData))
         }
     }
 
@@ -243,8 +243,8 @@ public actor OpenAIRealtimeStream: TranslationStream {
                 default: return .networkLost
                 }
             }()
-            Self.log.error("server error event code=\(e.code, privacy: .public) → \(String(describing: mapped), privacy: .public)")
-            connectionContinuation.yield(.failed(mapped))
+            Self.log.error("server error event code=\(e.code, privacy: .public) receivedData=\(self.receivedAnyData) → \(String(describing: mapped), privacy: .public)")
+            connectionContinuation.yield(.failed(mapped, receivedAnyData: self.receivedAnyData))
         case .unknown:
             break
         }

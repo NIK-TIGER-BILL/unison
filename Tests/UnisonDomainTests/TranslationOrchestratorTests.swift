@@ -246,7 +246,7 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
         if case .reconnecting = o.state { break }
     }
 
-    if case .reconnecting(let mode, _) = o.state {
+    if case .reconnecting(let mode, _, _) = o.state {
         #expect(mode == .call)
     } else {
         Issue.record("Expected .reconnecting, got \(o.state)")
@@ -388,4 +388,179 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
     } else {
         Issue.record("Expected .translating, got \(o.state)")
     }
+}
+
+// MARK: - Empty-close terminal escalation
+
+@Test @MainActor func orchestrator_twoConsecutiveEmptyCloses_escalatesToTerminalApiKeyInvalid() async throws {
+    // Two `.failed(receivedAnyData: false)` events on the same speaker
+    // within one session are the strongest signal of bad credentials or
+    // a disabled account — the server accepts the WS upgrade then drops
+    // us before delivering any chunk. The orchestrator must escalate to
+    // terminal `.apiKeyInvalid` to break the otherwise-endless retry
+    // loop.
+    //
+    // Use `InstantClock` so the reconnect retry loop completes
+    // quickly enough for the test to observe the second failure on
+    // the rebuilt stream.
+    let instantClock = InstantClock(now: epochDate(0))
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: instantClock)
+    await o.start(mode: .call, languages: .default)
+    guard case .translating = o.state else {
+        Issue.record("Expected .translating after start, got \(o.state)")
+        return
+    }
+
+    // First empty close — orchestrator counter becomes 1, goes to
+    // .reconnecting. The InstantClock returns immediately so the
+    // reconnect attempt fires and a NEW peer stream is built.
+    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost, receivedAnyData: false))
+
+    // Poll until reconnect succeeds (state back to .translating with a
+    // fresh stream wired up). Also bail if the orchestrator decided
+    // to short-circuit straight to .error.
+    for _ in 0..<300 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .translating = o.state { break }
+        if case .error = o.state { break }
+    }
+    guard case .translating = o.state else {
+        Issue.record("Expected .translating after reconnect, got \(o.state)")
+        return
+    }
+
+    // Yield a few times so the observer task on the new stream is
+    // actually scheduled before we emit on it. This is important
+    // because Task creation doesn't guarantee immediate execution —
+    // it requires at least one suspension point on the main actor.
+    for _ in 0..<5 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+
+    // Second empty close on the SAME speaker via the rebuilt stream —
+    // counter becomes 2 ≥ threshold, must terminate.
+    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost, receivedAnyData: false))
+    for _ in 0..<300 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .error = o.state { break }
+    }
+
+    #expect(o.state.errorValue == TranslationError.apiKeyInvalid)
+}
+
+@Test @MainActor func orchestrator_singleEmptyClose_doesNotEscalateImmediately() async throws {
+    // A single empty close must NOT trigger the terminal escalation —
+    // it should only set the counter to 1 and let the regular
+    // reconnect logic try again. The escalation only fires at the
+    // second consecutive empty close.
+    let fakeClock = FakeClock(now: epochDate(0))
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: fakeClock)
+    await o.start(mode: .call, languages: .default)
+
+    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost, receivedAnyData: false))
+    for _ in 0..<20 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .reconnecting = o.state { break }
+    }
+
+    if case .error = o.state {
+        Issue.record("Single empty close must not escalate to terminal; got \(o.state)")
+    }
+    if case .reconnecting = o.state {
+        #expect(true)
+    } else {
+        Issue.record("Expected .reconnecting after a single empty close, got \(o.state)")
+    }
+}
+
+@Test @MainActor func orchestrator_emptyClosesOnDifferentSpeakers_doNotEscalate() async throws {
+    // The counter is per-speaker — one empty close on `.me` plus one on
+    // `.peer` should NOT trigger the terminal escalation (which fires
+    // only at 2 consecutive on the SAME speaker).
+    let fakeClock = FakeClock(now: epochDate(0))
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: fakeClock)
+    await o.start(mode: .call, languages: .default)
+
+    // Empty close on .peer (counter[.peer] = 1) followed by one on
+    // .me (counter[.me] = 1). Neither speaker has hit the threshold
+    // of 2, so the orchestrator must remain in .reconnecting rather
+    // than escalating to terminal error.
+    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost, receivedAnyData: false))
+    factory.streams[.me]?.emitConnectionState(.failed(.networkLost, receivedAnyData: false))
+
+    // Give the orchestrator time to process both events on the main
+    // actor. Two empty closes on different speakers should leave the
+    // counter at 1 each — well below the threshold.
+    for _ in 0..<100 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+
+    if case .error(.apiKeyInvalid) = o.state {
+        Issue.record("Should not have escalated to terminal — empty closes were on different speakers; got \(o.state)")
+    }
+}
+
+// MARK: - Persistent timer across reconnects
+
+@Test @MainActor func orchestrator_reconnectingState_carriesOriginalSessionStartedAt() async throws {
+    // The popover timer reads `state.sessionStartedAt`. When a stream
+    // fails and the orchestrator moves to `.reconnecting`, the timer
+    // must keep counting from the user's click. The simplest way to
+    // verify is to confirm `.reconnecting` carries the same `startedAt`
+    // as the prior `.translating`.
+    let fakeClock = FakeClock(now: epochDate(0))
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: fakeClock)
+    await o.start(mode: .call, languages: .default)
+
+    guard case .translating(_, let startedAt) = o.state else {
+        Issue.record("Expected .translating after start, got \(o.state)")
+        return
+    }
+
+    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost, receivedAnyData: true))
+    for _ in 0..<20 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .reconnecting = o.state { break }
+    }
+
+    if case .reconnecting(_, _, let preservedStartedAt) = o.state {
+        #expect(preservedStartedAt == startedAt, "Reconnecting must carry the original session start time so the popover timer keeps counting")
+    } else {
+        Issue.record("Expected .reconnecting, got \(o.state)")
+    }
+}
+
+@Test @MainActor func orchestrator_reconnectingState_keepsCountingFromOriginalStartedAt() async throws {
+    // While in `.reconnecting`, `state.sessionStartedAt` must equal the
+    // original `.translating.startedAt` — the popover timer reads this
+    // and would snap back to 00:00 if the orchestrator used
+    // `clock.now()` here. This is the user-visible "timer keeps
+    // ticking from my click" fix without needing to drive the full
+    // reconnect-success path.
+    let fakeClock = FakeClock(now: epochDate(0))
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: fakeClock)
+    await o.start(mode: .call, languages: .default)
+
+    guard case .translating(_, let originalStartedAt) = o.state else {
+        Issue.record("Expected .translating after start, got \(o.state)")
+        return
+    }
+
+    // Advance the clock so any reset-on-reconnect bug would show up
+    // (the bug would replace `startedAt` with `clock.now()` = 5).
+    fakeClock.advance(by: 5)
+
+    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost, receivedAnyData: true))
+    for _ in 0..<20 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .reconnecting = o.state { break }
+    }
+
+    let preserved = o.state.sessionStartedAt
+    #expect(preserved == originalStartedAt, "Timer must not reset on reconnect — got \(String(describing: preserved)), expected \(originalStartedAt)")
 }

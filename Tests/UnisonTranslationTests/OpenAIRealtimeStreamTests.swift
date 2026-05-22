@@ -93,7 +93,7 @@ import Testing
     ws.push(.text(json))
 
     let state = await collector.value
-    if case .failed(let e) = state {
+    if case .failed(let e, _) = state {
         #expect(e == .apiKeyInvalid)
     } else {
         Issue.record("Expected .failed(.apiKeyInvalid), got \(String(describing: state))")
@@ -114,7 +114,7 @@ import Testing
 
     ws.pushClose(.abnormal(code: 1006, reason: nil))
     let state = await collector.value
-    if case .failed(let e) = state {
+    if case .failed(let e, _) = state {
         #expect(e == .networkLost)
     } else {
         Issue.record("Expected .failed(.networkLost), got \(String(describing: state))")
@@ -196,8 +196,9 @@ import Testing
     // signature — treat as `.apiKeyInvalid`, not `.networkLost`.
     ws.pushClose(.normal)
     let state = await collector.value
-    if case .failed(let e) = state {
+    if case .failed(let e, let receivedAnyData) = state {
         #expect(e == .apiKeyInvalid)
+        #expect(receivedAnyData == false, "Auth-fail close happens before any data — receivedAnyData must be false so the orchestrator can escalate to terminal")
     } else {
         Issue.record("Expected .failed(.apiKeyInvalid), got \(String(describing: state))")
     }

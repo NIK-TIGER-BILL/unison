@@ -51,6 +51,14 @@ public struct PopoverView: View {
             if vm.state.isActive {
                 timer
             }
+            // When a stream flaps the orchestrator oscillates between
+            // `.translating` and `.reconnecting`. We deliberately keep
+            // the timer + Stop button visible across both so the UI
+            // stays stable, and only swap in a thin hint below to let
+            // the user know reconnection is in progress.
+            if vm.isReconnecting {
+                reconnectingHint
+            }
             // Surface session-startup failures inline. Without this the
             // popover would look identical to its idle state after a
             // failed `start()` — exactly the silent-failure bug.
@@ -222,6 +230,23 @@ public struct PopoverView: View {
                 .monospacedDigit()
                 .frame(maxWidth: .infinity)
         }
+    }
+
+    /// Tiny inline status shown below the timer when the orchestrator is
+    /// in `.reconnecting`. Crucially the timer + Stop button above stay
+    /// rendered so the popover doesn't flicker when a flapping stream
+    /// oscillates between `.translating` and `.reconnecting`. Per
+    /// MEMORY.md UX-copy convention: short, single Russian phrase.
+    private var reconnectingHint: some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.7)
+            Text("Переподключение…")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Actions
