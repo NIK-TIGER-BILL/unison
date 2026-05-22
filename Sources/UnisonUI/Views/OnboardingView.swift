@@ -162,6 +162,17 @@ public struct OnboardingView: View {
                 loadingTitle: "Установка…"
             )
 
+            // Escape hatch: if the automated install fails for any
+            // reason (network, perm denial, CoreAudio quirk), the user
+            // can install BlackHole manually from existential.audio.
+            // Mirrors the `Получить ключ ↗` muted link under the OpenAI
+            // card — same visual weight, same affordance.
+            MutedLink("Установить вручную") {
+                onOpenURL(OnboardingViewModel.blackHoleManualInstallURL)
+            }
+            .accessibilityLabel("Установить BlackHole вручную")
+            .padding(.top, 4)
+
             if let message = vm.status[.blackHole]?.errorMessage {
                 ErrorRow(
                     title: "Не удалось установить",

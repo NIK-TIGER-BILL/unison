@@ -294,4 +294,13 @@ public final class OnboardingViewModel {
     public nonisolated static var openAIKeysURL: URL {
         URL(string: "https://platform.openai.com/api-keys")!
     }
+
+    /// External URL for the BlackHole manual install page. Surfaced as
+    /// a muted `Установить вручную ↗` link in the BlackHole onboarding
+    /// card so the user has an escape hatch if the automated install
+    /// flow fails for any reason (permission denied, network outage,
+    /// CoreAudio quirk, etc).
+    public nonisolated static var blackHoleManualInstallURL: URL {
+        URL(string: "https://existential.audio/blackhole/")!
+    }
 }
