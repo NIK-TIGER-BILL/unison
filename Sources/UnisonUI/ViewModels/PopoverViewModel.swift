@@ -37,6 +37,25 @@ public final class PopoverViewModel {
     /// touches this — `orchestrator.state` always wins when it exists.
     public var previewState: SessionState = .idle
 
+    /// Monotonic tick bumped whenever the *environment* changes —
+    /// device list, BlackHole install, mic permission grant. The
+    /// `startBlockedReason` computation reads it (via `_ = envTick`)
+    /// so SwiftUI's Observation invalidates the popover the moment
+    /// CoreAudio reports new hardware. Without this, plugging in a
+    /// new mic / installing BlackHole through onboarding wouldn't
+    /// dismiss the "BlackHole не найден" / "Микрофон не разрешён"
+    /// blocker until the user clicked Start (which would succeed
+    /// because the orchestrator re-reads on its own — misleading
+    /// state in the meantime).
+    public private(set) var envTick: Int = 0
+
+    /// Public so Composition can ping it from the registry's
+    /// `onDeviceListChanged` hook. Marked `@MainActor` because the
+    /// VM is.
+    public func refreshEnvironment() {
+        envTick &+= 1
+    }
+
     public init(
         orchestrator: TranslationOrchestrator,
         permissions: any PermissionsService,
@@ -171,6 +190,11 @@ public final class PopoverViewModel {
     }
 
     public var startBlockedReason: StartBlockedReason? {
+        // Touch `envTick` so SwiftUI's Observation tracks it. Without
+        // this, none of the dependencies below (permissions / registry)
+        // are Observable, so the popover never refreshes when the user
+        // grants mic permission or installs BlackHole from onboarding.
+        _ = envTick
         if settings.sessionMode == .call,
            permissions.currentStatus(.microphone) == .denied {
             return .micPermissionRequired

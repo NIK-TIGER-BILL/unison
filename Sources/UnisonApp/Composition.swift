@@ -231,17 +231,32 @@ public final class Composition {
             settingsVMRef.setOriginalMixVolume(volume)
         }
 
-        // Refresh SettingsViewModel's device + BlackHole state whenever
-        // CoreAudio reports the hardware roster changed. Without this
-        // the input/output pickers stayed frozen on the snapshot taken
-        // at app launch — plug in a new mic and it never appeared.
-        // The CoreAudio listener fires on `.main` (DispatchQueue), so
-        // hop to MainActor before touching the @Observable VM.
-        registry.onDeviceListChanged = { [weak settingsVMRef] in
+        // Refresh both view-models when CoreAudio reports the hardware
+        // roster changed. Without this the input/output pickers stayed
+        // frozen on the launch-time snapshot AND the popover's
+        // "BlackHole не найден" / "Микрофон не разрешён" blockers
+        // wouldn't dismiss after the user installed BlackHole or
+        // plugged in a mic. CoreAudio listener fires on `.main`
+        // DispatchQueue, so hop to MainActor before touching the
+        // @Observable view-models.
+        let popVMForRefresh = self.popoverVM
+        registry.onDeviceListChanged = { [weak settingsVMRef, weak popVMForRefresh] in
             Task { @MainActor in
                 settingsVMRef?.refreshDeviceList()
                 settingsVMRef?.refreshBlackHoleStatus()
+                popVMForRefresh?.refreshEnvironment()
             }
+        }
+        // Onboarding completion (mic grant, BlackHole install) doesn't
+        // necessarily trigger a CoreAudio device-list event — mic
+        // permission grant is a TCC change with no audible event,
+        // and a BlackHole install fires the registry listener
+        // but with potentially-flaky timing depending on the
+        // coreaudiod restart. Bump popover's env tick whenever
+        // onboarding's `refresh()` runs so the blocker re-evaluates.
+        let popVMForOnboarding = self.popoverVM
+        self.onboardingVM.onStateRefreshed = { [weak popVMForOnboarding] in
+            popVMForOnboarding?.refreshEnvironment()
         }
 
         // Apply `UNISON_FORCE_STATE` overrides that need to mutate the

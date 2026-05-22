@@ -144,6 +144,15 @@ public final class SettingsWindowController {
             w.center()
             window = w
         }
+        // Re-probe the registry on every show. The CoreAudio listener
+        // already pushes device-change events into the VM, but if the
+        // window was last opened before that listener was wired (rare
+        // launch race) — or if the user just unplugged something with
+        // the window closed — we want the freshest snapshot the moment
+        // it appears.
+        viewModel.refreshDeviceList()
+        viewModel.refreshBlackHoleStatus()
+
         window?.center()
         window?.makeKeyAndOrderFront(nil)
         // Ensure we steal focus from the menubar popover so the

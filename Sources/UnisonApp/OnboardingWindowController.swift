@@ -84,6 +84,13 @@ public final class OnboardingWindowController {
             w.contentViewController = NSHostingController(rootView: root)
             window = w
         }
+        // Re-probe permissions / installer / keychain on every show
+        // so a user who closed the window, granted mic in System
+        // Settings, and re-opened sees fresh state. Without this the
+        // onboarding card would keep showing "Микрофон — не разрешён"
+        // until the user manually clicked the request button again.
+        viewModel.refresh()
+
         window?.center()
         // `LSUIElement=true` (menubar agent) apps do NOT come forward
         // on their own when a window appears. Without explicit

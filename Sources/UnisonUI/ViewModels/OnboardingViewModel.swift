@@ -81,6 +81,15 @@ public final class OnboardingViewModel {
     /// called after the final step transitions to `.done`.
     private var completionFired = false
 
+    /// Fires on every `refresh()` (mic grant probed, BlackHole install
+    /// finished, key saved). Composition wires this to bump
+    /// `PopoverViewModel.refreshEnvironment()` so the popover's
+    /// "blocked" banner re-evaluates without waiting for a CoreAudio
+    /// device-list event (which doesn't fire for TCC grants and can
+    /// race with coreaudiod restart for BH installs).
+    @ObservationIgnored
+    public var onStateRefreshed: (@MainActor () -> Void)?
+
     public init(
         permissions: any PermissionsService,
         installer: any BlackHoleInstaller,
@@ -126,6 +135,7 @@ public final class OnboardingViewModel {
             completionFired = true
             onCompleted()
         }
+        onStateRefreshed?()
     }
 
     public var allDone: Bool { steps.allSatisfy(\.isDone) }
