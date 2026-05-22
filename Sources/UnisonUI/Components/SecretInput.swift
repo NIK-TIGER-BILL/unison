@@ -51,7 +51,15 @@ public struct SecretInput: View {
             .font(UnisonFonts.mono(11.5))
             .tracking(0.4)
             .foregroundStyle(.primary)
+            .multilineTextAlignment(.leading)
             .focused($fieldFocused)
+            // `.frame(maxWidth: .infinity, alignment: .leading)` makes
+            // the field claim the full available horizontal space and
+            // pin its text origin to the leading edge — without this,
+            // SwiftUI shrinks the field to fit its content and the
+            // value drifts to the trailing side of the HStack on
+            // macOS 26.
+            .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: 18)
 
             Button {
