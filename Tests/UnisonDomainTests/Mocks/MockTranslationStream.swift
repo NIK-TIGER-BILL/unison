@@ -6,6 +6,10 @@ public final class MockTranslationStream: TranslationStream, @unchecked Sendable
     public var connectedTo: Language?
     public var sentFrames: [AudioFrame] = []
     public var closeCalls = 0
+    /// If set, `connect(...)` throws this error instead of succeeding.
+    /// Used by tests that need to keep the orchestrator in
+    /// `.reconnecting` across the retry loop (e.g. watchdog tests).
+    public var connectError: Error?
 
     private var transcriptContinuation: AsyncStream<TranscriptDelta>.Continuation?
     private var outputContinuation: AsyncStream<AudioFrame>.Continuation?
@@ -29,6 +33,7 @@ public final class MockTranslationStream: TranslationStream, @unchecked Sendable
     }
 
     public func connect(target: Language) async throws {
+        if let err = connectError { throw err }
         connectedTo = target
         connectionContinuation?.yield(.connected)
     }
@@ -48,9 +53,15 @@ public final class MockTranslationStream: TranslationStream, @unchecked Sendable
 
 public final class MockTranslationStreamFactory: TranslationStreamFactory, @unchecked Sendable {
     public var streams: [Speaker: MockTranslationStream] = [:]
+    /// If non-nil, every stream produced after `make(...)` will throw
+    /// `nextConnectError` from `connect()`. Set this before triggering
+    /// the reconnect path to keep the orchestrator stuck in the retry
+    /// loop (useful for watchdog tests).
+    public var nextConnectError: Error?
     public init() {}
     public func make(speaker: Speaker) -> any TranslationStream {
         let s = MockTranslationStream(speaker: speaker)
+        s.connectError = nextConnectError
         streams[speaker] = s
         return s
     }

@@ -47,14 +47,32 @@ public final class TranslationOrchestrator {
     /// the server delivered any translated chunk. The handshake succeeds
     /// then the socket drops within milliseconds — the classic pattern
     /// for a rejected API key, account not enabled for realtime, or
-    /// unsupported model. After 2 such closes in a row we stop retrying
-    /// and surface `.apiKeyInvalid` so the user gets a fast, terminal
-    /// signal instead of an endless `.translating ↔ .reconnecting` flap.
+    /// unsupported model. After this many such closes in a row we stop
+    /// retrying and surface `.apiKeyInvalid` so the user gets a fast,
+    /// terminal signal instead of an endless `.translating ↔
+    /// .reconnecting` flap.
     private var consecutiveEmptyCloses: [Speaker: Int] = [.me: 0, .peer: 0]
-    /// Threshold for the empty-close escalation above. Tuned to 2 so a
-    /// single transient bad handshake doesn't take down the session,
-    /// but a clearly broken credential surfaces within ~2-3 seconds.
-    private static let emptyCloseTerminalThreshold = 2
+    /// Threshold for the empty-close escalation. A single connect-then-
+    /// close-without-data is already a very strong signal of a
+    /// credential/policy failure: macOS NSURLSession would not close a
+    /// successful realtime stream within the milliseconds-window
+    /// available between the WS upgrade and the first delta; that
+    /// behaviour is exclusively a server-side rejection. Hitting the
+    /// threshold once → immediate terminal `.error(.apiKeyInvalid)`.
+    private static let emptyCloseTerminalThreshold = 1
+    /// Watchdog that fires if the orchestrator stays in `.reconnecting`
+    /// without ever receiving translation data for longer than
+    /// `reconnectWatchdogSeconds`. Defense in depth: even if the
+    /// empty-close counter somehow doesn't escalate (e.g. the stream
+    /// hangs after the handshake instead of closing), the user still
+    /// gets a terminal error within a bounded time. Cleared on
+    /// successful data delivery and on `stop()`.
+    private var reconnectWatchdogTask: Task<Void, Never>?
+    /// How long we'll tolerate being in `.reconnecting` before forcing
+    /// a terminal `.error(.apiKeyInvalid)`. 15s is comfortably longer
+    /// than the regular reconnect retry budget (~10s across 5 attempts)
+    /// while still being short enough to feel responsive.
+    private static let reconnectWatchdogSeconds: TimeInterval = 15
 
     public init(
         micCapture: any MicrophoneCapture,
@@ -218,6 +236,41 @@ public final class TranslationOrchestrator {
         return .networkLost
     }
 
+    /// Arm the reconnect watchdog. After `Self.reconnectWatchdogSeconds`
+    /// the orchestrator forces terminal `.error(.apiKeyInvalid)` if it
+    /// is still in `.reconnecting` — this is the safety net that
+    /// guarantees a user-visible error within a bounded time, even
+    /// when the empty-close counter can't see the failure (stream
+    /// hangs post-handshake, etc.). Re-arming cancels the previous
+    /// task so we don't accumulate fired-twice races on rapid flaps.
+    private func armReconnectWatchdog() {
+        reconnectWatchdogTask?.cancel()
+        let clock = self.clock
+        reconnectWatchdogTask = Task { @MainActor [weak self] in
+            try? await clock.sleep(for: Self.reconnectWatchdogSeconds)
+            guard let self else { return }
+            if Task.isCancelled { return }
+            // Only escalate if we're still in `.reconnecting`. If the
+            // orchestrator already recovered (`.translating`), failed
+            // some other way (`.error`), or was stopped (`.idle`),
+            // the watchdog is moot.
+            if case .reconnecting = self.state {
+                Self.log.error("reconnect watchdog fired after \(Self.reconnectWatchdogSeconds)s — forcing terminal .apiKeyInvalid")
+                await self.stopAllStreams()
+                self.state = .error(.apiKeyInvalid)
+            }
+        }
+    }
+
+    /// Cancel any pending reconnect watchdog. Called when the session
+    /// recovers (back to `.translating`), is stopped, or escalates to
+    /// terminal via the empty-close counter — anything that means the
+    /// watchdog no longer needs to fire.
+    private func cancelReconnectWatchdog() {
+        reconnectWatchdogTask?.cancel()
+        reconnectWatchdogTask = nil
+    }
+
     private func observeConnectionState(
         stream: any TranslationStream,
         speaker: Speaker,
@@ -326,6 +379,11 @@ public final class TranslationOrchestrator {
         // completed (it shouldn't).
         let startedAt = sessionStartedAt ?? clock.now()
         state = .reconnecting(mode: mode, since: clock.now(), startedAt: startedAt)
+        // Arm the absolute reconnect watchdog. If the retry loop below
+        // never gets us back to `.translating` within
+        // `reconnectWatchdogSeconds`, we force terminal so the user
+        // doesn't see an endless "Переподключение…" spinner.
+        armReconnectWatchdog()
 
         // Cancel the failed speaker's tasks and close the stale stream so we
         // don't leak Tasks or orphan a still-open WebSocket on repeated reconnects.
@@ -387,6 +445,9 @@ public final class TranslationOrchestrator {
                 // ever transitioning to .translating.
                 let startedAt = sessionStartedAt ?? clock.now()
                 state = .translating(mode: mode, startedAt: startedAt)
+                // Reconnect succeeded — disarm the watchdog so it
+                // doesn't fire later and tear down a healthy session.
+                cancelReconnectWatchdog()
                 return
             } catch {
                 continue // try next backoff iteration
@@ -403,6 +464,7 @@ public final class TranslationOrchestrator {
     /// state at `.error(...)` instead of clobbering it back to `.idle`,
     /// which would hide the failure from the popover.
     private func stopAllStreams() async {
+        cancelReconnectWatchdog()
         for t in globalTasks { t.cancel() }
         for (_, tasks) in pipelineTasksBySpeaker {
             for t in tasks { t.cancel() }

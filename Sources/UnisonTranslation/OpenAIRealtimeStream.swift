@@ -36,6 +36,17 @@ public actor OpenAIRealtimeStream: TranslationStream {
     /// the WS handshake succeeds at TCP/TLS level, then the server
     /// closes immediately. We surface that as `.apiKeyInvalid` instead
     /// of `.networkLost`.
+    ///
+    /// INVARIANT: This flag is set ONLY when the server delivers an
+    /// actual translation chunk — `output_audio.delta` or
+    /// `output_transcript.delta`. Handshake/lifecycle events like
+    /// `session.*`, `error`, or `conversation.*` MUST NOT flip it,
+    /// because the orchestrator's empty-close escalation uses
+    /// `receivedAnyData=false` as the signal for "server accepted us
+    /// then dropped before translating a byte" — a credential/policy
+    /// failure that should terminate the session quickly. If a
+    /// non-data event ever toggles this, the user gets stuck in an
+    /// endless `.reconnecting` flap.
     private var receivedAnyData = false
 
     public init(

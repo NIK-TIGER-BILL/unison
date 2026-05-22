@@ -236,8 +236,11 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
         return
     }
 
-    // Push a .failed event on the peer stream's connectionState
-    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost))
+    // Push a .failed event on the peer stream's connectionState.
+    // `receivedAnyData: true` is the "transient drop mid-session"
+    // signature — we want to verify the regular reconnect path, NOT
+    // the empty-close terminal escalation.
+    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost, receivedAnyData: true))
 
     // Give the observer task time to react and the failure handler to set state.
     // The retry-loop will then call clock.sleep(for: 1) which suspends on FakeClock.
@@ -264,7 +267,7 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
     let o = makeOrchestrator(factory: factory, clock: fakeClock)
     await o.start(mode: .call, languages: .default)
 
-    factory.streams[.peer]?.emitConnectionState(.failed(.rateLimited(retryAfter: 7)))
+    factory.streams[.peer]?.emitConnectionState(.failed(.rateLimited(retryAfter: 7), receivedAnyData: true))
 
     for _ in 0..<20 {
         try await Task.sleep(nanoseconds: 10_000_000)
@@ -288,7 +291,9 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
     await o.start(mode: .call, languages: .default)
 
     let originalPeer = factory.streams[.peer]!
-    originalPeer.emitConnectionState(.failed(.networkLost))
+    // Mark as transient drop so we exercise the reconnect path (otherwise
+    // the empty-close threshold escalates straight to terminal error).
+    originalPeer.emitConnectionState(.failed(.networkLost, receivedAnyData: true))
 
     // Wait until the orchestrator has entered .reconnecting (which happens
     // synchronously after cancelling old tasks + closing the stale stream).
@@ -392,56 +397,28 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
 
 // MARK: - Empty-close terminal escalation
 
-@Test @MainActor func orchestrator_twoConsecutiveEmptyCloses_escalatesToTerminalApiKeyInvalid() async throws {
-    // Two `.failed(receivedAnyData: false)` events on the same speaker
-    // within one session are the strongest signal of bad credentials or
-    // a disabled account — the server accepts the WS upgrade then drops
-    // us before delivering any chunk. The orchestrator must escalate to
-    // terminal `.apiKeyInvalid` to break the otherwise-endless retry
+@Test @MainActor func orchestrator_singleEmptyClose_escalatesToTerminalApiKeyInvalid() async throws {
+    // A single `.failed(receivedAnyData: false)` event within a session is
+    // the strongest signal of bad credentials or a disabled account —
+    // the server accepts the WS upgrade then drops us before delivering
+    // any chunk. macOS NSURLSession would not close a successful
+    // realtime stream this quickly, so this is exclusively a server-
+    // side rejection. The orchestrator must escalate to terminal
+    // `.apiKeyInvalid` immediately to break the otherwise-endless retry
     // loop.
-    //
-    // Use `InstantClock` so the reconnect retry loop completes
-    // quickly enough for the test to observe the second failure on
-    // the rebuilt stream.
-    let instantClock = InstantClock(now: epochDate(0))
+    let fakeClock = FakeClock(now: epochDate(0))
     let factory = MockTranslationStreamFactory()
-    let o = makeOrchestrator(factory: factory, clock: instantClock)
+    let o = makeOrchestrator(factory: factory, clock: fakeClock)
     await o.start(mode: .call, languages: .default)
     guard case .translating = o.state else {
         Issue.record("Expected .translating after start, got \(o.state)")
         return
     }
 
-    // First empty close — orchestrator counter becomes 1, goes to
-    // .reconnecting. The InstantClock returns immediately so the
-    // reconnect attempt fires and a NEW peer stream is built.
+    // First (and only) empty close — counter becomes 1 ≥ threshold,
+    // must terminate immediately. No reconnect attempts.
     factory.streams[.peer]?.emitConnectionState(.failed(.networkLost, receivedAnyData: false))
-
-    // Poll until reconnect succeeds (state back to .translating with a
-    // fresh stream wired up). Also bail if the orchestrator decided
-    // to short-circuit straight to .error.
-    for _ in 0..<300 {
-        try await Task.sleep(nanoseconds: 10_000_000)
-        if case .translating = o.state { break }
-        if case .error = o.state { break }
-    }
-    guard case .translating = o.state else {
-        Issue.record("Expected .translating after reconnect, got \(o.state)")
-        return
-    }
-
-    // Yield a few times so the observer task on the new stream is
-    // actually scheduled before we emit on it. This is important
-    // because Task creation doesn't guarantee immediate execution —
-    // it requires at least one suspension point on the main actor.
-    for _ in 0..<5 {
-        try await Task.sleep(nanoseconds: 10_000_000)
-    }
-
-    // Second empty close on the SAME speaker via the rebuilt stream —
-    // counter becomes 2 ≥ threshold, must terminate.
-    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost, receivedAnyData: false))
-    for _ in 0..<300 {
+    for _ in 0..<100 {
         try await Task.sleep(nanoseconds: 10_000_000)
         if case .error = o.state { break }
     }
@@ -449,58 +426,81 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
     #expect(o.state.errorValue == TranslationError.apiKeyInvalid)
 }
 
-@Test @MainActor func orchestrator_singleEmptyClose_doesNotEscalateImmediately() async throws {
-    // A single empty close must NOT trigger the terminal escalation —
-    // it should only set the counter to 1 and let the regular
-    // reconnect logic try again. The escalation only fires at the
-    // second consecutive empty close.
+@Test @MainActor func orchestrator_emptyCloseOnAnySpeaker_escalates() async throws {
+    // With threshold=1, an empty close on EITHER speaker terminates the
+    // session immediately. Previously the test covered the per-speaker
+    // counter not crossing the threshold of 2; now even a single empty
+    // close on `.me` is terminal. Verifying both speakers exercise the
+    // same escalation path keeps the regression coverage symmetric.
     let fakeClock = FakeClock(now: epochDate(0))
     let factory = MockTranslationStreamFactory()
     let o = makeOrchestrator(factory: factory, clock: fakeClock)
     await o.start(mode: .call, languages: .default)
 
-    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost, receivedAnyData: false))
+    factory.streams[.me]?.emitConnectionState(.failed(.networkLost, receivedAnyData: false))
+    for _ in 0..<100 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .error = o.state { break }
+    }
+
+    #expect(o.state.errorValue == TranslationError.apiKeyInvalid)
+}
+
+// MARK: - Reconnect watchdog
+
+@Test @MainActor func orchestrator_reconnectWatchdog_firesIfReconnectingForTooLong() async throws {
+    // If the orchestrator stays in `.reconnecting` without ever
+    // recovering for longer than the watchdog window, it must force
+    // terminal `.error(.apiKeyInvalid)` — even when the empty-close
+    // counter can't see the failure (e.g. the stream hangs after the
+    // handshake instead of closing). Drive the FakeClock past the
+    // watchdog deadline and confirm the state moves to .error.
+    //
+    // To keep the retry loop from racing the watchdog (which can
+    // succeed instantly on the no-op MockTranslationStream and would
+    // transition us back to `.translating` before the watchdog body
+    // gets to inspect state), arrange for every reconnected stream
+    // to throw on connect — that keeps the loop suspended in the
+    // backoff sleep and lets the watchdog be the first to advance.
+    let fakeClock = FakeClock(now: epochDate(0))
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: fakeClock)
+    await o.start(mode: .call, languages: .default)
+    // After start, future streams (rebuilt during reconnect attempts)
+    // will fail to connect.
+    factory.nextConnectError = TranslationError.networkLost
+
+    // Use `receivedAnyData: true` so the empty-close path doesn't fire
+    // first — we want the watchdog to be the one to escalate.
+    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost, receivedAnyData: true))
     for _ in 0..<20 {
         try await Task.sleep(nanoseconds: 10_000_000)
         if case .reconnecting = o.state { break }
     }
-
-    if case .error = o.state {
-        Issue.record("Single empty close must not escalate to terminal; got \(o.state)")
+    guard case .reconnecting = o.state else {
+        Issue.record("Expected .reconnecting before watchdog fires, got \(o.state)")
+        return
     }
-    if case .reconnecting = o.state {
-        #expect(true)
-    } else {
-        Issue.record("Expected .reconnecting after a single empty close, got \(o.state)")
-    }
-}
 
-@Test @MainActor func orchestrator_emptyClosesOnDifferentSpeakers_doNotEscalate() async throws {
-    // The counter is per-speaker — one empty close on `.me` plus one on
-    // `.peer` should NOT trigger the terminal escalation (which fires
-    // only at 2 consecutive on the SAME speaker).
-    let fakeClock = FakeClock(now: epochDate(0))
-    let factory = MockTranslationStreamFactory()
-    let o = makeOrchestrator(factory: factory, clock: fakeClock)
-    await o.start(mode: .call, languages: .default)
-
-    // Empty close on .peer (counter[.peer] = 1) followed by one on
-    // .me (counter[.me] = 1). Neither speaker has hit the threshold
-    // of 2, so the orchestrator must remain in .reconnecting rather
-    // than escalating to terminal error.
-    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost, receivedAnyData: false))
-    factory.streams[.me]?.emitConnectionState(.failed(.networkLost, receivedAnyData: false))
-
-    // Give the orchestrator time to process both events on the main
-    // actor. Two empty closes on different speakers should leave the
-    // counter at 1 each — well below the threshold.
-    for _ in 0..<100 {
+    // Give the watchdog Task body time to actually start its
+    // `clock.sleep(15)` and register a deadline in FakeClock.pending.
+    // Otherwise our `advance(by: 20)` below races the Task creation
+    // and may fire before the watchdog has anything scheduled.
+    for _ in 0..<30 {
         try await Task.sleep(nanoseconds: 10_000_000)
     }
 
-    if case .error(.apiKeyInvalid) = o.state {
-        Issue.record("Should not have escalated to terminal — empty closes were on different speakers; got \(o.state)")
+    // Advance past the watchdog window. The FakeClock releases the
+    // watchdog's sleep continuation, which then transitions state to
+    // .error after observing we're still in .reconnecting.
+    fakeClock.advance(by: 20)
+
+    for _ in 0..<200 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .error = o.state { break }
     }
+    #expect(o.state.errorValue == TranslationError.apiKeyInvalid,
+            "Reconnect watchdog must force terminal .apiKeyInvalid; got \(o.state)")
 }
 
 // MARK: - Persistent timer across reconnects
