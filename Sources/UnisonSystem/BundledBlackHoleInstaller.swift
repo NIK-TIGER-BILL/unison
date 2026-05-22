@@ -320,9 +320,24 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         // string literal — defensive against weird tempdir paths even
         // though the standard `FileManager.default.temporaryDirectory`
         // path doesn't contain quotes.
-        let installCmds = pkgs
-            .map { "installer -pkg \(Self.shellQuote($0.path)) -target /" }
-            .joined(separator: " && ")
+        //
+        // After installing both pkgs we **kickstart coreaudiod**.
+        // BlackHole is a CoreAudio HAL plug-in installed under
+        // /Library/Audio/Plug-Ins/HAL/. macOS' `installer` writes the
+        // driver bundle to disk but does NOT relaunch coreaudiod, so the
+        // device stays invisible until either the user reboots or the
+        // audio daemon is restarted. The installer's own postinstall
+        // even says "The install requires restarting now." We avoid the
+        // restart by kickstarting the system daemon ourselves under the
+        // same admin auth that we already have. This makes BlackHole
+        // immediately discoverable by `system_profiler SPAudioDataType`
+        // and our own `hasDevice(named:)` poll, without asking the user
+        // to reboot.
+        var commands = pkgs.map {
+            "installer -pkg \(Self.shellQuote($0.path)) -target /"
+        }
+        commands.append("launchctl kickstart -k system/com.apple.audio.coreaudiod")
+        let installCmds = commands.joined(separator: " && ")
         let script = "do shell script \(Self.appleScriptQuote(installCmds)) with administrator privileges"
         Self.log.debug("osascript script: \(script, privacy: .public)")
 

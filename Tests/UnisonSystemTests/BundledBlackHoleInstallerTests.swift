@@ -101,6 +101,9 @@ func install_happyPath_invokesPkgutilAndInstaller() async throws {
     #expect(script.contains("with administrator privileges"))
     #expect(script.contains("&&"))
     #expect(script.contains("installer -pkg"))
+    // After the installs we kickstart coreaudiod so BlackHole is
+    // immediately discoverable by CoreAudio without a reboot.
+    #expect(script.contains("launchctl kickstart -k system/com.apple.audio.coreaudiod"))
 
     let urls = downloadedURLs.withLock { $0 }
     #expect(urls == [
