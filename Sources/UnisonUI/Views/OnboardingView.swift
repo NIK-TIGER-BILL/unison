@@ -419,12 +419,13 @@ private struct CompactPrimaryButton: View {
 
 // MARK: - Layout constants
 
-private enum OnboardingLayout {
-    static let windowWidth: CGFloat = 440
-    static let windowHeight: CGFloat = 620
+public enum OnboardingLayout {
+    public static let windowWidth: CGFloat = 440
+    public static let windowHeight: CGFloat = 620
     /// Matches `OnboardingWindowController` so the focus ring (if the
     /// compositor decides to draw one) follows the same rounded
-    /// silhouette as the glass card.
-    static let windowCornerRadius: CGFloat = 22
+    /// silhouette as the glass card. Public so the AppKit window
+    /// controller can wrap NSVisualEffectView at the same radius.
+    public static let windowCornerRadius: CGFloat = 22
 }
 

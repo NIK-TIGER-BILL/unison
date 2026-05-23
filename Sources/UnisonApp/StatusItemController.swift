@@ -90,7 +90,20 @@ public final class StatusItemController {
         )
         host.sizingOptions = [.preferredContentSize]
         popover.contentSize = NSSize(width: 340, height: 320)
-        popover.contentViewController = host
+        // Wrap the SwiftUI content in an NSVisualEffectView so the
+        // popover's glass is *live* — the compositor's behind-window
+        // pass recomputes blur as the wallpaper / underlying windows
+        // change. NSPopover paints its own chrome (rounded corners +
+        // arrow) so we don't need to manage clipping ourselves.
+        // Using `.popover` material gives Apple's canonical popover
+        // glass.
+        //
+        // The wrapper controller forwards the SwiftUI host's
+        // `preferredContentSize` to itself so NSPopover's
+        // sizing-options machinery keeps working — without that the
+        // popover would stay at the initial 340×320 forever even
+        // when the SwiftUI content's ideal size grew.
+        popover.contentViewController = GlassPopoverWrapperController(host: host, material: .popover)
 
         if let button = statusItem.button {
             // Listen for both left and right mouse-ups so we can branch
@@ -299,5 +312,51 @@ public final class StatusItemController {
     private func applyState() {
         guard let button = statusItem.button else { return }
         button.image = MenubarIcons.image(for: state)
+    }
+}
+
+/// View controller that backs the popover with a live
+/// `NSVisualEffectView` (Apple's canonical Liquid Glass on macOS 26
+/// at the AppKit level — the compositor recomputes its blur every
+/// frame as content behind the window changes). The hosted SwiftUI
+/// `NSHostingController` becomes a child controller so AppKit's
+/// `preferredContentSizeDidChange(for:)` chain wires the SwiftUI
+/// ideal-size signal up to NSPopover's resizing logic — without
+/// this the popover would freeze at its initial 340×320 even when
+/// the SwiftUI content's ideal size grew (e.g. when an error row
+/// gets appended).
+@MainActor
+private final class GlassPopoverWrapperController: NSViewController {
+    private let host: NSHostingController<PopoverView>
+
+    init(host: NSHostingController<PopoverView>, material: NSVisualEffectView.Material) {
+        self.host = host
+        super.init(nibName: nil, bundle: nil)
+        addChild(host)
+        let veView = NSVisualEffectView()
+        veView.material = material
+        veView.blendingMode = .behindWindow
+        veView.state = .active
+        veView.translatesAutoresizingMaskIntoConstraints = false
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        veView.addSubview(host.view)
+        NSLayoutConstraint.activate([
+            host.view.topAnchor.constraint(equalTo: veView.topAnchor),
+            host.view.bottomAnchor.constraint(equalTo: veView.bottomAnchor),
+            host.view.leadingAnchor.constraint(equalTo: veView.leadingAnchor),
+            host.view.trailingAnchor.constraint(equalTo: veView.trailingAnchor),
+        ])
+        view = veView
+        preferredContentSize = host.preferredContentSize
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func preferredContentSizeDidChange(for viewController: NSViewController) {
+        // Propagate the SwiftUI host's ideal size up so NSPopover
+        // resizes whenever the popover content grows / shrinks.
+        if viewController === host {
+            preferredContentSize = viewController.preferredContentSize
+        }
     }
 }

@@ -47,7 +47,30 @@ public final class DiagnosticWindowController {
                 self?.window?.orderOut(nil)
             }
         )
-        window?.contentViewController = NSHostingController(rootView: root)
+        // Same NSVisualEffectView wrap as OnboardingWindowController:
+        // SwiftUI `glassEffect()` alone doesn't give us *behind-window*
+        // live vibrancy, so wrap in an explicit NSVisualEffectView
+        // with rounded mask. See OnboardingWindowController for the
+        // detailed rationale.
+        let host = NSHostingController(rootView: root)
+        host.view.translatesAutoresizingMaskIntoConstraints = false
+        let veView = NSVisualEffectView()
+        veView.material = .windowBackground
+        veView.blendingMode = .behindWindow
+        veView.state = .active
+        veView.wantsLayer = true
+        veView.layer?.cornerRadius = 18
+        veView.layer?.masksToBounds = true
+        veView.translatesAutoresizingMaskIntoConstraints = false
+        veView.addSubview(host.view)
+        NSLayoutConstraint.activate([
+            host.view.topAnchor.constraint(equalTo: veView.topAnchor),
+            host.view.bottomAnchor.constraint(equalTo: veView.bottomAnchor),
+            host.view.leadingAnchor.constraint(equalTo: veView.leadingAnchor),
+            host.view.trailingAnchor.constraint(equalTo: veView.trailingAnchor),
+        ])
+        window?.contentView = veView
+        window?.contentViewController = nil
         window?.center()
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)

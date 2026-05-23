@@ -81,7 +81,40 @@ public final class OnboardingWindowController {
                     w?.orderOut(nil)
                 }
             )
-            w.contentViewController = NSHostingController(rootView: root)
+
+            // Wrap the SwiftUI content in an NSVisualEffectView with
+            // `.behindWindow` blending so the blur tracks whatever's
+            // *behind* the window in real time — desktop wallpaper
+            // changes, other apps moving, video playing underneath,
+            // etc. SwiftUI's `glassEffect()` modifier on its own
+            // renders a static within-window snapshot in many
+            // configurations (no NSVisualEffectView ancestor → no
+            // way to sample behind-window content). The user noticed:
+            // "наш Liquid Glass не динамичен". This wrapping is what
+            // actual macOS apps use for live window vibrancy.
+            //
+            // Rounded mask + window-level transparency keeps the
+            // borderless card shape: the visible glass is the
+            // rounded `veView`, the corners outside the radius are
+            // transparent (window passes through to desktop).
+            let host = NSHostingController(rootView: root)
+            host.view.translatesAutoresizingMaskIntoConstraints = false
+            let veView = NSVisualEffectView()
+            veView.material = .windowBackground
+            veView.blendingMode = .behindWindow
+            veView.state = .active
+            veView.wantsLayer = true
+            veView.layer?.cornerRadius = OnboardingLayout.windowCornerRadius
+            veView.layer?.masksToBounds = true
+            veView.translatesAutoresizingMaskIntoConstraints = false
+            veView.addSubview(host.view)
+            NSLayoutConstraint.activate([
+                host.view.topAnchor.constraint(equalTo: veView.topAnchor),
+                host.view.bottomAnchor.constraint(equalTo: veView.bottomAnchor),
+                host.view.leadingAnchor.constraint(equalTo: veView.leadingAnchor),
+                host.view.trailingAnchor.constraint(equalTo: veView.trailingAnchor),
+            ])
+            w.contentView = veView
             window = w
         }
         // Re-probe permissions / installer / keychain on every show

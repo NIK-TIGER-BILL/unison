@@ -78,8 +78,29 @@ public final class TranscriptWindowController {
             panel.title = "Unison Transcript"
 
             let host = NSHostingController(rootView: TranscriptView(vm: viewModel))
-            host.view.frame = NSRect(origin: .zero, size: frame.size)
-            panel.contentViewController = host
+            host.view.translatesAutoresizingMaskIntoConstraints = false
+            // NSVisualEffectView with `.behindWindow` blending so the
+            // transcript card's blur tracks whatever's behind it in
+            // real time (desktop, meeting window video frames, etc.).
+            // The SwiftUI `.liquidGlass()` modifier alone gives a
+            // static within-window snapshot — only the AppKit-level
+            // visual effect view gets the live compositor pass.
+            let veView = NSVisualEffectView()
+            veView.material = .windowBackground
+            veView.blendingMode = .behindWindow
+            veView.state = .active
+            veView.wantsLayer = true
+            veView.layer?.cornerRadius = 18
+            veView.layer?.masksToBounds = true
+            veView.translatesAutoresizingMaskIntoConstraints = false
+            veView.addSubview(host.view)
+            NSLayoutConstraint.activate([
+                host.view.topAnchor.constraint(equalTo: veView.topAnchor),
+                host.view.bottomAnchor.constraint(equalTo: veView.bottomAnchor),
+                host.view.leadingAnchor.constraint(equalTo: veView.leadingAnchor),
+                host.view.trailingAnchor.constraint(equalTo: veView.trailingAnchor),
+            ])
+            panel.contentView = veView
             window = panel
         } else {
             // Re-center on the current main screen each time we show so
