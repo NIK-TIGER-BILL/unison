@@ -134,7 +134,10 @@ public final class TranslationOrchestrator {
         transcript.clear()
         transcript.currentLanguagePair = languages
 
-        if mode == .call {
+        // Permission gates. Mic permission is required by both `.call`
+        // and `.test` (anything that captures from the mic). `.listen`
+        // only consumes BlackHole 16ch, no mic permission needed.
+        if mode.requiresMicrophone {
             let status = permissions.currentStatus(.microphone)
             Self.log.info("start() — microphone permission currentStatus=\(String(describing: status))")
             let resolved = status == .notDetermined ? await permissions.request(.microphone) : status
@@ -144,16 +147,26 @@ public final class TranslationOrchestrator {
                 state = .error(.permissionDenied(.microphone))
                 return
             }
+        }
+        // BlackHole device gates. Only required by modes that touch
+        // BlackHole — `.call` writes to BH 2ch (virtual mic) and reads
+        // BH 16ch (system audio). `.listen` only reads BH 16ch.
+        // `.test` doesn't touch BlackHole at all — that's the whole
+        // point of the mode (verify translation without needing the
+        // driver installed or a real call active).
+        if mode == .call {
             guard deviceRegistry.findBlackHole2ch() != nil else {
                 Self.log.error("start() guard failed: BlackHole 2ch not found → .error(.blackHole2chMissing)")
                 state = .error(.blackHole2chMissing)
                 return
             }
         }
-        guard deviceRegistry.findBlackHole16ch() != nil else {
-            Self.log.error("start() guard failed: BlackHole 16ch not found → .error(.blackHole16chMissing)")
-            state = .error(.blackHole16chMissing)
-            return
+        if mode == .call || mode == .listen {
+            guard deviceRegistry.findBlackHole16ch() != nil else {
+                Self.log.error("start() guard failed: BlackHole 16ch not found → .error(.blackHole16chMissing)")
+                state = .error(.blackHole16chMissing)
+                return
+            }
         }
 
         Self.log.info("start() — starting output mixer (outputDeviceUID=\(settings.outputDeviceUID ?? "default"))")
@@ -166,23 +179,31 @@ public final class TranslationOrchestrator {
             return
         }
 
-        // Peer (incoming) stream — used in both modes
-        Self.log.info("start() — connecting peer stream (target=\(languages.mine.rawValue))")
-        let peer = translationFactory.make(speaker: .peer)
-        peerStream = peer
-        do {
-            try await peer.connect(target: languages.mine)
-        } catch {
-            let mapped = mapConnectError(error)
-            Self.log.error("start() peer.connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
-            state = .error(mapped)
-            return
+        // Peer (incoming) stream — used in `.call` and `.listen`.
+        // Not in `.test` — test mode only verifies the user's own
+        // mic→translate→speakers loop.
+        if mode == .call || mode == .listen {
+            Self.log.info("start() — connecting peer stream (target=\(languages.mine.rawValue))")
+            let peer = translationFactory.make(speaker: .peer)
+            peerStream = peer
+            do {
+                try await peer.connect(target: languages.mine)
+            } catch {
+                let mapped = mapConnectError(error)
+                Self.log.error("start() peer.connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
+                state = .error(mapped)
+                return
+            }
+            Self.log.info("start() — peer stream connected; wiring incoming pipeline")
+            wireIncomingPipeline(stream: peer)
+            observeConnectionState(stream: peer, speaker: .peer, target: languages.mine, mode: mode)
         }
-        Self.log.info("start() — peer stream connected; wiring incoming pipeline")
-        wireIncomingPipeline(stream: peer)
-        observeConnectionState(stream: peer, speaker: .peer, target: languages.mine, mode: mode)
 
-        if mode == .call {
+        // Me (outgoing) stream — used in `.call` and `.test`.
+        // The pipeline diverges by destination:
+        //   .call: me-stream output → BlackHole 2ch (peer hears in their Zoom)
+        //   .test: me-stream output → speakers (user hears their own translation)
+        if mode == .call || mode == .test {
             Self.log.info("start() — connecting me stream (target=\(languages.peer.rawValue))")
             let me = translationFactory.make(speaker: .me)
             meStream = me
@@ -194,8 +215,8 @@ public final class TranslationOrchestrator {
                 state = .error(mapped)
                 return
             }
-            Self.log.info("start() — me stream connected; wiring outgoing pipeline")
-            wireOutgoingPipeline(stream: me)
+            Self.log.info("start() — me stream connected; wiring outgoing pipeline (destination=\(mode == .test ? "speakers" : "BlackHole 2ch"))")
+            wireOutgoingPipeline(stream: me, destination: mode == .test ? .speakers : .virtualMic)
             observeConnectionState(stream: me, speaker: .me, target: languages.peer, mode: mode)
         }
 
@@ -560,7 +581,15 @@ public final class TranslationOrchestrator {
                     wireIncomingPipeline(stream: newStream)
                 case .me:
                     meStream = newStream
-                    wireOutgoingPipeline(stream: newStream)
+                    // Re-derive the destination from the active mode
+                    // so a test-mode session that flapped doesn't
+                    // accidentally route to BlackHole 2ch after the
+                    // reconnect. .listen never reaches here because
+                    // it doesn't have a me-stream.
+                    wireOutgoingPipeline(
+                        stream: newStream,
+                        destination: mode == .test ? .speakers : .virtualMic
+                    )
                 }
                 observeConnectionState(stream: newStream, speaker: speaker, target: target, mode: mode)
                 // Preserve the original session start time across reconnects
@@ -663,7 +692,16 @@ public final class TranslationOrchestrator {
         }
     }
 
-    private func wireOutgoingPipeline(stream: any TranslationStream) {
+    /// Where the translated me-stream audio should be sent.
+    /// `.virtualMic` = BlackHole 2ch (peer's Zoom hears it).
+    /// `.speakers`   = local outputMixer (user hears their own
+    /// translated voice — used by `.test` mode).
+    enum OutgoingDestination {
+        case virtualMic
+        case speakers
+    }
+
+    private func wireOutgoingPipeline(stream: any TranslationStream, destination: OutgoingDestination) {
         let micFrames = micCapture.start(deviceUID: currentSettings.inputDeviceUID)
         let transformer = self.transformer
         let task1 = Task { [stream, weak self] in
@@ -689,7 +727,11 @@ public final class TranslationOrchestrator {
                 frameIndex += 1
             }
         }
-        let task2 = Task { [virtualMicPlayer, stream, transformer, weak self] in
+        // The "deliver translated audio downstream" task. The branch
+        // on `destination` picks the player: BlackHole2chPlayer for
+        // real-call virtual-mic mode, or AVAudioOutputMixer's
+        // translated-player for test-mode local playback.
+        let task2 = Task { [virtualMicPlayer, outputMixer, stream, transformer, weak self] in
             var resampledContinuation: AsyncStream<AudioFrame>.Continuation!
             let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
                 resampledContinuation = $0
@@ -708,7 +750,17 @@ public final class TranslationOrchestrator {
                 }
                 resampledContinuation.finish()
             }
-            await virtualMicPlayer.play(resampled)
+            switch destination {
+            case .virtualMic:
+                await virtualMicPlayer.play(resampled)
+            case .speakers:
+                // Re-use the outputMixer's "translated" player slot —
+                // in `.test` mode the mixer is only carrying our own
+                // translated track (no peer audio), so the player
+                // delivers it straight to the user's speakers at
+                // full volume.
+                await outputMixer.playTranslated(resampled)
+            }
             pump.cancel()
         }
         let task3 = Task { @MainActor [transcript, stream, weak self] in

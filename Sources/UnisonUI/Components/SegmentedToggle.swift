@@ -1,9 +1,10 @@
 import SwiftUI
 import UnisonDomain
 
-/// Two-segment Call/Listen toggle used at the top of the popover.
-/// Hand-drawn (`Picker(.segmented)` carries macOS accent blue, which
-/// conflicts with our neutral palette). DESIGN.md §5.6.
+/// N-segment session-mode toggle used at the top of the popover.
+/// Currently renders Call / Listen / Проверка (test). Hand-drawn —
+/// `Picker(.segmented)` carries macOS accent blue, which conflicts
+/// with our neutral palette. DESIGN.md §5.6.
 public struct SegmentedToggle: View {
     public struct Segment: Identifiable, Sendable {
         public let id: String

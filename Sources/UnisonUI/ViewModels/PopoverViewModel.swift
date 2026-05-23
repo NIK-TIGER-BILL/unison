@@ -195,14 +195,22 @@ public final class PopoverViewModel {
         // are Observable, so the popover never refreshes when the user
         // grants mic permission or installs BlackHole from onboarding.
         _ = envTick
-        if settings.sessionMode == .call,
+        let mode = settings.sessionMode
+        // Mic permission required by any mode that captures mic.
+        if mode.requiresMicrophone,
            permissions.currentStatus(.microphone) == .denied {
             return .micPermissionRequired
         }
-        if settings.sessionMode == .call, deviceRegistry.findBlackHole2ch() == nil {
+        // BlackHole 2ch only required by `.call` (virtual mic for peer).
+        if mode == .call, deviceRegistry.findBlackHole2ch() == nil {
             return .blackHole2chMissing
         }
-        if deviceRegistry.findBlackHole16ch() == nil {
+        // BlackHole 16ch required by `.call` + `.listen` (system audio
+        // capture). `.test` doesn't touch BH at all — pre-flight should
+        // not gate on it, otherwise the user can't run the self-test
+        // before installing BlackHole.
+        if mode == .call || mode == .listen,
+           deviceRegistry.findBlackHole16ch() == nil {
             return .blackHole16chMissing
         }
         return nil

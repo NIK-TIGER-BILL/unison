@@ -126,6 +126,12 @@ public struct PopoverView: View {
                     icon: Image(systemName: "headphones"),
                     mode: .listen
                 ),
+                .init(
+                    id: "test",
+                    title: "Проверка",
+                    icon: Image(systemName: "waveform"),
+                    mode: .test
+                ),
             ]
         )
     }
