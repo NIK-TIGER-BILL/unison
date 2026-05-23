@@ -92,6 +92,16 @@ public struct InputAudioBufferAppendPayload: Sendable {
 public enum RealtimeServerEvent: Sendable {
     case outputAudioDelta(OutputAudioDeltaPayload)
     case outputTranscriptDelta(OutputTranscriptDeltaPayload)
+    /// Source-language transcript fragment of what the model heard on
+    /// input. Used to populate the `me` bubble's primary text (what
+    /// the user actually said) — the design's `.me` bubble shape is
+    /// "primary = original, secondary = translated".
+    case inputTranscriptDelta(InputTranscriptDeltaPayload)
+    /// Server-signalled end of one turn. We rotate the `currentEntryId`
+    /// here so each utterance lands in its own bubble instead of
+    /// growing the very first bubble forever.
+    case outputTranscriptDone
+    case inputTranscriptDone
     case sessionClosed
     case error(ErrorPayload)
     case unknown(String)
@@ -102,6 +112,10 @@ public struct OutputAudioDeltaPayload: Sendable, Equatable {
 }
 
 public struct OutputTranscriptDeltaPayload: Sendable, Equatable {
+    public let delta: String
+}
+
+public struct InputTranscriptDeltaPayload: Sendable, Equatable {
     public let delta: String
 }
 
@@ -123,12 +137,26 @@ extension RealtimeServerEvent: Decodable {
         case "session.output_audio.delta":
             let delta = try c.decode(String.self, forKey: .delta)
             self = .outputAudioDelta(.init(delta: delta))
-        // Target-language transcript fragments. `session.input_transcript.delta`
-        // (source-language) is intentionally not surfaced here — Unison only
-        // displays the translated side.
+        // Target-language transcript fragments (what the listener will
+        // hear in their language).
         case "session.output_transcript.delta":
             let delta = try c.decode(String.self, forKey: .delta)
             self = .outputTranscriptDelta(.init(delta: delta))
+        // Source-language transcript fragments (what was actually
+        // spoken). The design's `.me` bubble shape is "primary =
+        // original, secondary = translated", so without surfacing
+        // these the `.me` bubble's primary text stays empty and the
+        // bubble looks blank.
+        case "session.input_transcript.delta":
+            let delta = try c.decode(String.self, forKey: .delta)
+            self = .inputTranscriptDelta(.init(delta: delta))
+        // Turn-end markers. Rotating `currentEntryId` on these is how
+        // each utterance lands in its own bubble — without them every
+        // fragment forever appends to the first bubble.
+        case "session.output_transcript.done":
+            self = .outputTranscriptDone
+        case "session.input_transcript.done":
+            self = .inputTranscriptDone
         case "session.closed":
             self = .sessionClosed
         case "error":

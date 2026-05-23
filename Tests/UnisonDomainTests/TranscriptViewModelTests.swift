@@ -220,8 +220,12 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
 
     vm.setLive(entryId: liveEntry.id)
     #expect(vm.activeLiveEntryId == liveEntry.id)
-    // Wait for `liveFinalizeDelaySeconds + 0.5s` of slack.
-    let nanos = UInt64((TranscriptViewModel.liveFinalizeDelaySeconds + 0.5) * 1_000_000_000)
+    // Wait for `liveFinalizeDelaySeconds + 1.5s` of slack. The slack
+    // was 0.5s historically but flaked under parallel test load (the
+    // suite now has 300+ tests and a couple of multi-second sleeps
+    // contending for the cooperative executor pushed real elapsed
+    // time past the 0.5s margin).
+    let nanos = UInt64((TranscriptViewModel.liveFinalizeDelaySeconds + 1.5) * 1_000_000_000)
     try? await Task.sleep(nanoseconds: nanos)
     #expect(vm.activeLiveEntryId == nil)
 }

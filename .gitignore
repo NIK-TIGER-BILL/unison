@@ -21,3 +21,4 @@ vm-screenshots/
 # VM integration test artifacts (kept locally for debugging — never committed)
 vm-integration-test.log
 vm-integration-test-output.wav
+Tests/UnisonUITests/__Snapshots__/**/*.failed.png

@@ -73,16 +73,35 @@ import Testing
 }
 
 @Test func decodes_sessionLifecycleEvents_fallToUnknown() throws {
-    // `session.created`, `session.updated`, `session.input_transcript.delta`,
-    // etc. are GA events we don't act on. They must decode cleanly as
-    // `.unknown(type)` without throwing.
+    // `session.created`, `session.updated`, etc. are GA events we don't
+    // act on. They must decode cleanly as `.unknown(type)` without
+    // throwing. `session.input_transcript.delta` USED to be in this
+    // list — now it's a real case (`.inputTranscriptDelta`) because
+    // the `.me` bubble's primary text comes from this event.
     let created = #"{"type":"session.created","event_id":"evt_1","session":{}}"#
     let updated = #"{"type":"session.updated","event_id":"evt_2","session":{}}"#
-    let inputTr = #"{"type":"session.input_transcript.delta","delta":"привет"}"#
+    let respCreated = #"{"type":"response.created","response":{}}"#
 
     if case .unknown(let t) = try decodeServerEvent(created) { #expect(t == "session.created") } else { Issue.record("session.created") }
     if case .unknown(let t) = try decodeServerEvent(updated) { #expect(t == "session.updated") } else { Issue.record("session.updated") }
-    if case .unknown(let t) = try decodeServerEvent(inputTr) { #expect(t == "session.input_transcript.delta") } else { Issue.record("session.input_transcript.delta") }
+    if case .unknown(let t) = try decodeServerEvent(respCreated) { #expect(t == "response.created") } else { Issue.record("response.created") }
+}
+
+@Test func decodes_inputTranscriptDelta() throws {
+    let json = #"{"type":"session.input_transcript.delta","delta":"привет"}"#
+    let decoded = try decodeServerEvent(json)
+    if case .inputTranscriptDelta(let p) = decoded {
+        #expect(p.delta == "привет")
+    } else {
+        Issue.record("Expected .inputTranscriptDelta, got \(decoded)")
+    }
+}
+
+@Test func decodes_transcriptDoneEvents() throws {
+    let outDone = #"{"type":"session.output_transcript.done"}"#
+    let inDone = #"{"type":"session.input_transcript.done"}"#
+    if case .outputTranscriptDone = try decodeServerEvent(outDone) {} else { Issue.record("Expected .outputTranscriptDone") }
+    if case .inputTranscriptDone = try decodeServerEvent(inDone) {} else { Issue.record("Expected .inputTranscriptDone") }
 }
 
 @Test func decodes_unknownTypeFallsToUnknown() throws {

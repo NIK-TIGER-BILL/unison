@@ -73,6 +73,23 @@ public final class TranslationOrchestrator {
     /// while still being short enough to feel responsive.
     private static let reconnectWatchdogSeconds: TimeInterval = 15
 
+    /// Watchdog that surfaces `.noDataFromServer` if the orchestrator
+    /// stays in `.translating` for `noDataWatchdogSeconds` without ANY
+    /// audio or transcript delta from either stream. This is the
+    /// "session looks healthy but nothing is happening" detector —
+    /// catches silent mic / no audio routed to BlackHole 16ch / server
+    /// stalls. Cleared the moment the first delta lands.
+    private var noDataWatchdogTask: Task<Void, Never>?
+    /// 12s is long enough to absorb OpenAI's typical 1–2s warm-up plus
+    /// human pauses, but short enough that "I started Unison and it's
+    /// doing nothing" stops looking like a frozen UI within a quarter
+    /// minute.
+    private static let noDataWatchdogSeconds: TimeInterval = 12
+    /// Flipped by the pipeline tasks the moment the first audio /
+    /// transcript delta is observed on either stream. Until it's
+    /// `true` the watchdog will fire and escalate.
+    private var anyDataReceivedThisSession: Bool = false
+
     public init(
         micCapture: any MicrophoneCapture,
         peerCapture: any PeerAudioCapture,
@@ -180,9 +197,50 @@ public final class TranslationOrchestrator {
         // Fresh session — reset empty-close counters; a previous run's
         // counter must not leak into the new one.
         consecutiveEmptyCloses = [.me: 0, .peer: 0]
+        anyDataReceivedThisSession = false
         state = .translating(mode: mode, startedAt: startedAt)
         observeDeviceChanges()
+        armNoDataWatchdog()
         Self.log.info("start() — translating session active")
+    }
+
+    /// Arm the no-data watchdog. If we're still in `.translating`
+    /// after `noDataWatchdogSeconds` and the first delta hasn't
+    /// landed, surface `.noDataFromServer` so the user sees a
+    /// concrete failure instead of a session that *looks* healthy
+    /// but produces nothing.
+    private func armNoDataWatchdog() {
+        noDataWatchdogTask?.cancel()
+        let clock = self.clock
+        noDataWatchdogTask = Task { @MainActor [weak self] in
+            try? await clock.sleep(for: Self.noDataWatchdogSeconds)
+            guard let self else { return }
+            if Task.isCancelled { return }
+            // Only fire if still translating AND nothing ever came in.
+            // If a delta arrived (anyDataReceivedThisSession was flipped),
+            // the markFirstDataReceived path will have cancelled this
+            // task already — this check is belt-and-braces.
+            if case .translating = self.state, !self.anyDataReceivedThisSession {
+                Self.log.error("no-data watchdog fired after \(Self.noDataWatchdogSeconds)s of translating with zero deltas — surfacing .noDataFromServer")
+                await self.stopAllStreams()
+                self.state = .error(.noDataFromServer)
+            }
+        }
+    }
+
+    private func cancelNoDataWatchdog() {
+        noDataWatchdogTask?.cancel()
+        noDataWatchdogTask = nil
+    }
+
+    /// Called by the pipeline tasks the moment the first audio or
+    /// transcript delta lands. Disarms the no-data watchdog so the
+    /// happy path doesn't trip it.
+    func markFirstDataReceived() {
+        guard !anyDataReceivedThisSession else { return }
+        anyDataReceivedThisSession = true
+        cancelNoDataWatchdog()
+        Self.log.info("first data delta received — no-data watchdog disarmed")
     }
 
     private func observeDeviceChanges() {
@@ -484,6 +542,7 @@ public final class TranslationOrchestrator {
     /// which would hide the failure from the popover.
     private func stopAllStreams() async {
         cancelReconnectWatchdog()
+        cancelNoDataWatchdog()
         for t in globalTasks { t.cancel() }
         for (_, tasks) in pipelineTasksBySpeaker {
             for t in tasks { t.cancel() }
@@ -528,13 +587,21 @@ public final class TranslationOrchestrator {
                 await stream.send(wire)
             }
         }
-        let task2 = Task { [virtualMicPlayer, stream, transformer] in
+        let task2 = Task { [virtualMicPlayer, stream, transformer, weak self] in
             var resampledContinuation: AsyncStream<AudioFrame>.Continuation!
             let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
                 resampledContinuation = $0
             }
             let pump = Task {
                 for await wireFrame in stream.output {
+                    // First audio delta from the server — disarm the
+                    // no-data watchdog. `markFirstDataReceived` is
+                    // @MainActor-isolated; this Task isn't, so hop
+                    // explicitly. Doing it in the pipeline (not in
+                    // the stream's handle()) means we mark "we
+                    // actually delivered data" rather than just "we
+                    // parsed an event".
+                    await MainActor.run { self?.markFirstDataReceived() }
                     resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
                 }
                 resampledContinuation.finish()
@@ -542,8 +609,9 @@ public final class TranslationOrchestrator {
             await virtualMicPlayer.play(resampled)
             pump.cancel()
         }
-        let task3 = Task { @MainActor [transcript, stream] in
+        let task3 = Task { @MainActor [transcript, stream, weak self] in
             for await d in stream.transcripts {
+                self?.markFirstDataReceived()
                 transcript.apply(d)
             }
         }
@@ -577,13 +645,14 @@ public final class TranslationOrchestrator {
                 await stream.send(wire)
             }
         }
-        let translatedPlay = Task { [outputMixer, stream, transformer] in
+        let translatedPlay = Task { [outputMixer, stream, transformer, weak self] in
             var resampledContinuation: AsyncStream<AudioFrame>.Continuation!
             let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
                 resampledContinuation = $0
             }
             let pump = Task {
                 for await wireFrame in stream.output {
+                    await MainActor.run { self?.markFirstDataReceived() }
                     resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
                 }
                 resampledContinuation.finish()
@@ -594,8 +663,9 @@ public final class TranslationOrchestrator {
         let originalPlay = Task { [outputMixer] in
             await outputMixer.playOriginal(passthroughFrames)
         }
-        let transcripts = Task { @MainActor [transcript, stream] in
+        let transcripts = Task { @MainActor [transcript, stream, weak self] in
             for await d in stream.transcripts {
+                self?.markFirstDataReceived()
                 transcript.apply(d)
             }
         }

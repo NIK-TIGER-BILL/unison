@@ -289,6 +289,8 @@ public final class PopoverViewModel {
             return "Микрофон недоступен. Выберите другое устройство в Настройках."
         case .outputDeviceUnavailable:
             return "Аудио-выход недоступен. Выберите другое устройство в Настройках."
+        case .noDataFromServer:
+            return "Микрофон молчит или сервер не отвечает. Проверьте уровень микрофона и подключение."
         }
     }
 }

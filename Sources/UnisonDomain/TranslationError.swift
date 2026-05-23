@@ -10,6 +10,15 @@ public enum TranslationError: Error, Equatable, Sendable {
     case networkLost
     case inputDeviceUnavailable
     case outputDeviceUnavailable
+    /// Raised when the orchestrator has been in `.translating` for
+    /// ~`noDataTimeoutSeconds` without receiving a single audio or
+    /// transcript delta. Catches "session looks healthy but nothing
+    /// is happening" — usually a silent microphone (no system audio
+    /// routed to BlackHole 16ch, or hardware mic level zero), but
+    /// also surfaces server-side stalls. User feedback was specific:
+    /// "если какие-то ошибки, нужно же падать с ошибкой" — this is
+    /// what makes the failure mode visible.
+    case noDataFromServer
 
     public var shortMessage: String {
         switch self {
@@ -22,6 +31,7 @@ public enum TranslationError: Error, Equatable, Sendable {
         case .networkLost: "Нет соединения"
         case .inputDeviceUnavailable: "Микрофон недоступен"
         case .outputDeviceUnavailable: "Выход аудио недоступен"
+        case .noDataFromServer: "Нет данных от сервера"
         }
     }
 }

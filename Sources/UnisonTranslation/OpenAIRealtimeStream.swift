@@ -30,6 +30,11 @@ public actor OpenAIRealtimeStream: TranslationStream {
 
     private var receiveTask: Task<Void, Never>?
     private var closeReasonTask: Task<Void, Never>?
+    /// One UUID per *utterance* (turn). Rotated on
+    /// `session.{input,output}_transcript.done` so each thing the
+    /// speaker says lands in its own bubble. The old behaviour kept
+    /// the same id forever, so every fragment of every sentence got
+    /// appended to a single ever-growing bubble.
     private var currentEntryId = UUID()
     /// Signal raised when `session.closed` arrives from the server.
     /// `close()` awaits this (with a short timeout) so any audio the
@@ -63,10 +68,15 @@ public actor OpenAIRealtimeStream: TranslationStream {
     /// actually delivered translated audio. The per-delta hot path
     /// stays log-free after that.
     private var loggedFirstAudioDelta = false
-    /// First-transcript-delta latch — same idea, but for the transcript
-    /// channel. Helps tell apart "server is silent" vs "audio path
-    /// broken but transcript landed".
+    /// First-transcript-delta latch — same idea, but for the
+    /// target-language transcript. Helps tell apart "server is silent"
+    /// vs "audio path broken but transcript landed".
     private var loggedFirstTranscriptDelta = false
+    /// First source-language transcript-delta latch. Catching the input
+    /// transcript path separately matters because it's the .me bubble's
+    /// *primary* text — if input transcripts never arrive, the bubble
+    /// looks blank even when the translated side is fine.
+    private var loggedFirstInputTranscriptDelta = false
     /// Sticky classification of *why* the WS / server failed. Set by
     /// `handleClose` and the server `error` event handler — the first
     /// classification wins so later transport-level noise (POSIX 89
@@ -357,6 +367,30 @@ public actor OpenAIRealtimeStream: TranslationStream {
                 Self.log.info("\(speakerLabel) first session.output_transcript.delta received — \(p.delta.count) chars")
             }
             transcriptContinuation.yield(delta)
+        case .inputTranscriptDelta(let p):
+            // Source-language fragment of what the speaker said. Tagged
+            // as `.original` so `TranscriptStore.apply` writes it into
+            // `entry.originalText` — that's the bubble's primary text
+            // for `.me` (and the secondary text for `.peer`).
+            let delta = TranscriptDelta(
+                entryId: currentEntryId, speaker: speaker,
+                kind: .original, text: p.delta, isFinal: false
+            )
+            receivedAnyData = true
+            if !loggedFirstInputTranscriptDelta {
+                loggedFirstInputTranscriptDelta = true
+                let speakerLabel = String(describing: speaker)
+                Self.log.info("\(speakerLabel) first session.input_transcript.delta received — \(p.delta.count) chars")
+            }
+            transcriptContinuation.yield(delta)
+        case .outputTranscriptDone, .inputTranscriptDone:
+            // Turn boundary: rotate the entry id so the next utterance
+            // gets its own bubble. We accept *either* done event as
+            // the boundary signal — they arrive close in time and
+            // either one is sufficient to start a fresh bubble.
+            // Repeated done events for the same turn are harmless
+            // (each just generates a new — unused — UUID).
+            currentEntryId = UUID()
         case .sessionClosed:
             // Server confirmed it has flushed any pending output. Wake
             // `close()` if it is parked on the grace continuation so we
