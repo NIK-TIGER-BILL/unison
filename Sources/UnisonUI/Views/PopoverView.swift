@@ -103,6 +103,22 @@ public struct PopoverView: View {
                 .tracking(-0.26)
                 .foregroundStyle(.primary)
             Spacer()
+            // Self-test button. Lives outside the Call/Listen picker
+            // because test is a *workflow* — verify your translation
+            // works before a real call — not a third routing mode the
+            // user picks for daily use. Clicking it overrides whichever
+            // mode is currently selected and runs the
+            // mic→translate→speakers loop locally. Disabled while a
+            // session is already active so the user can't accidentally
+            // stomp on a live call.
+            IconButton(label: "Проверка перевода", action: {
+                Task { @MainActor in await vm.startTest() }
+            }) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 12, weight: .regular))
+            }
+            .disabled(vm.state.isActive)
+            .opacity(vm.state.isActive ? 0.4 : 1.0)
             IconButton(label: "Настройки", action: onOpenSettings) {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 12, weight: .regular))
@@ -125,12 +141,6 @@ public struct PopoverView: View {
                     title: "Listen",
                     icon: Image(systemName: "headphones"),
                     mode: .listen
-                ),
-                .init(
-                    id: "test",
-                    title: "Проверка",
-                    icon: Image(systemName: "waveform"),
-                    mode: .test
                 ),
             ]
         )

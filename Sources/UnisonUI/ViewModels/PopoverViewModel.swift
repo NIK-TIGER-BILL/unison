@@ -252,6 +252,30 @@ public final class PopoverViewModel {
         Self.log.info("start() returned — state=\(postState)")
     }
 
+    /// Self-test entry point. Overrides the user-visible Call/Listen
+    /// pick and runs a `.test` session (mic → translate → speakers,
+    /// transcript shown, no BlackHole). The user's saved
+    /// `settings.sessionMode` is NOT touched — once they stop the
+    /// test session, the Start button still reflects whichever mode
+    /// (Call or Listen) they had selected. Bound to the waveform
+    /// icon in the popover header.
+    public func startTest() async {
+        Self.log.info("startTest() called — state=\(String(describing: self.state))")
+        if orchestrator == nil {
+            Self.log.error("startTest() — orchestrator is nil (preview VM); skipping")
+            return
+        }
+        // Same .error → .idle reset as the regular start() — without
+        // this a click on Проверка right after a failed session
+        // appears dead.
+        if case .error = state {
+            Self.log.info("startTest() — resetting from .error to .idle before fresh attempt")
+            await orchestrator?.stop()
+        }
+        await orchestrator?.start(mode: .test, languages: settings.languagePair, settings: settings)
+        Self.log.info("startTest() returned — state=\(String(describing: state))")
+    }
+
     public func stop() async {
         Self.log.info("stop() called — state=\(String(describing: self.state))")
         await orchestrator?.stop()

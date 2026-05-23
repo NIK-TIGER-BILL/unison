@@ -1,8 +1,11 @@
 import SwiftUI
 import UnisonDomain
 
-/// N-segment session-mode toggle used at the top of the popover.
-/// Currently renders Call / Listen / Проверка (test). Hand-drawn —
+/// Session-mode toggle used at the top of the popover. Currently
+/// renders Call / Listen — the third mode (Проверка / test) lives
+/// as a separate header button (`testButton` in PopoverView), not
+/// as a third segment here, so the picker stays binary for the two
+/// real-world modes that drive routing. Hand-drawn —
 /// `Picker(.segmented)` carries macOS accent blue, which conflicts
 /// with our neutral palette. DESIGN.md §5.6.
 public struct SegmentedToggle: View {
