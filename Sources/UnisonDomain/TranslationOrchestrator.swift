@@ -255,10 +255,29 @@ public final class TranslationOrchestrator {
     /// disarm the watchdog by itself — the watchdog still wants to
     /// fire if BOTH sides stay silent. But it does latch one side
     /// of the aliveness check.
-    func markMicFrameReceived() {
+    /// The RMS value passed in tells us whether the mic is actually
+    /// hearing anything (close to 0.0 = silence / mute / wrong device
+    /// / system audio gain at 0). The user-facing diagnostic includes
+    /// this so support can see at a glance whether the mic was
+    /// physically picking up sound when the user "spoke".
+    func markMicFrameReceived(format: String = "?", sampleRate: Int = 0, rms: Float = 0) {
         guard !anyMicFrameThisSession else { return }
         anyMicFrameThisSession = true
-        Self.log.info("first mic frame received — input pipeline alive")
+        Self.log.info("first mic frame — format=\(format) sampleRate=\(sampleRate)Hz rms=\(String(format: "%.5f", rms))")
+        if rms < 0.0005 {
+            Self.log.error("first mic frame — RMS \(String(format: "%.5f", rms)) is near-silent; OpenAI VAD will not trigger. Check the input gain in System Settings → Sound, or pick a different mic in the popover.")
+        }
+    }
+
+    /// Periodic mic level snapshot — logged every Nth frame so users
+    /// hitting the "no transcript appears" symptom can see in the
+    /// diagnostic whether the mic gain ramped up when they spoke
+    /// (RMS going from 0.0001 → 0.05 means the mic is hot) or stayed
+    /// dead-flat (RMS pegged at near-zero → mic is muted/wrong-device).
+    func logMicLevel(rms: Float, frameIndex: Int) {
+        // 1 log per second at 100ms frames (= every 10th frame).
+        guard frameIndex % 10 == 0 else { return }
+        Self.log.debug("mic level — frame=\(frameIndex) rms=\(String(format: "%.5f", rms))")
     }
 
     /// Called by the wire-in pipelines on first server delta (audio
@@ -613,19 +632,61 @@ public final class TranslationOrchestrator {
     // stalls while preventing unbounded memory growth on prolonged stalls.
     private static let pipelineFrameBuffer = 50
 
+    /// Quick RMS over the PCM samples in a frame, normalized to
+    /// [0, 1]. Used by the mic-level diagnostic so support can tell
+    /// "user spoke but app stayed silent" from "user spoke but mic
+    /// was muted at the OS level". Returns 0 for empty / malformed
+    /// frames.
+    private static func rms(_ frame: AudioFrame) -> Float {
+        let bytes = frame.pcm
+        guard !bytes.isEmpty else { return 0 }
+        switch frame.format {
+        case .float32:
+            return bytes.withUnsafeBytes { raw -> Float in
+                let n = raw.count / MemoryLayout<Float>.size
+                guard n > 0, let p = raw.bindMemory(to: Float.self).baseAddress else { return 0 }
+                var sumSquares: Float = 0
+                for i in 0..<n { sumSquares += p[i] * p[i] }
+                return (sumSquares / Float(n)).squareRoot()
+            }
+        case .int16:
+            return bytes.withUnsafeBytes { raw -> Float in
+                let n = raw.count / MemoryLayout<Int16>.size
+                guard n > 0, let p = raw.bindMemory(to: Int16.self).baseAddress else { return 0 }
+                var sumSquares: Float = 0
+                for i in 0..<n {
+                    let s = Float(p[i]) / 32_768.0
+                    sumSquares += s * s
+                }
+                return (sumSquares / Float(n)).squareRoot()
+            }
+        }
+    }
+
     private func wireOutgoingPipeline(stream: any TranslationStream) {
         let micFrames = micCapture.start(deviceUID: currentSettings.inputDeviceUID)
         let transformer = self.transformer
         let task1 = Task { [stream, weak self] in
+            var frameIndex = 0
             for await frame in micFrames {
                 // First mic frame proves the capture engine spun up
                 // and the tap is delivering — watchdog uses this to
                 // distinguish "user silent" (don't alert) from "mic
-                // dead" (do alert). Hop to main actor because the
-                // orchestrator is @MainActor.
-                await MainActor.run { self?.markMicFrameReceived() }
+                // dead" (do alert). We also compute RMS so the
+                // diagnostic log can show whether the mic is hot
+                // (real audio) or pegged at silence (muted / wrong
+                // device / system gain at 0).
+                let rms = Self.rms(frame)
+                let formatLabel = String(describing: frame.format)
+                let sampleRate = frame.sampleRate
+                let idx = frameIndex
+                await MainActor.run { [weak self] in
+                    self?.markMicFrameReceived(format: formatLabel, sampleRate: sampleRate, rms: rms)
+                    self?.logMicLevel(rms: rms, frameIndex: idx)
+                }
                 let wire = transformer.toWire(frame)
                 await stream.send(wire)
+                frameIndex += 1
             }
         }
         let task2 = Task { [virtualMicPlayer, stream, transformer, weak self] in
