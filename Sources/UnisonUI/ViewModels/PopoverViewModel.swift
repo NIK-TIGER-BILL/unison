@@ -290,7 +290,13 @@ public final class PopoverViewModel {
         case .outputDeviceUnavailable:
             return "Аудио-выход недоступен. Выберите другое устройство в Настройках."
         case .noDataFromServer:
-            return "Микрофон молчит или сервер не отвечает. Проверьте уровень микрофона и подключение."
+            // The watchdog only fires now when literally no mic
+            // frames flowed AND no server delta arrived. That's a
+            // mic-side problem 99% of the time (engine didn't spin
+            // up, permission revoked mid-session, USB device
+            // unplugged). Server-side stalls would surface via the
+            // reconnect path with .networkLost.
+            return "Микрофон не подаёт сигнал. Проверьте, что выбрано правильное устройство в Настройках, и попробуйте снова."
         }
     }
 }

@@ -74,21 +74,30 @@ public final class TranslationOrchestrator {
     private static let reconnectWatchdogSeconds: TimeInterval = 15
 
     /// Watchdog that surfaces `.noDataFromServer` if the orchestrator
-    /// stays in `.translating` for `noDataWatchdogSeconds` without ANY
-    /// audio or transcript delta from either stream. This is the
-    /// "session looks healthy but nothing is happening" detector —
-    /// catches silent mic / no audio routed to BlackHole 16ch / server
-    /// stalls. Cleared the moment the first delta lands.
+    /// stays in `.translating` for `noDataWatchdogSeconds` without a
+    /// single frame flowing from the mic side AND without any
+    /// audio/transcript delta from the server. The aliveness signal
+    /// is **mic-frame-or-server-delta**, deliberately — if mic frames
+    /// are flowing (even silence), the pipeline is healthy and the
+    /// user is simply not speaking. The earlier "any server delta"
+    /// gate was too aggressive: it false-positived whenever the user
+    /// opened the popover, clicked Start, then sat quietly for 12s
+    /// (OpenAI's server-side VAD returns nothing on silence).
     private var noDataWatchdogTask: Task<Void, Never>?
-    /// 12s is long enough to absorb OpenAI's typical 1–2s warm-up plus
-    /// human pauses, but short enough that "I started Unison and it's
-    /// doing nothing" stops looking like a frozen UI within a quarter
-    /// minute.
-    private static let noDataWatchdogSeconds: TimeInterval = 12
-    /// Flipped by the pipeline tasks the moment the first audio /
-    /// transcript delta is observed on either stream. Until it's
-    /// `true` the watchdog will fire and escalate.
-    private var anyDataReceivedThisSession: Bool = false
+    /// Longer now because we're only catching truly broken sessions
+    /// (no mic frames at all, no server response at all). A real mic
+    /// device produces frames within the first audio-buffer cycle
+    /// (~100ms), so 20s is comfortably past any reasonable boot delay.
+    private static let noDataWatchdogSeconds: TimeInterval = 20
+    /// Latched on first mic frame entering the wire pipeline (proves
+    /// the input side is alive — capture engine started, tap working,
+    /// frames arriving).
+    private var anyMicFrameThisSession: Bool = false
+    /// Latched on first audio/transcript delta arriving FROM the
+    /// server. Separate from the mic latch so we can tell apart
+    /// "input dead" from "input alive, server silent (user not
+    /// speaking)".
+    private var anyServerDeltaThisSession: Bool = false
 
     public init(
         micCapture: any MicrophoneCapture,
@@ -197,18 +206,24 @@ public final class TranslationOrchestrator {
         // Fresh session — reset empty-close counters; a previous run's
         // counter must not leak into the new one.
         consecutiveEmptyCloses = [.me: 0, .peer: 0]
-        anyDataReceivedThisSession = false
+        anyMicFrameThisSession = false
+        anyServerDeltaThisSession = false
         state = .translating(mode: mode, startedAt: startedAt)
         observeDeviceChanges()
         armNoDataWatchdog()
         Self.log.info("start() — translating session active")
     }
 
-    /// Arm the no-data watchdog. If we're still in `.translating`
-    /// after `noDataWatchdogSeconds` and the first delta hasn't
-    /// landed, surface `.noDataFromServer` so the user sees a
-    /// concrete failure instead of a session that *looks* healthy
-    /// but produces nothing.
+    /// Arm the no-data watchdog. Fires `.noDataFromServer` ONLY when
+    /// neither side of the pipeline produced any data — i.e. mic
+    /// frames never started AND server never sent a delta. The
+    /// previous version fired purely on "no server delta", which
+    /// false-positived for the most common case: user clicks Start
+    /// and sits quietly for 12s. OpenAI's server-side VAD returns
+    /// nothing on silence, so that's expected behaviour, not a
+    /// failure. With the mic-frame latch added the watchdog only
+    /// catches genuinely broken sessions (capture engine dead,
+    /// permission revoked, device disappeared post-Start).
     private func armNoDataWatchdog() {
         noDataWatchdogTask?.cancel()
         let clock = self.clock
@@ -216,14 +231,17 @@ public final class TranslationOrchestrator {
             try? await clock.sleep(for: Self.noDataWatchdogSeconds)
             guard let self else { return }
             if Task.isCancelled { return }
-            // Only fire if still translating AND nothing ever came in.
-            // If a delta arrived (anyDataReceivedThisSession was flipped),
-            // the markFirstDataReceived path will have cancelled this
-            // task already — this check is belt-and-braces.
-            if case .translating = self.state, !self.anyDataReceivedThisSession {
-                Self.log.error("no-data watchdog fired after \(Self.noDataWatchdogSeconds)s of translating with zero deltas — surfacing .noDataFromServer")
+            // The pipeline is "alive" if EITHER mic frames are
+            // flowing OR the server sent anything. Both being silent
+            // for 20s is the real failure mode.
+            let micAlive = self.anyMicFrameThisSession
+            let serverAlive = self.anyServerDeltaThisSession
+            if case .translating = self.state, !micAlive, !serverAlive {
+                Self.log.error("no-data watchdog fired after \(Self.noDataWatchdogSeconds)s — no mic frames AND no server deltas → .noDataFromServer")
                 await self.stopAllStreams()
                 self.state = .error(.noDataFromServer)
+            } else {
+                Self.log.info("no-data watchdog check passed (micAlive=\(micAlive), serverAlive=\(serverAlive)) — pipeline healthy")
             }
         }
     }
@@ -233,14 +251,25 @@ public final class TranslationOrchestrator {
         noDataWatchdogTask = nil
     }
 
-    /// Called by the pipeline tasks the moment the first audio or
-    /// transcript delta lands. Disarms the no-data watchdog so the
-    /// happy path doesn't trip it.
+    /// Called by the wire-out pipeline on first mic frame. Doesn't
+    /// disarm the watchdog by itself — the watchdog still wants to
+    /// fire if BOTH sides stay silent. But it does latch one side
+    /// of the aliveness check.
+    func markMicFrameReceived() {
+        guard !anyMicFrameThisSession else { return }
+        anyMicFrameThisSession = true
+        Self.log.info("first mic frame received — input pipeline alive")
+    }
+
+    /// Called by the wire-in pipelines on first server delta (audio
+    /// or transcript). Same role as `markMicFrameReceived` for the
+    /// server side, plus disarms the watchdog outright — once data
+    /// flows both directions, nothing's wrong worth alerting on.
     func markFirstDataReceived() {
-        guard !anyDataReceivedThisSession else { return }
-        anyDataReceivedThisSession = true
+        guard !anyServerDeltaThisSession else { return }
+        anyServerDeltaThisSession = true
         cancelNoDataWatchdog()
-        Self.log.info("first data delta received — no-data watchdog disarmed")
+        Self.log.info("first server delta received — no-data watchdog disarmed")
     }
 
     private func observeDeviceChanges() {
@@ -587,8 +616,14 @@ public final class TranslationOrchestrator {
     private func wireOutgoingPipeline(stream: any TranslationStream) {
         let micFrames = micCapture.start(deviceUID: currentSettings.inputDeviceUID)
         let transformer = self.transformer
-        let task1 = Task { [stream] in
+        let task1 = Task { [stream, weak self] in
             for await frame in micFrames {
+                // First mic frame proves the capture engine spun up
+                // and the tap is delivering — watchdog uses this to
+                // distinguish "user silent" (don't alert) from "mic
+                // dead" (do alert). Hop to main actor because the
+                // orchestrator is @MainActor.
+                await MainActor.run { self?.markMicFrameReceived() }
                 let wire = transformer.toWire(frame)
                 await stream.send(wire)
             }

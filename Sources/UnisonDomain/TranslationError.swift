@@ -31,7 +31,7 @@ public enum TranslationError: Error, Equatable, Sendable {
         case .networkLost: "Нет соединения"
         case .inputDeviceUnavailable: "Микрофон недоступен"
         case .outputDeviceUnavailable: "Выход аудио недоступен"
-        case .noDataFromServer: "Нет данных от сервера"
+        case .noDataFromServer: "Микрофон не подаёт сигнал"
         }
     }
 }
