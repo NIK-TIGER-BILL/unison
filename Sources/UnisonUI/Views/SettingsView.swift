@@ -78,44 +78,52 @@ public struct SettingsView: View {
     @SwiftUI.State private var saveIndicator = SaveIndicatorController()
 
     public var body: some View {
-        Form {
-            audioSection
-            languagesSection
-            openAISection
-            hotkeysSection
-            blackHoleSection
-            behaviorSection
-            aboutSection
-            howToUseSection
+        // ScrollView + custom transparent cards instead of `Form { ...
+        // }.formStyle(.grouped)`. Reason: on macOS 26, the system
+        // grouped-form style renders each `Section` as an opaque
+        // material card that sits on top of `NSVisualEffectView` —
+        // the user sees a solid grey panel even with
+        // `.scrollContentBackground(.hidden)` applied to the Form
+        // (that modifier only clears the outer scroll background,
+        // not the per-section materials). The user's report was:
+        // "до сих пор не прозрачно. Полностью серый фон".
+        //
+        // Replacing Form with ScrollView + a `card(...)` helper that
+        // uses a fully transparent (or very-faintly-tinted)
+        // background lets the host window's `NSVisualEffectView`
+        // show through. Each card retains a thin hairline border
+        // for visual grouping so rows don't look unmoored.
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                audioSection
+                languagesSection
+                openAISection
+                hotkeysSection
+                blackHoleSection
+                behaviorSection
+                aboutSection
+                howToUseSection
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color.clear)
         .frame(minWidth: SettingsLayout.windowWidth, minHeight: SettingsLayout.minWindowHeight)
         // The host window uses `.fullSizeContentView` + hidden traffic
         // lights so the SwiftUI surface extends edge-to-edge in the
-        // rounded Liquid Glass card. We still need to clear the
-        // 28pt titlebar band, otherwise the first form row hides
-        // under the (invisible) chrome. A `safeAreaInset` overlay
-        // also gives us a place to anchor the close button.
+        // rounded Liquid Glass card. The header overlay carries the
+        // close button + drag area.
         .safeAreaInset(edge: .top, spacing: 0) {
             settingsHeader
         }
-        // Hide the form's default opaque scroll-content background so
-        // the host window's `NSVisualEffectView(.windowBackground)`
-        // shows through behind the section cards. Without this the
-        // form draws an opaque material on top of the visual effect
-        // view and the user sees a solid grey panel instead of the
-        // Liquid Glass material System Settings uses.
-        .scrollContentBackground(.hidden)
-        //
         // `.overlay` puts the SaveIndicator *above* the content rather
         // than inserting it into the layout flow. Two consequences:
-        //   1. Showing/hiding the indicator never shifts the form rows
-        //      (the user reported "весь текст сдвигается вниз и
-        //      прыгает" with the old `.safeAreaInset` placement).
-        //   2. The indicator floats over the form regardless of scroll
-        //      position, so it stays visible even when the user has
-        //      scrolled to the bottom of Settings (the user reported
-        //      "Когда ты снизу настроек, не видно текста сохранено").
+        //   1. Showing/hiding the indicator never shifts the rows
+        //      (the user reported jumping with `.safeAreaInset`).
+        //   2. The indicator floats over the content regardless of
+        //      scroll position, so it stays visible at any scroll.
         // Bottom-trailing placement matches the System Settings save
         // convention on Tahoe.
         .overlay(alignment: .bottomTrailing) {
@@ -165,10 +173,46 @@ public struct SettingsView: View {
         .background(Color.clear)
     }
 
+    // MARK: - Section card helper
+
+    /// Section container used in place of the system grouped-Form
+    /// `Section`. Renders the title above a card whose background is
+    /// nearly transparent (`whiteAlpha 0.04`) — just enough to give
+    /// the rows visual grouping without obscuring the host window's
+    /// Liquid Glass material. Inner rows use the same `VStack`
+    /// spacing as the previous Form layout so existing content
+    /// (`LabeledContent`, `Picker`, `Toggle`) reads identically.
+    @ViewBuilder
+    private func card<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased())
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(0.6)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 14)
+            VStack(alignment: .leading, spacing: 12) {
+                content()
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(UnisonColors.whiteAlpha(0.04))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(UnisonColors.whiteAlpha(0.08), lineWidth: 0.5)
+            )
+        }
+    }
+
     // MARK: - Section: Audio
 
     private var audioSection: some View {
-        Section("Аудио") {
+        card(title: "Аудио") {
             VStack(alignment: .leading, spacing: 4) {
                 Picker("Микрофон", selection: Binding(
                     get: { vm.settings.inputDeviceUID ?? Self.defaultDeviceTag },
@@ -238,7 +282,7 @@ public struct SettingsView: View {
     // MARK: - Section: Languages
 
     private var languagesSection: some View {
-        Section("Языки по умолчанию") {
+        card(title: "Языки по умолчанию") {
             // Restrict to the 13 supported output targets — both sides
             // of `LanguagePair` get sent as `session.audio.output.language`
             // (peer-incoming stream targets `.mine`, me-outgoing targets
@@ -280,7 +324,7 @@ public struct SettingsView: View {
         // the label above the input and let the field span the full
         // row width — the same trick the system Settings uses for
         // long secrets / paths.
-        Section("OpenAI") {
+        card(title: "OpenAI") {
             VStack(alignment: .leading, spacing: 6) {
                 Text("API ключ")
                 SecretInputBound(
@@ -308,7 +352,7 @@ public struct SettingsView: View {
     // MARK: - Section: Hotkeys
 
     private var hotkeysSection: some View {
-        Section("Hotkeys") {
+        card(title: "Хоткеи") {
             LabeledContent("Старт / стоп") {
                 HotkeyRecorder(
                     hotkey: Binding(
@@ -353,7 +397,7 @@ public struct SettingsView: View {
     // MARK: - Section: BlackHole
 
     private var blackHoleSection: some View {
-        Section("BlackHole") {
+        card(title: "BlackHole") {
             LabeledContent("BlackHole 2ch") {
                 blackHoleStatusRow(status: vm.blackHole2chStatus)
             }
@@ -412,7 +456,7 @@ public struct SettingsView: View {
     // MARK: - Section: Behavior
 
     private var behaviorSection: some View {
-        Section("Поведение") {
+        card(title: "Поведение") {
             Toggle("Запускать при логине", isOn: Binding(
                 get: { vm.autostart },
                 set: { vm.updateAutostart($0) }
@@ -429,7 +473,7 @@ public struct SettingsView: View {
     // MARK: - Section: About
 
     private var aboutSection: some View {
-        Section("О приложении") {
+        card(title: "О приложении") {
             LabeledContent("Версия") {
                 HStack(spacing: 4) {
                     Text(Self.bundleShortVersion)
@@ -461,7 +505,7 @@ public struct SettingsView: View {
     /// Explains the Two-BlackHole architecture so users understand
     /// which device to pick where in their calling app.
     private var howToUseSection: some View {
-        Section("Как пользоваться") {
+        card(title: "Как пользоваться") {
             flowDiagramRow
             zoomSetupRow
             launchStepsRow
