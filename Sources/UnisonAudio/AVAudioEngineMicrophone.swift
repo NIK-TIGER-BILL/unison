@@ -106,7 +106,7 @@ public final class AVAudioEngineMicrophone: MicrophoneCapture, @unchecked Sendab
         }
 
         var tapInvocationCount = 0
-        input.installTap(onBus: 0, bufferSize: 2400, format: format) { [weak self] buffer, _ in
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             guard let self else { return }
             tapInvocationCount += 1
             // Log the first 3 tap invocations so we can see frames
@@ -137,7 +137,34 @@ public final class AVAudioEngineMicrophone: MicrophoneCapture, @unchecked Sendab
             self.continuation?.yield(frame)
         }
 
-        Self.log.info("startEngine — tap installed (bufferSize=2400 frames); calling engine.start()")
+        // CRITICAL: on macOS 26, the input subsystem doesn't actually
+        // start delivering audio to taps unless the inputNode is part
+        // of the engine's processing graph. A standalone `installTap`
+        // — without a downstream connection — leaves the input node
+        // "idle from the engine's POV": `engine.start()` returns,
+        // `isRunning == true`, but the underlying CoreAudio AUHAL
+        // never gets an `AudioUnitInitialize` for input → no audio
+        // ever flows. The fix is to connect inputNode → mainMixerNode
+        // so the engine has a complete graph, and silence the mixer
+        // so nothing actually plays through the speakers as
+        // monitoring loopback.
+        //
+        // This matches Apple's `AVAudioEngine` sample code and the
+        // pattern other macOS recording apps use. It was missing here
+        // because the original implementation only used a tap and
+        // happened to work on earlier macOS revisions.
+        let mainMixer = engine.mainMixerNode
+        mainMixer.outputVolume = 0  // mute the loopback BEFORE connecting
+        engine.connect(input, to: mainMixer, format: format)
+        Self.log.info("startEngine — connected inputNode → mainMixerNode (volume=0, no loopback)")
+
+        // `prepare()` walks the graph and pre-allocates AUHAL state.
+        // Optional in theory but on macOS 26 it noticeably reduces
+        // the chance of the first tap-callback being delayed by
+        // hundreds of ms while the engine cold-starts.
+        engine.prepare()
+
+        Self.log.info("startEngine — tap installed (bufferSize=1024 frames); calling engine.start()")
         do {
             try engine.start()
         } catch {
