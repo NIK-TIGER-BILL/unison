@@ -1,38 +1,59 @@
 import Foundation
 import AVFoundation
 import CoreAudio
+import CoreMedia
 import UnisonDomain
 
-public final class AVAudioEngineMicrophone: MicrophoneCapture, @unchecked Sendable {
-    /// Diagnostic logger. Every step of binding + engine.start gets a
-    /// line here so a "Микрофон не подаёт сигнал" report can be
-    /// triaged from the file log alone — without this the failure
-    /// path inside the AsyncStream closure swallows errors silently
-    /// (we only have `c.finish()` to signal upstream).
+/// Microphone capture built on **AVCaptureSession**, not AVAudioEngine.
+///
+/// **Why not AVAudioEngine.**
+/// AVAudioEngine.inputNode on macOS 26 silently refuses to deliver tap
+/// callbacks unless the input node is part of a "complete" processing
+/// graph — installTap alone is not enough, the node also needs an
+/// `engine.connect(input, to: mainMixer, ...)` edge or AUHAL never
+/// initializes the input scope. Even *with* that connect, we hit
+/// production logs showing engine.isRunning == true and zero tap
+/// callbacks for 20 seconds.
+///
+/// AVCaptureSession is the AVFoundation API designed specifically for
+/// capture (the same one QuickTime / Final Cut / Logic use for audio
+/// recording). It opens the device, attaches an
+/// AVCaptureAudioDataOutput, and delivers `CMSampleBuffer`s via a
+/// delegate — no graph, no node connections, no engine.prepare(),
+/// no engine.mainMixerNode shenanigans. It works on macOS 14+ and is
+/// what every reliable mac audio recorder uses.
+///
+/// The reference Elixir+Rust impl
+/// (https://github.com/LetovKai/call-translator) does the same thing
+/// via `cpal`, which on macOS opens CoreAudio AUHAL directly — also
+/// bypassing AVAudioEngine. AVCaptureSession is the Swift-native
+/// equivalent of that approach.
+///
+/// **Type name kept for backwards compat.** Composition wires
+/// `AVAudioEngineMicrophone()` by name in production. Keeping the
+/// type identifier lets us swap the implementation without touching
+/// the composition root or other call sites.
+public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchecked Sendable {
     private static let log = UnisonLog(category: "AVAudioEngineMicrophone")
 
-    private let engine = AVAudioEngine()
+    private let session = AVCaptureSession()
     private var continuation: AsyncStream<AudioFrame>.Continuation?
-    /// Latches while a tap is installed on `engine.inputNode`. Apple
-    /// docs: "Installing a tap with the same format throws an
-    /// exception" — and `AVAudioNode` exceptions are Obj-C, so they
-    /// kill the process. `wireOutgoingPipeline` in the orchestrator
-    /// calls `start()` on every reconnect, so without this guard a
-    /// transient WS drop mid-call would CRASH the app on the second
-    /// installTap. Idempotency keeps us safe.
-    private var started = false
+    /// Latches once configured + running so a re-entrant `start()`
+    /// (orchestrator's reconnect path) resets cleanly via `stop()`
+    /// before reconfiguring instead of layering inputs.
+    private var running = false
+    /// Dispatch queue the delegate's `didOutput` callback fires on.
+    /// AVCaptureSession requires a serial queue here; we make a
+    /// dedicated one so capture work doesn't get queued behind main.
+    private let captureQueue = DispatchQueue(label: "com.unison.app.AVAudioEngineMicrophone.capture", qos: .userInitiated)
 
-    public init() {}
+    public override init() {
+        super.init()
+    }
 
     public func start(deviceUID: String?) -> AsyncStream<AudioFrame> {
-        // If a previous start() didn't go through a stop() (e.g. the
-        // orchestrator's reconnect path re-wires the pipeline without
-        // tearing down the mic), reset so the new installTap doesn't
-        // throw against the lingering one. The previous AsyncStream
-        // consumer was cancelled by the orchestrator before this
-        // call, so finishing it here is harmless.
-        if started {
-            Self.log.info("start() — restarting (previous session left engine in `started=true`)")
+        if running {
+            Self.log.info("start() — restarting (previous session left running=true)")
             stop()
         }
         Self.log.info("start(deviceUID=\(deviceUID ?? "<default>"))")
@@ -40,139 +61,175 @@ public final class AVAudioEngineMicrophone: MicrophoneCapture, @unchecked Sendab
             guard let self else { c.finish(); return }
             self.continuation = c
             do {
-                try self.bindInputDevice(uid: deviceUID)
-                try self.startEngine()
-                self.started = true
-                Self.log.info("start() — bind + engine.start successful; awaiting tap callbacks")
+                try self.configure(deviceUID: deviceUID)
+                self.session.startRunning()
+                self.running = self.session.isRunning
+                Self.log.info("start() — session.isRunning=\(self.session.isRunning); awaiting sample buffer delegate callbacks")
             } catch {
                 let ns = error as NSError
-                Self.log.error("start() — FAILED: domain=\(ns.domain) code=\(ns.code) desc=\(ns.localizedDescription) → continuation finished, no mic frames will flow")
+                Self.log.error("start() — FAILED: domain=\(ns.domain) code=\(ns.code) desc=\(ns.localizedDescription); no mic frames will flow")
                 c.finish()
             }
         }
     }
 
     public func stop() {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        if session.isRunning { session.stopRunning() }
+        // Tear down inputs + outputs so the next start() builds a
+        // fresh graph instead of accumulating layers on the same
+        // session.
+        session.beginConfiguration()
+        session.inputs.forEach { session.removeInput($0) }
+        session.outputs.forEach { session.removeOutput($0) }
+        session.commitConfiguration()
         continuation?.finish()
         continuation = nil
-        started = false
-        Self.log.info("stop() — engine stopped, tap removed")
+        running = false
+        Self.log.info("stop() — session stopped, inputs+outputs removed")
     }
 
-    private func bindInputDevice(uid: String?) throws {
-        guard let uid else {
-            Self.log.info("bindInputDevice — no UID; engine will use system default input")
-            return
+    private func configure(deviceUID: String?) throws {
+        let device = try Self.resolveDevice(uid: deviceUID)
+        Self.log.info("configure — using AVCaptureDevice '\(device.localizedName)' uid=\(device.uniqueID)")
+
+        let input = try AVCaptureDeviceInput(device: device)
+
+        session.beginConfiguration()
+        defer { session.commitConfiguration() }
+
+        guard session.canAddInput(input) else {
+            throw NSError(domain: "AVAudioEngineMicrophone", code: -10,
+                          userInfo: [NSLocalizedDescriptionKey: "Capture session refused to add input for device \(device.localizedName)"])
         }
-        guard let deviceID = audioDeviceID(forUID: uid) else {
-            // Not throwing — falling back to default is the lesser
-            // evil. But surface it loudly: this is the most likely
-            // cause of "I picked device X but nothing happens" —
-            // the stored UID from a previous launch may no longer
-            // resolve (USB device unplugged, etc.).
-            Self.log.error("bindInputDevice — UID '\(uid)' not found in CoreAudio device list; engine will fall back to system default. Re-pick the device in Settings if this isn't intended.")
-            return
+        session.addInput(input)
+
+        let audioOutput = AVCaptureAudioDataOutput()
+        // No audioSettings override — we accept whatever native format
+        // the device delivers (typically 48 kHz float32). The downstream
+        // orchestrator resamples to OpenAI's 24 kHz int16 wire format
+        // regardless. Setting custom audioSettings on macOS can
+        // silently disable the output if the device can't deliver
+        // that exact format.
+        audioOutput.setSampleBufferDelegate(self, queue: captureQueue)
+
+        guard session.canAddOutput(audioOutput) else {
+            throw NSError(domain: "AVAudioEngineMicrophone", code: -11,
+                          userInfo: [NSLocalizedDescriptionKey: "Capture session refused to add audio output"])
         }
-        Self.log.info("bindInputDevice — resolved UID '\(uid)' to deviceID=\(deviceID); binding")
-        var id = deviceID
-        let status = AudioUnitSetProperty(
-            engine.inputNode.audioUnit!,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global, 0,
-            &id, UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
-        if status != noErr {
-            Self.log.error("bindInputDevice — AudioUnitSetProperty(CurrentDevice) returned status=\(status); throwing")
-            throw NSError(domain: "AVAudioEngineMicrophone", code: Int(status))
-        }
-        Self.log.info("bindInputDevice — bound successfully")
+        session.addOutput(audioOutput)
+        Self.log.info("configure — input + output added; session ready")
     }
 
-    private func startEngine() throws {
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        Self.log.info("startEngine — inputNode format: \(format.sampleRate)Hz × \(format.channelCount)ch \(String(describing: format.commonFormat))")
-
-        if format.sampleRate == 0 || format.channelCount == 0 {
-            // This is a real-world symptom on macOS when an input
-            // device is bound but the engine hasn't established a
-            // valid stream for it yet — `installTap` will succeed
-            // but the callback never fires (no audio to deliver).
-            // Surfacing it explicitly so the diagnostic shows the
-            // root cause instead of just "no mic frames".
-            Self.log.error("startEngine — degenerate input format (sampleRate=\(format.sampleRate), channels=\(format.channelCount)); the tap will install but never fire. Permission revoked or device unavailable.")
-        }
-
-        var tapInvocationCount = 0
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            guard let self else { return }
-            tapInvocationCount += 1
-            // Log the first 3 tap invocations so we can see frames
-            // actually arriving + frame size. After that the per-frame
-            // RMS logging in the orchestrator's pipeline takes over.
-            if tapInvocationCount <= 3 {
-                Self.log.info("tap callback #\(tapInvocationCount) — frameLength=\(buffer.frameLength) (= \(Int(Double(buffer.frameLength) * 1000 / format.sampleRate))ms at \(format.sampleRate)Hz)")
+    /// Resolve a CoreAudio device UID to an `AVCaptureDevice`. Falls
+    /// back to the system default audio input if the UID doesn't
+    /// resolve. Logs loudly so a stale UID (USB device unplugged etc.)
+    /// is visible in the diagnostic.
+    private static func resolveDevice(uid: String?) throws -> AVCaptureDevice {
+        if let uid {
+            // First try by uniqueID directly — that's what
+            // AVCaptureDevice surfaces and it matches CoreAudio's
+            // kAudioDevicePropertyDeviceUID for built-in devices on
+            // current macOS. For USB devices the strings sometimes
+            // diverge, hence the fallback search below.
+            if let d = AVCaptureDevice(uniqueID: uid) {
+                return d
             }
-            guard let cd = buffer.floatChannelData else {
-                if tapInvocationCount <= 3 {
-                    Self.log.error("tap callback — buffer.floatChannelData is nil; cannot extract PCM")
-                }
-                return
-            }
-            let n = Int(buffer.frameLength)
-            let byteCount = n * MemoryLayout<Float>.size
-            var data = Data(count: byteCount)
-            data.withUnsafeMutableBytes { raw in
-                let p = raw.bindMemory(to: Float.self).baseAddress!
-                memcpy(p, cd[0], byteCount)
-            }
-            let frame = AudioFrame(
-                pcm: data,
-                sampleRate: Int(format.sampleRate),
-                channels: Int(format.channelCount),
-                format: .float32
+            // Linear scan of all audio devices comparing uniqueID
+            // exactly. Cheap because the list is short.
+            let discovery = AVCaptureDevice.DiscoverySession(
+                deviceTypes: [.microphone, .external],
+                mediaType: .audio,
+                position: .unspecified
             )
-            self.continuation?.yield(frame)
+            for d in discovery.devices where d.uniqueID == uid {
+                return d
+            }
+            log.error("resolveDevice — UID '\(uid)' not resolvable via AVCaptureDevice; falling back to system default audio input")
+        }
+        if let d = AVCaptureDevice.default(for: .audio) {
+            return d
+        }
+        throw NSError(domain: "AVAudioEngineMicrophone", code: -12,
+                      userInfo: [NSLocalizedDescriptionKey: "No audio capture device available (system default returned nil)"])
+    }
+}
+
+// MARK: - AVCaptureAudioDataOutputSampleBufferDelegate
+
+extension AVAudioEngineMicrophone: AVCaptureAudioDataOutputSampleBufferDelegate {
+    public func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        // Pull the PCM bytes out of the sample buffer. AVCaptureSession
+        // delivers `CMSampleBuffer` whose CMBlockBuffer holds the
+        // contiguous PCM. We copy into a Data so the AsyncStream
+        // can hold it past the delegate's call frame.
+        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(formatDesc) else {
+            return
+        }
+        let asbd = asbdPtr.pointee
+        let sampleRate = Int(asbd.mSampleRate)
+        let channels = Int(asbd.mChannelsPerFrame)
+
+        // First-buffer log so the diagnostic shows the actual delivered
+        // format. Latched per-instance so the per-frame hot path stays
+        // log-free.
+        Self.logFirstBufferIfNeeded(sampleRate: sampleRate, channels: channels, asbd: asbd, sampleBuffer: sampleBuffer)
+
+        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
+        var totalLength = 0
+        var dataPointer: UnsafeMutablePointer<Int8>?
+        let status = CMBlockBufferGetDataPointer(
+            blockBuffer,
+            atOffset: 0,
+            lengthAtOffsetOut: nil,
+            totalLengthOut: &totalLength,
+            dataPointerOut: &dataPointer
+        )
+        guard status == noErr, let p = dataPointer, totalLength > 0 else { return }
+
+        // AVCaptureAudioDataOutput on macOS delivers PCM in the
+        // device's native format. Most built-in macs use
+        // pcmFormatFloat32 non-interleaved; some USB devices give
+        // int16. We branch on the ASBD's format flags so the
+        // downstream resampler gets the right tag.
+        let format: AudioSampleFormat
+        if asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0 {
+            format = .float32
+        } else {
+            format = .int16
         }
 
-        // CRITICAL: on macOS 26, the input subsystem doesn't actually
-        // start delivering audio to taps unless the inputNode is part
-        // of the engine's processing graph. A standalone `installTap`
-        // — without a downstream connection — leaves the input node
-        // "idle from the engine's POV": `engine.start()` returns,
-        // `isRunning == true`, but the underlying CoreAudio AUHAL
-        // never gets an `AudioUnitInitialize` for input → no audio
-        // ever flows. The fix is to connect inputNode → mainMixerNode
-        // so the engine has a complete graph, and silence the mixer
-        // so nothing actually plays through the speakers as
-        // monitoring loopback.
-        //
-        // This matches Apple's `AVAudioEngine` sample code and the
-        // pattern other macOS recording apps use. It was missing here
-        // because the original implementation only used a tap and
-        // happened to work on earlier macOS revisions.
-        let mainMixer = engine.mainMixerNode
-        mainMixer.outputVolume = 0  // mute the loopback BEFORE connecting
-        engine.connect(input, to: mainMixer, format: format)
-        Self.log.info("startEngine — connected inputNode → mainMixerNode (volume=0, no loopback)")
+        let data = Data(bytes: p, count: totalLength)
+        let frame = AudioFrame(
+            pcm: data,
+            sampleRate: sampleRate,
+            channels: channels,
+            format: format
+        )
+        continuation?.yield(frame)
+    }
 
-        // `prepare()` walks the graph and pre-allocates AUHAL state.
-        // Optional in theory but on macOS 26 it noticeably reduces
-        // the chance of the first tap-callback being delayed by
-        // hundreds of ms while the engine cold-starts.
-        engine.prepare()
+    nonisolated(unsafe) private static var firstBufferLogged = false
+    private static let firstBufferLogLock = NSLock()
 
-        Self.log.info("startEngine — tap installed (bufferSize=1024 frames); calling engine.start()")
-        do {
-            try engine.start()
-        } catch {
-            let ns = error as NSError
-            Self.log.error("startEngine — engine.start() threw: domain=\(ns.domain) code=\(ns.code) desc=\(ns.localizedDescription)")
-            throw error
-        }
-        Self.log.info("startEngine — engine.start() returned; running=\(engine.isRunning)")
+    private static func logFirstBufferIfNeeded(
+        sampleRate: Int,
+        channels: Int,
+        asbd: AudioStreamBasicDescription,
+        sampleBuffer: CMSampleBuffer
+    ) {
+        firstBufferLogLock.lock()
+        let shouldLog = !firstBufferLogged
+        if shouldLog { firstBufferLogged = true }
+        firstBufferLogLock.unlock()
+        guard shouldLog else { return }
+        let nSamples = CMSampleBufferGetNumSamples(sampleBuffer)
+        let isFloat = asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0
+        log.info("first sample buffer — sampleRate=\(sampleRate)Hz channels=\(channels) format=\(isFloat ? "float32" : "int16") frames=\(nSamples) bitsPerChan=\(asbd.mBitsPerChannel)")
     }
 }
 
