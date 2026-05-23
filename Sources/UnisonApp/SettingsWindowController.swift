@@ -51,81 +51,71 @@ public final class SettingsWindowController {
 
     public func show() {
         if window == nil {
-            // Standard macOS Settings-style window:
-            // - `.titled`: native titlebar with the document title.
-            // - `.closable` / `.miniaturizable`: all three traffic lights.
-            // - `.resizable`: user can resize the Settings window to fit
-            //   their display. Native Form supplies an internal scroll
-            //   view so reducing the height shows a scroll indicator
-            //   instead of clipping rows.
+            // Chromeless rounded Liquid Glass card — matches the
+            // visual language of Onboarding / Transcript / Diagnostic.
+            // The user explicitly asked for this style instead of the
+            // previous `.titled` window: "пусть будет liquidGlass".
             //
-            // We deliberately omit `.fullSizeContentView`: with that flag
-            // SwiftUI content extends under the titlebar and the system
-            // does not auto-inset, so the first row of the Form covers
-            // the title text and the traffic lights (the user's bug
-            // report). Without the flag, AppKit reserves the titlebar
-            // band on its own and the form starts directly below it,
-            // matching every other System Settings-style window on
-            // Tahoe.
+            // `[.titled, .resizable, .fullSizeContentView, .closable,
+            // .miniaturizable]` + transparent titlebar + hidden
+            // traffic lights gets us the chromeless card *and* keeps
+            // resize, Cmd+W close, and Cmd+M minimize working through
+            // the system. Pure `.borderless` would lose all of those.
             //
-            // Default height is 620pt — the standard macOS System
-            // Settings pane height — so the window fits comfortably on
-            // any display out of the box. The Form's internal scroll
-            // view handles overflow, and the user can drag the bottom
-            // edge to expand the window if they want every section
-            // visible at once.
+            // `.fullSizeContentView` lets the SwiftUI content extend
+            // through the (invisible) titlebar band so the glass card
+            // is unbroken top-to-bottom. The form rows then need a top
+            // inset to avoid landing under the hidden traffic-light
+            // hit area — handled in SettingsView via padding.
             let w = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
+            // Internal title — never visible (titleVisibility=.hidden)
+            // but used by the screenshot harness to locate the window.
             w.title = "Unison · Настройки"
-            w.titleVisibility = .visible
-            // Standard titlebar (not transparent): on macOS 26 the
-            // titlebar renders with the system Liquid Glass material
-            // and a faint divider beneath it, the same chrome System
-            // Settings uses. Making it transparent breaks that
-            // composition.
-            w.titlebarAppearsTransparent = false
+            w.titleVisibility = .hidden
+            w.titlebarAppearsTransparent = true
+            // Hide the three traffic-light buttons so the card looks
+            // unified. Cmd+W still closes (handled by .closable).
+            w.standardWindowButton(.closeButton)?.isHidden = true
+            w.standardWindowButton(.miniaturizeButton)?.isHidden = true
+            w.standardWindowButton(.zoomButton)?.isHidden = true
             w.isReleasedWhenClosed = false
-            // Liquid Glass requires an explicit `NSVisualEffectView`
-            // backing on macOS 26: `NSColor.windowBackgroundColor` in
-            // light mode is a solid grey, not the translucent material
-            // System Settings uses. We back the window with
-            // `NSVisualEffectView(material: .windowBackground)` and
-            // make the window itself transparent so the visual effect
-            // shows through. The Form's own scroll-content background
-            // is hidden below in `SettingsView` so the glass is visible
-            // beneath the section cards.
+            w.isMovableByWindowBackground = true
+            // Liquid Glass: transparent window so the NSVisualEffectView
+            // below shows through; the compositor's behind-window
+            // blend pass recomputes blur in real time as content
+            // behind the window changes.
             w.isOpaque = false
             w.backgroundColor = .clear
             w.hasShadow = true
-            // Min/max bounds: the smaller end keeps the form usable on
-            // 13" displays (sections still readable, no horizontal
-            // squish); the upper bound prevents accidental over-expand
-            // on multi-monitor setups.
             w.minSize = NSSize(width: 560, height: 480)
             w.maxSize = NSSize(width: 800, height: 1200)
 
             let root = SettingsView(
                 vm: viewModel,
                 onOpenURL: onOpenURL,
-                onRecordHotkey: onRecordHotkey
+                onRecordHotkey: onRecordHotkey,
+                onClose: { [weak w] in w?.performClose(nil) }
             )
             let host = NSHostingController(rootView: root)
             host.view.translatesAutoresizingMaskIntoConstraints = false
 
-            // Liquid Glass backing for the window content area. With
-            // `.windowBackground` material, `NSVisualEffectView`
-            // resolves to the system Liquid Glass material on Tahoe —
-            // the same translucent surface System Settings draws on,
-            // which refracts the desktop wallpaper and sibling windows
-            // behind the window.
+            // Liquid Glass backing. `.windowBackground` material on
+            // macOS Tahoe renders the canonical translucent Liquid
+            // Glass surface. The rounded mask gives the card its
+            // silhouette; the system shadow underneath was set
+            // above via `w.hasShadow`.
             let veView = NSVisualEffectView()
             veView.material = .windowBackground
             veView.blendingMode = .behindWindow
             veView.state = .active
+            veView.wantsLayer = true
+            veView.layer?.cornerRadius = 22
+            veView.layer?.masksToBounds = true
             veView.translatesAutoresizingMaskIntoConstraints = false
             veView.addSubview(host.view)
             NSLayoutConstraint.activate([

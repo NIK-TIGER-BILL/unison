@@ -50,14 +50,21 @@ public struct SettingsView: View {
     /// row was tapped via `vm.beginRecordingHotkey(_:)`.
     let onRecordHotkey: (HotkeyKind) -> Void
 
+    /// Closes the Settings window. Wired by `SettingsWindowController`
+    /// in the host app — when running in previews this stays the
+    /// default no-op.
+    let onClose: () -> Void
+
     public init(
         vm: SettingsViewModel,
         onOpenURL: @escaping (URL) -> Void = { _ in },
-        onRecordHotkey: @escaping (HotkeyKind) -> Void = { _ in }
+        onRecordHotkey: @escaping (HotkeyKind) -> Void = { _ in },
+        onClose: @escaping () -> Void = {}
     ) {
         self.vm = vm
         self.onOpenURL = onOpenURL
         self.onRecordHotkey = onRecordHotkey
+        self.onClose = onClose
     }
 
     /// Sentinel used by `Picker` for "system default" device. `Picker`
@@ -83,6 +90,15 @@ public struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(minWidth: SettingsLayout.windowWidth, minHeight: SettingsLayout.minWindowHeight)
+        // The host window uses `.fullSizeContentView` + hidden traffic
+        // lights so the SwiftUI surface extends edge-to-edge in the
+        // rounded Liquid Glass card. We still need to clear the
+        // 28pt titlebar band, otherwise the first form row hides
+        // under the (invisible) chrome. A `safeAreaInset` overlay
+        // also gives us a place to anchor the close button.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            settingsHeader
+        }
         // Hide the form's default opaque scroll-content background so
         // the host window's `NSVisualEffectView(.windowBackground)`
         // shows through behind the section cards. Without this the
@@ -114,6 +130,39 @@ public struct SettingsView: View {
         .onChange(of: vm.lastSavedAt) { _, _ in
             saveIndicator.markSaved()
         }
+    }
+
+    // MARK: - Title bar (custom — window chrome is hidden)
+
+    /// Mini header: app subtitle on the left, close button on the
+    /// right. Replaces the system titlebar (hidden in
+    /// `SettingsWindowController` to make the window a clean Liquid
+    /// Glass card). Transparent background so the visual effect
+    /// material shows through.
+    private var settingsHeader: some View {
+        HStack {
+            Text("Настройки")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary)
+                .padding(.leading, 18)
+            Spacer()
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+                    .background(
+                        Circle().fill(UnisonColors.whiteAlpha(0.08))
+                    )
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 12)
+            .keyboardShortcut("w", modifiers: .command)
+        }
+        .frame(height: 36)
+        // Transparent — let the NSVisualEffectView underneath show.
+        .background(Color.clear)
     }
 
     // MARK: - Section: Audio
