@@ -294,12 +294,18 @@ public final class TranslationOrchestrator {
     }
 
     /// Arm the reconnect watchdog. After `Self.reconnectWatchdogSeconds`
-    /// the orchestrator forces terminal `.error(.apiKeyInvalid)` if it
-    /// is still in `.reconnecting` — this is the safety net that
-    /// guarantees a user-visible error within a bounded time, even
-    /// when the empty-close counter can't see the failure (stream
-    /// hangs post-handshake, etc.). Re-arming cancels the previous
-    /// task so we don't accumulate fired-twice races on rapid flaps.
+    /// the orchestrator forces a terminal error if it is still in
+    /// `.reconnecting` — safety net that guarantees a user-visible
+    /// error within a bounded time, even when the empty-close
+    /// counter can't see the failure (stream hangs post-handshake,
+    /// etc.). The error surfaced is `.networkLost`: the watchdog
+    /// fires after the orchestrator already received data this session
+    /// (otherwise the empty-close path would have escalated to
+    /// `.apiKeyInvalid` long before the watchdog), so the user is
+    /// experiencing a network problem, not a credential one. The
+    /// previous version surfaced `.apiKeyInvalid` here which was
+    /// actively misleading for the most common cause — a real WiFi
+    /// drop reading "ключ невалидный".
     private func armReconnectWatchdog() {
         reconnectWatchdogTask?.cancel()
         let clock = self.clock
@@ -312,9 +318,9 @@ public final class TranslationOrchestrator {
             // some other way (`.error`), or was stopped (`.idle`),
             // the watchdog is moot.
             if case .reconnecting = self.state {
-                Self.log.error("reconnect watchdog fired after \(Self.reconnectWatchdogSeconds)s — forcing terminal .apiKeyInvalid")
+                Self.log.error("reconnect watchdog fired after \(Self.reconnectWatchdogSeconds)s — forcing terminal .networkLost")
                 await self.stopAllStreams()
-                self.state = .error(.apiKeyInvalid)
+                self.state = .error(.networkLost)
             }
         }
     }

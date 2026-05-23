@@ -499,8 +499,8 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
         try await Task.sleep(nanoseconds: 10_000_000)
         if case .error = o.state { break }
     }
-    #expect(o.state.errorValue == TranslationError.apiKeyInvalid,
-            "Reconnect watchdog must force terminal .apiKeyInvalid; got \(o.state)")
+    #expect(o.state.errorValue == TranslationError.networkLost,
+            "Reconnect watchdog must force terminal .networkLost (it fires after data has flowed; a fresh credential failure would have escalated to .apiKeyInvalid via the empty-close counter long before the watchdog); got \(o.state)")
 }
 
 // MARK: - Persistent timer across reconnects
