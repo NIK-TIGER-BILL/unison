@@ -383,14 +383,26 @@ public actor OpenAIRealtimeStream: TranslationStream {
                 Self.log.info("\(speakerLabel) first session.input_transcript.delta received — \(p.delta.count) chars")
             }
             transcriptContinuation.yield(delta)
-        case .outputTranscriptDone, .inputTranscriptDone:
-            // Turn boundary: rotate the entry id so the next utterance
-            // gets its own bubble. We accept *either* done event as
-            // the boundary signal — they arrive close in time and
-            // either one is sufficient to start a fresh bubble.
-            // Repeated done events for the same turn are harmless
-            // (each just generates a new — unused — UUID).
+        case .outputTranscriptDone:
+            // Turn boundary: rotate the entry id ONLY on the OUTPUT
+            // done event because that's the LAST event of a turn.
+            // The OpenAI realtime translate flow per turn is:
+            //   input_transcript.delta × N  (source builds up)
+            //   input_transcript.done       (source complete)
+            //   output_transcript.delta × M (translation builds up)
+            //   output_transcript.done      ← rotate here
+            // Rotating on `input_transcript.done` was a bug: the
+            // translation deltas that arrived AFTER the rotation
+            // landed in a fresh bubble with the same source text
+            // (input had already populated the previous bubble's
+            // originalText), so the user saw two duplicate bubbles
+            // per utterance with split translations.
             currentEntryId = UUID()
+        case .inputTranscriptDone:
+            // Informational only — marks the end of the source
+            // transcription phase, but the turn continues with the
+            // translation. Don't rotate here.
+            break
         case .sessionClosed:
             // Server confirmed it has flushed any pending output. Wake
             // `close()` if it is parked on the grace continuation so we

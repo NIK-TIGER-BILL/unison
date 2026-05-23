@@ -35,14 +35,19 @@ public struct Bubble: View {
     }
 
     public var body: some View {
-        // HIG Materials note: bubbles render on top of *flat tinted
-        // gradients* (blue tint for `me`, white tint for `peer`) — not
-        // on a Liquid Glass material. Vibrant `.primary` / `.secondary`
-        // foregrounds are designed for material surfaces; on a flat
-        // tinted background they would desaturate or shift unexpectedly.
-        // Keep explicit `Color.white` (and a half-opacity for the
-        // translated subtext) so the bubble text reads consistently
-        // regardless of light/dark or Increase Contrast settings.
+        // Bubbles use Apple's native Liquid Glass material (the
+        // macOS 26 `.glassEffect(.regular.tint(_:), in:)` API). The
+        // system handles every glass affordance — specular highlight,
+        // conic rim, displacement, depth — automatically and
+        // consistently with the rest of macOS Tahoe. The previous
+        // implementation hand-rolled `.regularMaterial` underneath a
+        // LinearGradient + clipShape + manual shadow, which on
+        // macOS 26 looked like a flat blue-tinted blur rather than
+        // actual liquid glass.
+        //
+        // Tint is the speaker affordance (blue for `me`, near-white
+        // for `peer`). Text foreground stays explicit `.white` so it
+        // reads with consistent contrast against the tinted glass.
         VStack(alignment: .leading, spacing: 5 * scale) {
             HStack(spacing: 6 * scale) {
                 Text(primary)
@@ -58,22 +63,40 @@ public struct Bubble: View {
                 Text(secondary)
                     .font(.system(size: 11 * scale, weight: .regular))
                     .italic()
-                    .foregroundStyle(UnisonColors.whiteAlpha(0.52))
+                    .foregroundStyle(UnisonColors.whiteAlpha(0.62))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.vertical, 11 * scale)
         .padding(.horizontal, 15 * scale)
-        .background(background)
+        .glassEffect(glassStyle, in: shape)
         .overlay(
             shape
                 .strokeBorder(border, lineWidth: borderWidth)
         )
-        .clipShape(shape)
-        .shadow(color: .black.opacity(0.35), radius: 14, x: 0, y: 14)
         .frame(maxWidth: .infinity, alignment: speaker == .me ? .leading : .trailing)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabelText)
+    }
+
+    /// Speaker-tinted Liquid Glass: blue for `me`, slightly desaturated
+    /// for `peer`. Tint passes through the system's glass rendering
+    /// so the specular highlight + rim still picks up the underlying
+    /// wallpaper / window backdrop — i.e. it actually looks like
+    /// tinted glass, not a flat colour panel.
+    private var glassStyle: Glass {
+        switch speaker {
+        case .me:
+            // Blue tint pulled from the design's `me` gradient stops.
+            return .regular.tint(
+                Color(red: 110 / 255, green: 180 / 255, blue: 245 / 255).opacity(0.55)
+            )
+        case .peer:
+            // Near-clear: white tint at low alpha lets the glass read
+            // as "the other person", visually distinct from `me`
+            // without competing.
+            return .regular.tint(UnisonColors.whiteAlpha(0.10))
+        }
     }
 
     private var accessibilityLabelText: String {
@@ -112,47 +135,6 @@ public struct Bubble: View {
         }
     }
 
-    private var background: some View {
-        // Two layers: `.regularMaterial` provides the backdrop blur
-        // (HTML mock uses `backdrop-filter: blur(30px) saturate(190%)`),
-        // which gives the bubble enough density to read against any
-        // wallpaper — bright (white sand, water) or dark. The tinted
-        // gradient on top adds the speaker colour (blue for `me`,
-        // white for `peer`). Without the material underneath, the
-        // gradient alone (0.10–0.20 alpha) is invisible on bright
-        // backgrounds.
-        ZStack {
-            Rectangle().fill(.regularMaterial)
-            LinearGradient(
-                colors: gradientColors,
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-    }
-
-    private var gradientColors: [Color] {
-        // The `me` bubble's blue tint has to survive the `.regularMaterial`
-        // underneath (which heavily desaturates) and any wallpaper tint
-        // pulled through by the material's vibrancy. Earlier alpha values
-        // (0.32 / 0.14, then 0.48 / 0.26) still washed out against the
-        // sea wallpaper used by the VM screenshots — the `me` bubbles
-        // came out greenish, not blue. Cycle 3 bumps the stops to
-        // 0.55 / 0.30 (me) and 0.16 / 0.06 (peer) so the side colour
-        // affordance survives material vibrancy on any backdrop.
-        switch speaker {
-        case .me:
-            return [
-                Color(red: 140 / 255, green: 200 / 255, blue: 1.0).opacity(0.55),
-                Color(red: 95 / 255, green: 165 / 255, blue: 220 / 255).opacity(0.30),
-            ]
-        case .peer:
-            return [
-                UnisonColors.whiteAlpha(0.16),
-                UnisonColors.whiteAlpha(0.06),
-            ]
-        }
-    }
 
     private var border: Color {
         switch speaker {
