@@ -169,8 +169,18 @@ public struct SettingsView: View {
             .keyboardShortcut("w", modifiers: .command)
         }
         .frame(height: 36)
-        // Transparent — let the NSVisualEffectView underneath show.
-        .background(Color.clear)
+        // Opaque vibrant material so scrolled content doesn't bleed
+        // through the header text (the user reported "header
+        // настройки залазит на текст при прокрутке"). `.regularMaterial`
+        // gives a translucent backdrop that's still solid enough to
+        // hide rows passing under it, while keeping the live blur
+        // tone consistent with the host NSVisualEffectView.
+        .background(.regularMaterial)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(UnisonColors.whiteAlpha(0.08))
+                .frame(height: 0.5)
+        }
     }
 
     // MARK: - Section card helper
@@ -198,6 +208,16 @@ public struct SettingsView: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
+            // Spread every direct child to full card width so
+            // `LabeledContent` / `Toggle` / custom rows lay out
+            // label-left-content-trailing the way `Form { }` did
+            // automatically. Without `.fill` on container width,
+            // each row took its intrinsic width and controls ended
+            // up adjacent to the label rather than pushed to the
+            // right edge — the user reported "все управление...
+            // сместились влева".
+            .labeledContentStyle(SpreadLabeledStyle())
+            .toggleStyle(.switch)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(UnisonColors.whiteAlpha(0.04))
@@ -214,18 +234,21 @@ public struct SettingsView: View {
     private var audioSection: some View {
         card(title: "Аудио") {
             VStack(alignment: .leading, spacing: 4) {
-                Picker("Микрофон", selection: Binding(
-                    get: { vm.settings.inputDeviceUID ?? Self.defaultDeviceTag },
-                    set: { uid in
-                        vm.setInputDeviceUID(uid == Self.defaultDeviceTag ? nil : uid)
+                LabeledContent("Микрофон") {
+                    Picker("Микрофон", selection: Binding(
+                        get: { vm.settings.inputDeviceUID ?? Self.defaultDeviceTag },
+                        set: { uid in
+                            vm.setInputDeviceUID(uid == Self.defaultDeviceTag ? nil : uid)
+                        }
+                    )) {
+                        Text("По умолчанию").tag(Self.defaultDeviceTag)
+                        ForEach(vm.availableMics, id: \.uid) { device in
+                            Text(device.name).tag(device.uid)
+                        }
                     }
-                )) {
-                    Text("По умолчанию").tag(Self.defaultDeviceTag)
-                    ForEach(vm.availableMics, id: \.uid) { device in
-                        Text(device.name).tag(device.uid)
-                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
                 }
-                .pickerStyle(.menu)
 
                 Text("Ваш реальный микрофон. В Zoom выберите «BlackHole 2ch» как mic.")
                     .font(.caption)
@@ -233,18 +256,21 @@ public struct SettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Picker("Динамик", selection: Binding(
-                    get: { vm.settings.outputDeviceUID ?? Self.defaultDeviceTag },
-                    set: { uid in
-                        vm.setOutputDeviceUID(uid == Self.defaultDeviceTag ? nil : uid)
+                LabeledContent("Динамик") {
+                    Picker("Динамик", selection: Binding(
+                        get: { vm.settings.outputDeviceUID ?? Self.defaultDeviceTag },
+                        set: { uid in
+                            vm.setOutputDeviceUID(uid == Self.defaultDeviceTag ? nil : uid)
+                        }
+                    )) {
+                        Text("По умолчанию").tag(Self.defaultDeviceTag)
+                        ForEach(vm.availableSpeakers, id: \.uid) { device in
+                            Text(device.name).tag(device.uid)
+                        }
                     }
-                )) {
-                    Text("По умолчанию").tag(Self.defaultDeviceTag)
-                    ForEach(vm.availableSpeakers, id: \.uid) { device in
-                        Text(device.name).tag(device.uid)
-                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
                 }
-                .pickerStyle(.menu)
 
                 Text("Куда играть перевод. Системный output должен быть «BlackHole 16ch».")
                     .font(.caption)
@@ -287,31 +313,37 @@ public struct SettingsView: View {
             // of `LanguagePair` get sent as `session.audio.output.language`
             // (peer-incoming stream targets `.mine`, me-outgoing targets
             // `.peer`), so neither slot may carry a non-target language.
-            Picker("Я говорю", selection: Binding(
-                get: { vm.settings.languagePair.mine },
-                set: { newLang in
-                    let pair = LanguagePair(mine: newLang, peer: vm.settings.languagePair.peer)
-                    vm.setLanguagePair(pair)
+            LabeledContent("Я говорю") {
+                Picker("Я говорю", selection: Binding(
+                    get: { vm.settings.languagePair.mine },
+                    set: { newLang in
+                        let pair = LanguagePair(mine: newLang, peer: vm.settings.languagePair.peer)
+                        vm.setLanguagePair(pair)
+                    }
+                )) {
+                    ForEach(Language.supportedTargets, id: \.self) { lang in
+                        Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
+                    }
                 }
-            )) {
-                ForEach(Language.supportedTargets, id: \.self) { lang in
-                    Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
-                }
+                .pickerStyle(.menu)
+                .labelsHidden()
             }
-            .pickerStyle(.menu)
 
-            Picker("Слушаю", selection: Binding(
-                get: { vm.settings.languagePair.peer },
-                set: { newLang in
-                    let pair = LanguagePair(mine: vm.settings.languagePair.mine, peer: newLang)
-                    vm.setLanguagePair(pair)
+            LabeledContent("Слушаю") {
+                Picker("Слушаю", selection: Binding(
+                    get: { vm.settings.languagePair.peer },
+                    set: { newLang in
+                        let pair = LanguagePair(mine: vm.settings.languagePair.mine, peer: newLang)
+                        vm.setLanguagePair(pair)
+                    }
+                )) {
+                    ForEach(Language.supportedTargets, id: \.self) { lang in
+                        Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
+                    }
                 }
-            )) {
-                ForEach(Language.supportedTargets, id: \.self) { lang in
-                    Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
-                }
+                .pickerStyle(.menu)
+                .labelsHidden()
             }
-            .pickerStyle(.menu)
         }
     }
 
@@ -457,16 +489,25 @@ public struct SettingsView: View {
 
     private var behaviorSection: some View {
         card(title: "Поведение") {
-            Toggle("Запускать при логине", isOn: Binding(
-                get: { vm.autostart },
-                set: { vm.updateAutostart($0) }
-            ))
-            .controlSize(.mini)
-            Toggle("Скрывать меню при старте сессии", isOn: Binding(
-                get: { vm.hideMenuOnSession },
-                set: { vm.updateHideMenuOnSession($0) }
-            ))
-            .controlSize(.mini)
+            // `Toggle("Label", isOn:)` outside Form on macOS packs
+            // label+switch adjacent. Routing through `LabeledContent`
+            // + a labels-hidden Toggle inherits the card's
+            // `SpreadLabeledStyle`, pushing the switch to the
+            // trailing edge like Form did.
+            LabeledContent("Запускать при логине") {
+                Toggle("Запускать при логине", isOn: Binding(
+                    get: { vm.autostart },
+                    set: { vm.updateAutostart($0) }
+                ))
+                .labelsHidden()
+            }
+            LabeledContent("Скрывать меню при старте сессии") {
+                Toggle("Скрывать меню при старте сессии", isOn: Binding(
+                    get: { vm.hideMenuOnSession },
+                    set: { vm.updateHideMenuOnSession($0) }
+                ))
+                .labelsHidden()
+            }
         }
     }
 
@@ -655,4 +696,23 @@ private enum SettingsLinks {
     // "github.com/unison" but the destination has to match the *real*
     // repo to be useful. Update if the canonical home moves.
     static let source = URL(string: "https://github.com/NIK-TIGER-BILL/unison")!
+}
+
+// MARK: - LabeledContent spread style
+
+/// `LabeledContentStyle` that pushes the label to the leading edge
+/// and the content to the trailing edge of the row, with a `Spacer`
+/// filling the gap. Restores the visual contract `Form { }` provided
+/// automatically — the user reported "все управление сместились
+/// влева" after the Form → ScrollView refactor because the default
+/// `automatic` style packs label+content next to each other.
+private struct SpreadLabeledStyle: LabeledContentStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 12) {
+            configuration.label
+            Spacer(minLength: 8)
+            configuration.content
+        }
+        .frame(maxWidth: .infinity)
+    }
 }
