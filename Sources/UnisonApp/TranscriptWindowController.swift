@@ -77,33 +77,23 @@ public final class TranscriptWindowController {
             // Transcript"` and crop the screencapture to its frame.
             panel.title = "Unison Transcript"
 
+            // No NSVisualEffectView wrap here — unlike Settings /
+            // Onboarding, the transcript panel is *not* a single
+            // glass card. The user wants the panel itself to be
+            // fully transparent and the glass to live on each
+            // transcript bubble (and on the floating bottom-row
+            // controls). Wrapping the whole content view in
+            // NSVisualEffectView previously produced a huge empty
+            // glass rectangle when no bubbles were present — the
+            // user reported "При транскрипте выводиться огромное
+            // liquid glass окно. Так-же не должно быть."
+            //
+            // SwiftUI bubble views supply their own
+            // `.regularMaterial` background, so each card renders
+            // as glass against a fully transparent panel.
             let host = NSHostingController(rootView: TranscriptView(vm: viewModel))
-            host.view.translatesAutoresizingMaskIntoConstraints = false
-            // NSVisualEffectView with `.behindWindow` blending so the
-            // transcript card's blur tracks whatever's behind it in
-            // real time (desktop, meeting window video frames, etc.).
-            // The SwiftUI `.liquidGlass()` modifier alone gives a
-            // static within-window snapshot — only the AppKit-level
-            // visual effect view gets the live compositor pass.
-            let veView = NSVisualEffectView()
-            // `.hudWindow` is the canonical Liquid Glass material on
-            // macOS Tahoe. `.windowBackground` looks like solid panel
-            // on Tahoe and gives the "no liquid glass" appearance.
-            veView.material = .hudWindow
-            veView.blendingMode = .behindWindow
-            veView.state = .active
-            veView.wantsLayer = true
-            veView.layer?.cornerRadius = 18
-            veView.layer?.masksToBounds = true
-            veView.translatesAutoresizingMaskIntoConstraints = false
-            veView.addSubview(host.view)
-            NSLayoutConstraint.activate([
-                host.view.topAnchor.constraint(equalTo: veView.topAnchor),
-                host.view.bottomAnchor.constraint(equalTo: veView.bottomAnchor),
-                host.view.leadingAnchor.constraint(equalTo: veView.leadingAnchor),
-                host.view.trailingAnchor.constraint(equalTo: veView.trailingAnchor),
-            ])
-            panel.contentView = veView
+            host.view.frame = NSRect(origin: .zero, size: frame.size)
+            panel.contentViewController = host
             window = panel
         } else {
             // Re-center on the current main screen each time we show so

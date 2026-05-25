@@ -99,7 +99,14 @@ public final class SettingsWindowController {
                 vm: viewModel,
                 onOpenURL: onOpenURL,
                 onRecordHotkey: onRecordHotkey,
-                onClose: { [weak w] in w?.performClose(nil) }
+                // Use `close()` directly. `performClose(_:)` runs
+                // through the responder chain and consults a
+                // `windowShouldClose:` delegate, which combined with
+                // `isMovableByWindowBackground = true` (claims most
+                // pointer events for drag) seems to swallow the
+                // request — the user reported "крестик - закрытие
+                // в настройках не работает".
+                onClose: { [weak w] in w?.close() }
             )
             let host = NSHostingController(rootView: root)
             host.view.translatesAutoresizingMaskIntoConstraints = false
