@@ -110,7 +110,13 @@ public final class SettingsWindowController {
             // silhouette; the system shadow underneath was set
             // above via `w.hasShadow`.
             let veView = NSVisualEffectView()
-            veView.material = .windowBackground
+            // `.hudWindow` is the canonical Liquid Glass material on
+            // macOS Tahoe (the same one used by Notification Center,
+            // Spotlight, Control Center). `.windowBackground` renders
+            // as a near-opaque panel on Tahoe — the user reported
+            // "Полностью серый фон" with that material. `.hudWindow`
+            // is genuinely translucent and refracts the wallpaper.
+            veView.material = .hudWindow
             veView.blendingMode = .behindWindow
             veView.state = .active
             veView.wantsLayer = true

@@ -85,22 +85,23 @@ public final class OnboardingWindowController {
             // Wrap the SwiftUI content in an NSVisualEffectView with
             // `.behindWindow` blending so the blur tracks whatever's
             // *behind* the window in real time — desktop wallpaper
-            // changes, other apps moving, video playing underneath,
-            // etc. SwiftUI's `glassEffect()` modifier on its own
-            // renders a static within-window snapshot in many
-            // configurations (no NSVisualEffectView ancestor → no
-            // way to sample behind-window content). The user noticed:
-            // "наш Liquid Glass не динамичен". This wrapping is what
-            // actual macOS apps use for live window vibrancy.
+            // changes, other apps moving, video playing underneath.
+            //
+            // **Material choice**: `.hudWindow` is the canonical
+            // Liquid Glass material on macOS Tahoe (used by
+            // Notification Center, Spotlight, Control Center). It's
+            // genuinely translucent — light passes through, the
+            // wallpaper colour bleeds into the blur. `.windowBackground`
+            // looks like solid panel on Tahoe (much less translucent)
+            // and gave the user the "потерял liquid glass" symptom.
             //
             // Rounded mask + window-level transparency keeps the
-            // borderless card shape: the visible glass is the
-            // rounded `veView`, the corners outside the radius are
-            // transparent (window passes through to desktop).
+            // borderless card shape: the visible glass is the rounded
+            // `veView`, corners outside the radius are transparent.
             let host = NSHostingController(rootView: root)
             host.view.translatesAutoresizingMaskIntoConstraints = false
             let veView = NSVisualEffectView()
-            veView.material = .windowBackground
+            veView.material = .hudWindow
             veView.blendingMode = .behindWindow
             veView.state = .active
             veView.wantsLayer = true

@@ -55,7 +55,11 @@ public final class DiagnosticWindowController {
         let host = NSHostingController(rootView: root)
         host.view.translatesAutoresizingMaskIntoConstraints = false
         let veView = NSVisualEffectView()
-        veView.material = .windowBackground
+        // `.hudWindow` is the canonical Liquid Glass material on
+        // macOS Tahoe (used by Notification Center / Spotlight /
+        // Control Center). `.windowBackground` looks like solid panel
+        // on Tahoe and gives the "no liquid glass" appearance.
+        veView.material = .hudWindow
         veView.blendingMode = .behindWindow
         veView.state = .active
         veView.wantsLayer = true

@@ -86,7 +86,10 @@ public final class TranscriptWindowController {
             // static within-window snapshot — only the AppKit-level
             // visual effect view gets the live compositor pass.
             let veView = NSVisualEffectView()
-            veView.material = .windowBackground
+            // `.hudWindow` is the canonical Liquid Glass material on
+            // macOS Tahoe. `.windowBackground` looks like solid panel
+            // on Tahoe and gives the "no liquid glass" appearance.
+            veView.material = .hudWindow
             veView.blendingMode = .behindWindow
             veView.state = .active
             veView.wantsLayer = true

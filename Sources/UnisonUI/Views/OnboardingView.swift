@@ -49,19 +49,17 @@ public struct OnboardingView: View {
     public var body: some View {
         panel
             .frame(width: OnboardingLayout.windowWidth, height: OnboardingLayout.windowHeight)
-            // Glass is the outermost layer so the glass surface fills
-            // the entire NSWindow content area. If the glass were
-            // smaller than the window (e.g. with outer `.padding(16)`),
-            // macOS would draw the focus ring around the window rect
-            // and produce a visible black ring outside the rounded
-            // glass card. By making `.liquidGlass` the outermost layer,
-            // window bounds and glass bounds match exactly.
-            .liquidGlass(cornerRadius: OnboardingLayout.windowCornerRadius)
-            // Clip to the same rounded shape so any system-drawn focus
-            // ring follows the rounded outline instead of the square
-            // window rect.
-            .clipShape(RoundedRectangle(cornerRadius: OnboardingLayout.windowCornerRadius, style: .continuous))
-            // ESC closes the window. v1 just closes (per spec).
+            // No SwiftUI `.liquidGlass()` here anymore. The host
+            // `OnboardingWindowController` now wraps content in an
+            // `NSVisualEffectView(material: .hudWindow,
+            // blendingMode: .behindWindow, state: .active)` — that's
+            // the canonical AppKit Liquid Glass surface on macOS
+            // Tahoe (same as Notification Center / Spotlight /
+            // Control Center). Two glass layers stacked (SwiftUI
+            // glassEffect + AppKit NSVisualEffectView) made the
+            // surface visually opaque — that was the user's "потерял
+            // стиль liquid glass" report. One layer, in AppKit, is
+            // both genuinely live AND looks like the right material.
             .onExitCommand(perform: onClose)
     }
 

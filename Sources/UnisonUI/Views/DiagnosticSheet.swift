@@ -45,7 +45,11 @@ public struct DiagnosticSheet: View {
         }
         .padding(20)
         .frame(width: 600, height: 600)
-        .liquidGlass(cornerRadius: 18)
+        // No SwiftUI `.liquidGlass()` here — the host
+        // `DiagnosticWindowController` provides Liquid Glass via
+        // `NSVisualEffectView(material: .hudWindow,
+        // blendingMode: .behindWindow)`. Layering both was the
+        // user's "потерял стиль liquid glass" symptom.
     }
 
     // MARK: - Sections
