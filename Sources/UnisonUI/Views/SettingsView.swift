@@ -182,15 +182,27 @@ public struct SettingsView: View {
             .keyboardShortcut("w", modifiers: .command)
         }
         .frame(height: 28)
-        // Opaque vibrant material so scrolled content doesn't bleed
-        // through the header text. `.regularMaterial` gives a
-        // translucent backdrop that's still solid enough to hide
-        // rows passing under it, while keeping the live blur tone
-        // consistent with the host NSVisualEffectView.
-        .background(.regularMaterial)
+        // Header opacity. The host window's NSVisualEffectView is
+        // already a vibrancy surface (`.hudWindow`), and SwiftUI's
+        // `.regularMaterial` is *also* a vibrancy effect that
+        // samples behind-window content. Stacking vibrancy on
+        // vibrancy doesn't actually accumulate — both layers
+        // refract the same wallpaper, so the header looks
+        // transparent on top of the rest of the glass. To get
+        // visible separation, we need a SOLID translucent tint
+        // on top of the material. A thin black wash plus the
+        // material gives the header a slightly denser appearance
+        // than the cards below, enough to hide scrolled rows
+        // passing under it.
+        .background(
+            ZStack {
+                Rectangle().fill(.thickMaterial)
+                Rectangle().fill(Color.black.opacity(0.22))
+            }
+        )
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(UnisonColors.whiteAlpha(0.08))
+                .fill(UnisonColors.whiteAlpha(0.1))
                 .frame(height: 0.5)
         }
     }
