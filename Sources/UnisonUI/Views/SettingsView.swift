@@ -182,20 +182,19 @@ public struct SettingsView: View {
             .keyboardShortcut("w", modifiers: .command)
         }
         .frame(height: 28)
-        // AppKit NSVisualEffectView (`.titlebar` material) is the
-        // ONLY way to get a visibly denser strip on top of the
-        // window's existing vibrancy. SwiftUI's `.regularMaterial`
-        // / `.thickMaterial` don't help here — they're vibrancy
-        // effects themselves and stacking vibrancy on vibrancy
-        // doesn't accumulate (both layers sample the same
-        // wallpaper, so the upper layer is invisible). The system
-        // titlebar material draws as a separate compositor pass
-        // with denser tinting — that's how it stays readable
-        // while the rest of the window stays translucent.
-        .background(TitlebarVibrancyBackdrop())
+        // Solid dark tint, not a SwiftUI material. Every vibrancy-
+        // based attempt (`.regularMaterial`, `.thickMaterial`,
+        // `NSVisualEffectView` overlays) ended up visually identical
+        // to the host window's own glass because vibrancy doesn't
+        // accumulate when layered. A solid semi-opaque tint draws
+        // as its own pixel layer and is *guaranteed* to read as
+        // denser than the rest of the window. 0.45 alpha gives a
+        // clearly-visible dark bar that still feels glass-tinted
+        // (the host vibrancy is partially visible underneath).
+        .background(Color.black.opacity(0.45))
         .overlay(alignment: .bottom) {
             Rectangle()
-                .fill(UnisonColors.whiteAlpha(0.1))
+                .fill(UnisonColors.whiteAlpha(0.12))
                 .frame(height: 0.5)
         }
     }
