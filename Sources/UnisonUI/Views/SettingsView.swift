@@ -93,31 +93,44 @@ public struct SettingsView: View {
         // background lets the host window's `NSVisualEffectView`
         // show through. Each card retains a thin hairline border
         // for visual grouping so rows don't look unmoored.
-        ScrollView(.vertical) {
-            LazyVStack(alignment: .leading, spacing: 18) {
-                audioSection
-                languagesSection
-                openAISection
-                hotkeysSection
-                blackHoleSection
-                behaviorSection
-                aboutSection
-                howToUseSection
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .scrollContentBackground(.hidden)
-        .background(Color.clear)
-        .frame(minWidth: SettingsLayout.windowWidth, minHeight: SettingsLayout.minWindowHeight)
-        // The host window uses `.fullSizeContentView` + hidden traffic
-        // lights so the SwiftUI surface extends edge-to-edge in the
-        // rounded Liquid Glass card. The header overlay carries the
-        // close button + drag area.
-        .safeAreaInset(edge: .top, spacing: 0) {
+        VStack(spacing: 0) {
             settingsHeader
+            ScrollView(.vertical) {
+                // Plain `VStack`, not `LazyVStack`. Lazy layout is the
+                // wrong tool here: Settings has ~8 sections (a few
+                // hundred pt tall total), so the cost of measuring
+                // everything upfront is trivial. Meanwhile, lazy
+                // layout makes the scrollbar thumb resize as
+                // not-yet-loaded sections come into view — the user
+                // reported "при прокрутке... слайдер прокрутки резко
+                // скачет" when reaching the bottom-most section.
+                // Eager `VStack` gives a stable total content height
+                // from the first frame, so the thumb stays constant.
+                VStack(alignment: .leading, spacing: 18) {
+                    audioSection
+                    languagesSection
+                    openAISection
+                    hotkeysSection
+                    blackHoleSection
+                    behaviorSection
+                    aboutSection
+                    howToUseSection
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
         }
+        // Pin the header at y=0 ourselves. With `safeAreaInset`, the
+        // header was *stacked on top* of the system's titlebar safe
+        // area (~28pt reserved by `.fullSizeContentView` for hidden
+        // traffic lights), producing a visible double-header zone
+        // 56pt tall. Ignoring the top safe-area + manual VStack
+        // collapses that to a single 28pt bar.
+        .ignoresSafeArea(.container, edges: .top)
+        .frame(minWidth: SettingsLayout.windowWidth, minHeight: SettingsLayout.minWindowHeight)
         // `.overlay` puts the SaveIndicator *above* the content rather
         // than inserting it into the layout flow. Two consequences:
         //   1. Showing/hiding the indicator never shifts the rows
