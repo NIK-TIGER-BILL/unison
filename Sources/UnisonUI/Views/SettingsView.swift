@@ -150,31 +150,30 @@ public struct SettingsView: View {
     private var settingsHeader: some View {
         HStack {
             Text("Настройки")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.primary)
-                .padding(.leading, 18)
+                .padding(.leading, 16)
             Spacer()
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 9.5, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
+                    .frame(width: 18, height: 18)
                     .background(
                         Circle().fill(UnisonColors.whiteAlpha(0.08))
                     )
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .padding(.trailing, 12)
+            .padding(.trailing, 10)
             .keyboardShortcut("w", modifiers: .command)
         }
-        .frame(height: 36)
+        .frame(height: 28)
         // Opaque vibrant material so scrolled content doesn't bleed
-        // through the header text (the user reported "header
-        // настройки залазит на текст при прокрутке"). `.regularMaterial`
-        // gives a translucent backdrop that's still solid enough to
-        // hide rows passing under it, while keeping the live blur
-        // tone consistent with the host NSVisualEffectView.
+        // through the header text. `.regularMaterial` gives a
+        // translucent backdrop that's still solid enough to hide
+        // rows passing under it, while keeping the live blur tone
+        // consistent with the host NSVisualEffectView.
         .background(.regularMaterial)
         .overlay(alignment: .bottom) {
             Rectangle()
