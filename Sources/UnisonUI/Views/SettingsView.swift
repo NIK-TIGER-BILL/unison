@@ -182,24 +182,17 @@ public struct SettingsView: View {
             .keyboardShortcut("w", modifiers: .command)
         }
         .frame(height: 28)
-        // Header opacity. The host window's NSVisualEffectView is
-        // already a vibrancy surface (`.hudWindow`), and SwiftUI's
-        // `.regularMaterial` is *also* a vibrancy effect that
-        // samples behind-window content. Stacking vibrancy on
-        // vibrancy doesn't actually accumulate — both layers
-        // refract the same wallpaper, so the header looks
-        // transparent on top of the rest of the glass. To get
-        // visible separation, we need a SOLID translucent tint
-        // on top of the material. A thin black wash plus the
-        // material gives the header a slightly denser appearance
-        // than the cards below, enough to hide scrolled rows
-        // passing under it.
-        .background(
-            ZStack {
-                Rectangle().fill(.thickMaterial)
-                Rectangle().fill(Color.black.opacity(0.22))
-            }
-        )
+        // AppKit NSVisualEffectView (`.titlebar` material) is the
+        // ONLY way to get a visibly denser strip on top of the
+        // window's existing vibrancy. SwiftUI's `.regularMaterial`
+        // / `.thickMaterial` don't help here — they're vibrancy
+        // effects themselves and stacking vibrancy on vibrancy
+        // doesn't accumulate (both layers sample the same
+        // wallpaper, so the upper layer is invisible). The system
+        // titlebar material draws as a separate compositor pass
+        // with denser tinting — that's how it stays readable
+        // while the rest of the window stays translucent.
+        .background(TitlebarVibrancyBackdrop())
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(UnisonColors.whiteAlpha(0.1))
@@ -739,4 +732,29 @@ private struct SpreadLabeledStyle: LabeledContentStyle {
         }
         .frame(maxWidth: .infinity)
     }
+}
+
+// MARK: - AppKit-backed header material
+
+/// `NSVisualEffectView` wrapped for SwiftUI, configured with the
+/// `.titlebar` material — Apple's purpose-built opaque-ish vibrancy
+/// surface for window titlebars. The host window's content view is
+/// itself a vibrancy surface (`.hudWindow`), and SwiftUI's
+/// `.regularMaterial` / `.thickMaterial` modifiers, being vibrancy
+/// effects too, render visually identical to it (vibrancy-on-vibrancy
+/// doesn't accumulate — both layers sample the same wallpaper). The
+/// only way to get a clearly-denser strip on top is a *separate*
+/// NSVisualEffectView with a different material, drawn by the
+/// compositor as its own pass. `.titlebar` is the material Apple
+/// uses for system title bars exactly so they stay readable while
+/// the body of the window stays translucent.
+private struct TitlebarVibrancyBackdrop: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = .titlebar
+        v.blendingMode = .withinWindow
+        v.state = .active
+        return v
+    }
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
