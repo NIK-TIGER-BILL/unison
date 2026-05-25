@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Transcript · R4 · 16:9</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="liquidGlass" x="-15%" y="-15%" width="130%" height="130%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.010 0.016" numOctaves="3" seed="11" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="3.5" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="20" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <filter id="liquidGlassSubtle" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.014 0.02" numOctaves="2" seed="3" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="2.5" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="12" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+
+    <symbol id="icon-stop" viewBox="0 0 16 16">
+      <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/>
+    </symbol>
+    <symbol id="icon-chevron-down" viewBox="0 0 16 16">
+      <polyline points="4,6 8,10 12,6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="icon-chevron-up" viewBox="0 0 16 16">
+      <polyline points="4,10 8,6 12,10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="icon-plus" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <line x1="8" y1="3" x2="8" y2="13"/>
+        <line x1="3" y1="8" x2="13" y2="8"/>
+      </g>
+    </symbol>
+    <symbol id="icon-play" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M4 2.5c0-.5.5-.8.95-.55l8.5 5.05c.45.27.45.93 0 1.2l-8.5 5.05c-.45.26-.95-.05-.95-.55v-10.2z"/>
+    </symbol>
+    <symbol id="icon-pause" viewBox="0 0 16 16">
+      <g fill="currentColor">
+        <rect x="4" y="3" width="3" height="10" rx="0.6"/>
+        <rect x="9" y="3" width="3" height="10" rx="0.6"/>
+      </g>
+    </symbol>
+    <symbol id="icon-trash" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="4" x2="13" y2="4"/>
+        <path d="M5 4 L5.5 13 a 1 1 0 0 0 1 1 H 9.5 a 1 1 0 0 0 1 -1 L 11 4"/>
+        <path d="M6 4 V 2.5 a 0.5 0.5 0 0 1 0.5 -0.5 H 9.5 a 0.5 0.5 0 0 1 0.5 0.5 V 4"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --me-color: #b6e0ff;
+  --peer-color: #ffd6c0;
+  --ready: #58e09a;
+  --active: #5ac8fa;
+  --stop: #ff7a8c;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.03em; margin-bottom: 4px;
+}
+.page-header h1 .accent { color: var(--accent); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; }
+.page-header p code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11.5px;
+  background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;
+}
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+/* Wide layout — 16:9 frame above, annotations below */
+.layout {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 48px 48px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+.demo-wrap { width: 100%; }
+
+/* 16:9 frame — aspect ratio held via CSS */
+.frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 32px 64px -16px rgba(0,0,0,0.7), 0 4px 16px rgba(0,0,0,0.5);
+}
+.aspect-note {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  color: var(--page-mute);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+.aspect-note .res {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+}
+
+.menubar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex; align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px;
+  z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+
+.desktop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+
+/* Mock window (Zoom) */
+.mock-window {
+  position: absolute;
+  top: 56px; left: 60px; right: 60px; bottom: 60px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #2a2a3a, #1a1a2a);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.3);
+}
+.mock-window .video-area {
+  width: 55%; height: 70%;
+  background: linear-gradient(135deg, #3a3a4a, #2a2a3a);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 48px;
+  opacity: 0.4;
+}
+
+/* Transcript zone — bottom center on 16:9 */
+.transcript-zone {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  width: 60%;
+  max-width: 720px;
+  min-width: 520px;
+  z-index: 5;
+  display: flex; flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  pointer-events: none;
+}
+.transcript-zone > * { pointer-events: auto; }
+
+.bubbles-list {
+  display: flex; flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+/* ═══ Bubble — heavily amplified liquid glass ═══ */
+.bubble {
+  max-width: 70%;
+  padding: 12px 16px;
+  border-radius: 18px;
+  font-size: 13.5px;
+  letter-spacing: -0.005em;
+  line-height: 1.4;
+  position: relative;
+  backdrop-filter: blur(36px) saturate(200%) url(#liquidGlass);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  box-shadow:
+    0 18px 36px rgba(0,0,0,0.35),
+    0 4px 10px rgba(0,0,0,0.2),
+    inset 0 1.5px 0 rgba(255,255,255,0.28),
+    inset 0 -1.5px 0 rgba(0,0,0,0.22),
+    inset 1px 0 0 rgba(255,255,255,0.08),
+    inset -1px 0 0 rgba(255,255,255,0.08);
+  animation: bubbleIn 0.45s cubic-bezier(0.32, 0.94, 0.6, 1);
+  word-wrap: break-word;
+  overflow: visible;
+}
+
+/* Specular highlight — bright reflective top */
+.bubble::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 65%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.14) 0%, transparent 50%),
+    radial-gradient(ellipse 90% 60% at 25% -10%, rgba(255,255,255,0.30), transparent 70%),
+    radial-gradient(ellipse 60% 30% at 75% 5%, rgba(255,255,255,0.18), transparent 60%);
+  border-radius: 18px 18px 60% 60% / 18px 18px 35% 35%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.85;
+}
+
+/* Conic rim — переливающийся периметр */
+.bubble::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  padding: 1px;
+  background: conic-gradient(from 120deg at 50% 50%,
+    rgba(255,255,255,0.55),
+    rgba(255,255,255,0.08) 22%,
+    rgba(255,255,255,0.40) 50%,
+    rgba(255,255,255,0.08) 78%,
+    rgba(255,255,255,0.55));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.bubble .original {
+  font-weight: 500;
+  color: rgba(255,255,255,1);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  position: relative;
+  z-index: 1;
+}
+.bubble .translated {
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.68);
+  font-style: italic;
+  margin-top: 5px;
+  padding-top: 6px;
+  border-top: 0.5px solid rgba(255,255,255,0.14);
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+}
+
+/* My — left, light blue glass */
+.bubble.me {
+  align-self: flex-start;
+  background: linear-gradient(180deg, rgba(160, 210, 255, 0.16), rgba(100, 160, 220, 0.08));
+  border: 0.5px solid rgba(180, 220, 255, 0.22);
+}
+
+/* Peer — right, neutral glass */
+.bubble.peer {
+  align-self: flex-end;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03));
+  border: 0.5px solid rgba(255,255,255,0.13);
+}
+
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.92); filter: blur(6px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.bubble.fade-out { animation: bubbleOut 0.7s cubic-bezier(0.4, 0, 0.6, 1) forwards; }
+@keyframes bubbleOut {
+  0% { opacity: 1; transform: translateY(0) scale(1); max-height: 200px; }
+  60% { opacity: 0.15; transform: translateY(-6px) scale(0.96); }
+  100% { opacity: 0; transform: translateY(-12px) scale(0.92); max-height: 0; padding-top: 0; padding-bottom: 0; margin: 0; border-width: 0; }
+}
+
+/* ═══ Control pill ═══ */
+.control-pill {
+  align-self: center;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 8px 7px 14px;
+  background: rgba(20, 22, 30, 0.50);
+  backdrop-filter: blur(36px) saturate(200%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border: 0.5px solid rgba(255,255,255,0.14);
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.85);
+  letter-spacing: -0.005em;
+  box-shadow:
+    0 10px 28px rgba(0,0,0,0.45),
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    inset 0 -1px 0 rgba(0,0,0,0.2);
+  cursor: grab;
+  user-select: none;
+  transition: opacity 0.3s ease;
+  position: relative;
+}
+.control-pill::after {
+  content: "";
+  position: absolute; inset: 0;
+  border-radius: 999px;
+  padding: 1px;
+  background: conic-gradient(from 120deg at 50% 50%,
+    rgba(255,255,255,0.45),
+    rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.35) 50%,
+    rgba(255,255,255,0.05) 75%,
+    rgba(255,255,255,0.45));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.5;
+}
+.control-pill:active { cursor: grabbing; }
+.control-pill .dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--active);
+  box-shadow: 0 0 6px rgba(90, 200, 250, 0.7);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.control-pill .timer {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.7);
+}
+.control-pill .sep {
+  width: 0.5px; height: 13px;
+  background: rgba(255,255,255,0.14);
+  margin: 0 3px;
+}
+.control-pill .pill-btn {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.65);
+  border-radius: 50%;
+  cursor: pointer;
+  background: none; border: none;
+  transition: background 0.15s, color 0.15s;
+  position: relative;
+}
+.control-pill .pill-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.control-pill .pill-btn.stop:hover { color: var(--stop); background: rgba(255, 122, 140, 0.16); }
+.control-pill .pill-btn svg { width: 12px; height: 12px; }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+.transcript-zone.collapsed .bubbles-list { display: none; }
+
+/* ═══ Annotations / demo controls ═══ */
+.below {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+@media (max-width: 900px) { .below { grid-template-columns: 1fr; } }
+
+.annotations { padding-top: 0; }
+.ann-title {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+}
+.ann-subtitle {
+  color: var(--page-mute);
+  font-size: 13.5px;
+  margin-bottom: 22px;
+  max-width: 460px;
+  line-height: 1.55;
+}
+.ann-section { margin-bottom: 24px; }
+.ann-section h3 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--page-mute);
+  margin-bottom: 12px;
+  font-weight: 400;
+}
+.ann-section ul { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.ann-section li {
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(245,245,247,0.85);
+  padding-left: 22px;
+  position: relative;
+}
+.ann-section li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 7px;
+  width: 12px; height: 1px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+.ann-section li strong { color: var(--page-fg); font-weight: 500; }
+.ann-section li code, .ann-subtitle code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.demo-controls {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 16px;
+  background: rgba(255,255,255,0.03);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  border-radius: 11px;
+  margin-bottom: 16px;
+}
+.demo-controls .row {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.btn-demo {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,0.08);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  color: #fff;
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.08s;
+}
+.btn-demo:hover { background: rgba(255,255,255,0.14); }
+.btn-demo:active { transform: scale(0.97); }
+.btn-demo svg { width: 11px; height: 11px; }
+.btn-demo.me { color: var(--me-color); }
+.btn-demo.peer { color: var(--peer-color); }
+.btn-demo.auto { color: var(--ready); }
+.btn-demo.auto.active { background: rgba(88, 224, 154, 0.18); border-color: rgba(88, 224, 154, 0.4); }
+.btn-demo.clear { color: rgba(255, 130, 130, 0.85); }
+
+.button-legend {
+  display: grid; grid-template-columns: auto 1fr;
+  gap: 10px 14px;
+  font-size: 12.5px;
+  margin-top: 6px;
+}
+.button-legend .legend-icon {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.1);
+  border-radius: 7px;
+  color: rgba(255,255,255,0.8);
+  flex-shrink: 0;
+}
+.button-legend .legend-icon svg { width: 12px; height: 12px; }
+.button-legend .legend-icon.stop { color: var(--stop); }
+.button-legend .legend-text {
+  color: rgba(245,245,247,0.85);
+  line-height: 1.5;
+}
+.button-legend .legend-text strong { color: #fff; font-weight: 500; }
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Transcript · <span class="accent">R4 · 16:9</span></h1>
+<p>Landscape-формат 16:9 как реальный монитор. Glass усилен (blur 36px, conic rim, doubled specular). Иконки поменяны на понятные: ⌄ свернуть, ■ стоп. В легенде ниже расписано что делает каждая.</p>
+<div class="nav">
+<a href="/popover-final/">Popover</a>
+<a href="/onboarding-final/">Onboarding</a>
+<a href="/transcript-round-1/">R1</a>
+<a href="/transcript-round-2/">R2</a>
+<a href="/transcript-round-3/">R3</a>
+<a class="current" href="/transcript-round-4/">R4</a>
+</div>
+</header>
+
+<main class="layout">
+
+<div class="demo-wrap">
+<div class="aspect-note">Aspect 16:9 · <span class="res">≈ 1920×1080 при отображении на FHD-мониторе</span></div>
+<div class="frame">
+<div class="menubar"><span class="app-name">Zoom</span><span>Meeting</span><span>View</span><span>Share</span><span class="spacer"></span><span>🔔</span><span>📡</span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="mock-window">
+<div class="video-area">📹</div>
+</div>
+<div class="transcript-zone" id="transcript-zone">
+<div class="bubbles-list" id="bubbles-list"></div>
+<div class="control-pill" id="control-pill">
+<span class="dot"></span>
+<span class="timer" id="timer">02:14</span>
+<span class="sep"></span>
+<button class="pill-btn" id="toggle-btn" title="Свернуть транскрипт"><svg id="toggle-icon"><use href="#icon-chevron-down"/></svg></button>
+<button class="pill-btn stop" id="close-btn" title="Остановить перевод"><svg><use href="#icon-stop"/></svg></button>
+</div>
+</div>
+</div>
+</div>
+
+<div class="below">
+
+<div class="annotations">
+<div class="ann-title">Что делают кнопки</div>
+<div class="ann-subtitle">Pill-контрол внизу транскрипта — это управление активной сессией. Две кнопки с разной семантикой.</div>
+
+<div class="button-legend">
+<div class="legend-icon"><svg><use href="#icon-chevron-down"/></svg></div>
+<div class="legend-text"><strong>⌄ — Свернуть</strong><br>Скрывает bubbles. Pill остаётся (с иконкой ˄). Сессия перевода продолжается, перевод работает в фоне — просто визуальные bubbles не показываются. Клик ещё раз — bubbles возвращаются.</div>
+
+<div class="legend-icon stop"><svg><use href="#icon-stop"/></svg></div>
+<div class="legend-text"><strong>■ — Остановить</strong><br>Завершает сессию перевода. Pill и все bubbles исчезают. В реальном приложении: вызывает <code>Orchestrator.stop()</code> — закрытие WebSocket-сессий OpenAI, остановка mic-capture, остановка playback. Эквивалентно нажатию «Стоп» в menu bar popover.</div>
+</div>
+</div>
+
+<div class="annotations">
+<div class="ann-title">R4 · что нового</div>
+
+<div class="ann-section">
+<h3>Демо</h3>
+<div class="demo-controls">
+<div class="row">
+<button class="btn-demo me" id="btn-add-me"><svg><use href="#icon-plus"/></svg> Моя фраза</button>
+<button class="btn-demo peer" id="btn-add-peer"><svg><use href="#icon-plus"/></svg> Фраза собеседника</button>
+</div>
+<div class="row">
+<button class="btn-demo auto" id="btn-auto"><svg><use href="#icon-play"/></svg> Авто-диалог</button>
+<button class="btn-demo clear" id="btn-clear"><svg><use href="#icon-trash"/></svg> Очистить</button>
+</div>
+</div>
+</div>
+
+<div class="ann-section">
+<h3>16:9</h3>
+<ul>
+<li>Frame теперь <code>aspect-ratio: 16/9</code> и занимает всю ширину колонки</li>
+<li>Transcript-zone — 60% ширины, max 720px, min 520px — близко к центру при любом масштабе</li>
+<li>Mock Zoom-окно занимает больше места — bubbles реально плавают поверх контента</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Glass amplified</h3>
+<ul>
+<li><strong>Blur 36px</strong> + <strong>saturate 200%</strong> (было 24/180) — больше пробивает фон</li>
+<li><strong>SVG-displacement</strong> с scale 20 — отчётливая рефракция</li>
+<li><strong>Specular highlight</strong> ::before в 3 слоя (linear + 2× radial) — заметный «отражённый блик»</li>
+<li><strong>Conic rim</strong> ::after — переливающийся периметр (как у popover/onboarding)</li>
+<li><strong>Inner shadows</strong> 1.5px highlight сверху + 1.5px тень снизу — толщина стекла</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Иконки</h3>
+<ul>
+<li><strong>👁 → ⌄</strong> Chevron-down вместо глаза. Метафора «свернуть/развернуть» вместо «показать/скрыть»</li>
+<li><strong>✕ → ■</strong> Stop-square вместо креста — однозначно «остановить», как у Start-button в popover</li>
+</ul>
+</div>
+
+</div>
+</div>
+
+</main>
+
+<script>
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+const MY_PHRASES = [
+  { o: 'Привет, как дела?', t: 'Hi, how are you?' },
+  { o: 'Давай встретимся завтра?', t: 'Let\'s meet tomorrow?' },
+  { o: 'Я готов начинать.', t: 'I\'m ready to start.' },
+  { o: 'Что насчёт пятницы?', t: 'What about Friday?' },
+  { o: 'Понял, спасибо.', t: 'Got it, thanks.' },
+  { o: 'Согласен.', t: 'Agreed.' },
+  { o: 'Давай в 10 утра.', t: 'Let\'s do 10 AM.' },
+  { o: 'Хорошо, до встречи.', t: 'Okay, see you then.' },
+  { o: 'Скинь ссылку на встречу.', t: 'Send me the meeting link.' },
+  { o: 'Я опоздаю на пять минут.', t: 'I\'ll be five minutes late.' },
+];
+const PEER_PHRASES = [
+  { o: 'I\'m good, thanks!', t: 'Хорошо, спасибо!' },
+  { o: 'Sounds good to me.', t: 'Звучит хорошо.' },
+  { o: 'Let me check my calendar.', t: 'Дай посмотрю календарь.' },
+  { o: 'Friday works for me.', t: 'Пятница подходит.' },
+  { o: 'See you then.', t: 'До встречи.' },
+  { o: 'What time exactly?', t: 'Во сколько именно?' },
+  { o: 'Perfect, sending it now.', t: 'Отлично, отправляю.' },
+  { o: 'Just got out of another call.', t: 'Только что закончил другой звонок.' },
+  { o: 'Take your time.', t: 'Не торопись.' },
+  { o: 'Talk soon.', t: 'Скоро спишемся.' },
+];
+
+const VISIBLE_LIMIT = 3;
+let myIndex = 0, peerIndex = 0, autoInterval = null, autoLastSide = 'peer';
+let collapsed = false;
+
+const list = document.getElementById('bubbles-list');
+const zone = document.getElementById('transcript-zone');
+const btnAddMe = document.getElementById('btn-add-me');
+const btnAddPeer = document.getElementById('btn-add-peer');
+const btnAuto = document.getElementById('btn-auto');
+const btnClear = document.getElementById('btn-clear');
+const closeBtn = document.getElementById('close-btn');
+const toggleBtn = document.getElementById('toggle-btn');
+const toggleIcon = document.getElementById('toggle-icon');
+
+function addBubble(side, phrase) {
+  if (collapsed) return;
+  const bubble = document.createElement('div');
+  bubble.className = `bubble ${side}`;
+  bubble.innerHTML = `
+    <div class="original">${escapeHtml(phrase.o)}</div>
+    <div class="translated">${escapeHtml(phrase.t)}</div>
+  `;
+  list.appendChild(bubble);
+  prune();
+}
+
+function prune() {
+  const live = list.querySelectorAll('.bubble:not(.fade-out)');
+  if (live.length > VISIBLE_LIMIT) {
+    const toFade = live.length - VISIBLE_LIMIT;
+    for (let i = 0; i < toFade; i++) {
+      live[i].classList.add('fade-out');
+      const t = live[i];
+      setTimeout(() => t.remove(), 720);
+    }
+  }
+}
+
+function clearAll() {
+  list.querySelectorAll('.bubble').forEach(b => {
+    if (!b.classList.contains('fade-out')) {
+      b.classList.add('fade-out');
+      setTimeout(() => b.remove(), 720);
+    }
+  });
+}
+
+btnAddMe.addEventListener('click', () => {
+  addBubble('me', MY_PHRASES[myIndex++ % MY_PHRASES.length]);
+});
+btnAddPeer.addEventListener('click', () => {
+  addBubble('peer', PEER_PHRASES[peerIndex++ % PEER_PHRASES.length]);
+});
+btnClear.addEventListener('click', clearAll);
+
+btnAuto.addEventListener('click', () => {
+  if (autoInterval) {
+    clearInterval(autoInterval);
+    autoInterval = null;
+    btnAuto.classList.remove('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-play"/></svg> Авто-диалог';
+  } else {
+    btnAuto.classList.add('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-pause"/></svg> Стоп';
+    const tick = () => {
+      if (autoLastSide === 'me') {
+        addBubble('peer', PEER_PHRASES[peerIndex++ % PEER_PHRASES.length]);
+        autoLastSide = 'peer';
+      } else {
+        addBubble('me', MY_PHRASES[myIndex++ % MY_PHRASES.length]);
+        autoLastSide = 'me';
+      }
+    };
+    tick();
+    autoInterval = setInterval(tick, 2000);
+  }
+});
+
+toggleBtn.addEventListener('click', () => {
+  collapsed = !collapsed;
+  if (collapsed) {
+    list.querySelectorAll('.bubble').forEach(b => {
+      if (!b.classList.contains('fade-out')) {
+        b.classList.add('fade-out');
+        setTimeout(() => b.remove(), 720);
+      }
+    });
+    setTimeout(() => zone.classList.add('collapsed'), 720);
+    toggleIcon.innerHTML = '<use href="#icon-chevron-up"/>';
+    toggleBtn.title = 'Развернуть транскрипт';
+  } else {
+    zone.classList.remove('collapsed');
+    toggleIcon.innerHTML = '<use href="#icon-chevron-down"/>';
+    toggleBtn.title = 'Свернуть транскрипт';
+  }
+});
+
+closeBtn.addEventListener('click', () => {
+  if (autoInterval) {
+    clearInterval(autoInterval);
+    autoInterval = null;
+    btnAuto.classList.remove('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-play"/></svg> Авто-диалог';
+  }
+  clearAll();
+  console.log('Stop session (placeholder)');
+});
+
+let seconds = 134;
+setInterval(() => {
+  seconds++;
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = (seconds % 60).toString().padStart(2, '0');
+  document.getElementById('timer').textContent = `${m}:${s}`;
+}, 1000);
+
+const pill = document.getElementById('control-pill');
+let dragging = false, dragStart = {};
+pill.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.pill-btn')) return;
+  dragging = true;
+  const rect = zone.getBoundingClientRect();
+  const frame = zone.closest('.frame');
+  const fRect = frame.getBoundingClientRect();
+  dragStart = {
+    x: e.clientX, y: e.clientY,
+    rectLeft: rect.left - fRect.left,
+    rectBottom: fRect.bottom - rect.bottom,
+  };
+  e.preventDefault();
+});
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const frame = zone.closest('.frame');
+  const fRect = frame.getBoundingClientRect();
+  const dx = e.clientX - dragStart.x;
+  const dy = e.clientY - dragStart.y;
+  const w = zone.offsetWidth;
+  let newLeft = dragStart.rectLeft + dx;
+  let newBottom = dragStart.rectBottom - dy;
+  newLeft = Math.max(8, Math.min(newLeft, fRect.width - w - 8));
+  newBottom = Math.max(8, Math.min(newBottom, fRect.height - 80));
+  zone.style.left = newLeft + 'px';
+  zone.style.right = 'auto';
+  zone.style.bottom = newBottom + 'px';
+  zone.style.transform = 'none';
+});
+window.addEventListener('mouseup', () => { dragging = false; });
+
+setTimeout(() => addBubble('me', MY_PHRASES[myIndex++]), 200);
+setTimeout(() => addBubble('peer', PEER_PHRASES[peerIndex++]), 700);
+setTimeout(() => addBubble('me', MY_PHRASES[myIndex++]), 1200);
+</script>
+
+</body>
+</html>

@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Popover · Round 6 · V2a dropdown polished</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="liquidGlass" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="2" seed="9" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="3" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+
+    <symbol id="icon-gear" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <line x1="2.5" y1="4.5" x2="6" y2="4.5"/>
+        <circle cx="8.5" cy="4.5" r="1.6" fill="currentColor" stroke="none"/>
+        <line x1="11" y1="4.5" x2="13.5" y2="4.5"/>
+        <line x1="2.5" y1="11.5" x2="9.5" y2="11.5"/>
+        <circle cx="12" cy="11.5" r="1.6" fill="currentColor" stroke="none"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-play" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M4 2.5c0-.5.5-.8.95-.55l8.5 5.05c.45.27.45.93 0 1.2l-8.5 5.05c-.45.26-.95-.05-.95-.55v-10.2z"/>
+    </symbol>
+
+    <symbol id="icon-stop" viewBox="0 0 16 16">
+      <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/>
+    </symbol>
+
+    <symbol id="icon-call" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.6 17.6 0 0 0 4.168 6.608 17.6 17.6 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z"/>
+    </symbol>
+
+    <symbol id="icon-listen" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M2.5 11v-3a5.5 5.5 0 0 1 11 0v3"/>
+      </g>
+      <rect x="1.7" y="10.4" width="2.8" height="4" rx="1" fill="currentColor"/>
+      <rect x="11.5" y="10.4" width="2.8" height="4" rx="1" fill="currentColor"/>
+    </symbol>
+
+    <symbol id="arrow-a" viewBox="0 0 40 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="6" y1="8" x2="34" y2="8"/>
+        <polyline points="10,4 6,8 10,12"/>
+        <polyline points="30,4 34,8 30,12"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-chevron" viewBox="0 0 16 16">
+      <polyline points="4,6 8,10 12,6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+
+    <symbol id="icon-check" viewBox="0 0 16 16">
+      <polyline points="3,8 7,12 13,4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+
+    <symbol id="icon-search" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <circle cx="7" cy="7" r="4"/>
+        <line x1="10" y1="10" x2="13" y2="13"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-warning" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M8 1.5l7 12.5h-14z" opacity="0.95"/>
+      <rect x="7.4" y="6" width="1.2" height="4" rx="0.4" fill="#1a0d20"/>
+      <circle cx="8" cy="11.5" r="0.7" fill="#1a0d20"/>
+    </symbol>
+  </defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --warn: #ffc060;
+  --start-grad: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08));
+  --start-grad-hover: linear-gradient(180deg, rgba(255,255,255,0.30), rgba(255,255,255,0.12));
+  --start-grad-active: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.04));
+  --start-grad-disabled: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  --stop-grad: linear-gradient(180deg, rgba(255, 110, 130, 0.42), rgba(220, 60, 90, 0.28));
+  --stop-grad-hover: linear-gradient(180deg, rgba(255, 130, 150, 0.55), rgba(230, 75, 105, 0.38));
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'Fraunces', serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.025em; margin-bottom: 4px;
+}
+.page-header h1 em { font-style: italic; color: var(--accent); font-weight: 300; }
+.page-header p {
+  color: var(--page-mute);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.layout {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 48px 48px 64px;
+  display: grid;
+  grid-template-columns: minmax(420px, 540px) 1fr;
+  gap: 56px;
+  align-items: flex-start;
+}
+
+@media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+
+.demo-wrap { position: sticky; top: 160px; }
+
+.frame {
+  position: relative;
+  height: 600px;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 32px 64px -16px rgba(0,0,0,0.7), 0 4px 16px rgba(0,0,0,0.5);
+}
+
+.menubar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex; align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, 'SF Pro Text', sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px;
+  z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+
+.desktop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+
+.popover-wrap {
+  position: absolute;
+  top: 30%; left: 50%;
+  transform: translate(-50%, 0);
+  z-index: 5;
+}
+
+.popover {
+  width: 340px;
+  padding: 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  backdrop-filter: blur(20px) saturate(160%) url(#liquidGlass);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border-radius: 24px;
+  color: #f5f5f7;
+  font-family: 'DM Sans', sans-serif;
+  position: relative;
+  overflow: visible;
+  box-shadow:
+    0 32px 80px -8px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -1px 0 rgba(0,0,0,0.4),
+    inset 1px 0 0 rgba(255,255,255,0.06),
+    inset -1px 0 0 rgba(255,255,255,0.06);
+}
+.popover::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 60%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.16) 0%, transparent 35%),
+    radial-gradient(ellipse 100% 60% at 30% 0%, rgba(255,255,255,0.22), transparent 70%);
+  border-radius: 24px 24px 50% 50% / 24px 24px 30% 30%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.popover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 24px;
+  padding: 1px;
+  background: conic-gradient(from 135deg at 50% 50%,
+    rgba(255,255,255,0.4),
+    rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.4) 50%,
+    rgba(255,255,255,0.05) 75%,
+    rgba(255,255,255,0.4));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+/* header */
+.top-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 14px;
+  position: relative; z-index: 1;
+}
+.dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #58e09a;
+  box-shadow: 0 0 8px rgba(88, 224, 154, 0.65);
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+.popover.warn .dot {
+  background: var(--warn);
+  box-shadow: 0 0 8px rgba(255, 192, 96, 0.6);
+}
+.popover.translating .dot {
+  background: #5ac8fa;
+  box-shadow: 0 0 8px rgba(90, 200, 250, 0.75);
+  animation: dotPulse 1.6s ease-in-out infinite;
+}
+@keyframes dotPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.brand-text {
+  font-size: 13px; font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.top-row .spacer { flex: 1; }
+
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+button:focus-visible { outline: 1.5px solid rgba(255, 200, 230, 0.6); outline-offset: 1px; }
+
+.gear-btn {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.55);
+  border-radius: 7px;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+.gear-btn:hover { color: rgba(255,255,255,0.95); background: rgba(255,255,255,0.10); }
+.gear-btn:active { transform: scale(0.94); background: rgba(255,255,255,0.06); }
+.gear-btn svg { width: 14px; height: 14px; }
+
+/* mode toggle */
+.mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 2px; background: rgba(0,0,0,0.22);
+  padding: 3px; border-radius: 11px;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.25);
+}
+.mode-seg {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 0;
+  font-size: 12.5px;
+  color: rgba(255,255,255,0.55);
+  border-radius: 8px; font-weight: 500;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.1s ease, box-shadow 0.18s ease;
+}
+.mode-seg:hover { color: rgba(255,255,255,0.85); }
+.mode-seg:active { transform: scale(0.97); }
+.mode-seg.on {
+  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06));
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.25),
+    inset 0 -1px 0 rgba(0,0,0,0.1),
+    0 1px 2px rgba(0,0,0,0.2);
+}
+.mode-seg svg { width: 13px; height: 13px; }
+
+/* language bar */
+.lang-bar {
+  background: rgba(0,0,0,0.16);
+  border-radius: 13px;
+  padding: 14px;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+  display: flex; align-items: flex-end;
+  transition: box-shadow 0.2s ease, background 0.2s ease;
+}
+.popover.warn .lang-bar {
+  background: rgba(255, 192, 96, 0.08);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 192, 96, 0.3);
+}
+.lang-side {
+  flex: 1; min-width: 0;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+  position: relative;
+}
+.lang-side:hover { background: rgba(255,255,255,0.06); }
+.lang-side:active { transform: scale(0.98); }
+.lang-side.right { text-align: right; }
+.lang-lbl {
+  font-size: 9.5px;
+  color: rgba(255,255,255,0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.lang-val {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  display: flex; align-items: center; gap: 6px;
+}
+.lang-side.right .lang-val { justify-content: flex-end; }
+.lang-val .flag { font-size: 14px; }
+.lang-val .chev {
+  width: 9px; height: 9px;
+  color: rgba(255,255,255,0.4);
+  transition: transform 0.18s ease, color 0.18s ease;
+}
+.lang-side.open .lang-val .chev { transform: rotate(180deg); color: var(--accent); }
+.arrow-wrap {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 8px 2px;
+  color: rgba(255,255,255,0.55);
+  flex-shrink: 0;
+}
+.arrow-wrap svg { width: 36px; height: 14px; }
+
+/* dropdown */
+.lang-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  width: 200px;
+  background: rgba(20, 20, 30, 0.62);
+  backdrop-filter: blur(36px) saturate(200%);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border-radius: 13px;
+  padding: 5px;
+  z-index: 50;
+  box-shadow:
+    0 18px 44px rgba(0,0,0,0.6),
+    inset 0 1px 0 rgba(255,255,255,0.12),
+    inset 0 -1px 0 rgba(0,0,0,0.3);
+  border: 0.5px solid rgba(255,255,255,0.12);
+  opacity: 0;
+  transform: translateY(-4px) scale(0.96);
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.lang-side.open .lang-dropdown {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.lang-side .lang-dropdown { left: 0; }
+.lang-side.right .lang-dropdown { right: 0; left: auto; }
+
+.search-row {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(0, 0, 0, 0.32);
+  padding: 6px 9px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  border: 0.5px solid rgba(255,255,255,0.06);
+  transition: border-color 0.15s ease;
+}
+.search-row:focus-within { border-color: rgba(255, 182, 224, 0.32); }
+.search-row .search-icon {
+  width: 11px; height: 11px;
+  color: rgba(255,255,255,0.4);
+  flex-shrink: 0;
+}
+.search-input {
+  flex: 1; min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: rgba(255,255,255,0.95);
+  font-family: inherit;
+  font-size: 12.5px;
+  letter-spacing: -0.005em;
+}
+.search-input::placeholder { color: rgba(255,255,255,0.4); }
+
+.lang-list {
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.18) transparent;
+}
+.lang-list::-webkit-scrollbar { width: 6px; }
+.lang-list::-webkit-scrollbar-track { background: transparent; }
+.lang-list::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.18);
+  border-radius: 3px;
+}
+.lang-list::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.32); }
+
+.lang-option {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  letter-spacing: -0.005em;
+  color: rgba(255,255,255,0.85);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  white-space: nowrap;
+}
+.lang-option:hover { background: rgba(255,255,255,0.10); color: #fff; }
+.lang-option.selected { color: var(--accent); }
+.lang-option .flag { font-size: 14px; }
+.lang-option .check {
+  width: 11px; height: 11px;
+  margin-left: auto;
+  color: var(--accent);
+  opacity: 0;
+}
+.lang-option.selected .check { opacity: 1; }
+.lang-option.keyboard-focused { background: rgba(255,255,255,0.10); }
+
+.no-results {
+  font-size: 12px;
+  color: rgba(255,255,255,0.4);
+  padding: 14px 10px;
+  text-align: center;
+  letter-spacing: -0.005em;
+}
+
+/* warning row */
+.warn-row {
+  display: none;
+  align-items: center; gap: 6px;
+  padding: 8px 12px;
+  background: rgba(255, 192, 96, 0.10);
+  border: 0.5px solid rgba(255, 192, 96, 0.28);
+  border-radius: 9px;
+  margin-bottom: 12px;
+  font-size: 11.5px;
+  color: rgba(255, 220, 170, 0.95);
+  letter-spacing: -0.005em;
+  position: relative; z-index: 1;
+  animation: warnFade 0.2s ease-out;
+}
+.popover.warn .warn-row { display: flex; }
+.warn-row .warn-icon {
+  width: 12px; height: 12px;
+  color: var(--warn);
+  flex-shrink: 0;
+}
+@keyframes warnFade {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* start button */
+.start-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%;
+  background: var(--start-grad);
+  border: 0.5px solid rgba(255,255,255,0.22);
+  color: #fff;
+  padding: 13px;
+  border-radius: 13px;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  position: relative; z-index: 1;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    inset 0 -1px 0 rgba(0,0,0,0.15),
+    0 4px 12px rgba(0,0,0,0.28);
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+  transition: background 0.16s ease, transform 0.08s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+}
+.start-btn:hover {
+  background: var(--start-grad-hover);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.32),
+    inset 0 -1px 0 rgba(0,0,0,0.15),
+    0 6px 16px rgba(0,0,0,0.35);
+}
+.start-btn:active {
+  background: var(--start-grad-active);
+  transform: scale(0.98);
+  box-shadow:
+    inset 0 1px 1px rgba(0,0,0,0.15),
+    0 1px 4px rgba(0,0,0,0.2);
+}
+.start-btn:disabled {
+  background: var(--start-grad-disabled);
+  color: rgba(255,255,255,0.4);
+  cursor: not-allowed;
+  border-color: rgba(255,255,255,0.10);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+  transform: none;
+}
+.start-btn svg { width: 11px; height: 11px; }
+
+.popover.translating .start-btn {
+  background: var(--stop-grad);
+  border-color: rgba(255, 110, 130, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    inset 0 -1px 0 rgba(0,0,0,0.2),
+    0 4px 14px rgba(220, 60, 90, 0.32);
+}
+.popover.translating .start-btn:hover {
+  background: var(--stop-grad-hover);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.25),
+    inset 0 -1px 0 rgba(0,0,0,0.2),
+    0 6px 18px rgba(220, 60, 90, 0.42);
+}
+
+.timer {
+  display: none;
+  text-align: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.08em;
+  margin-top: 10px;
+  position: relative; z-index: 1;
+  font-variant-numeric: tabular-nums;
+}
+.popover.translating .timer { display: block; }
+
+/* annotations */
+.annotations { padding-top: 8px; }
+.ann-title {
+  font-family: 'Fraunces', serif;
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: -0.015em;
+  margin-bottom: 4px;
+}
+.ann-subtitle {
+  color: var(--page-mute);
+  font-size: 13.5px;
+  margin-bottom: 22px;
+  max-width: 460px;
+  line-height: 1.55;
+}
+.ann-section { margin-bottom: 28px; }
+.ann-section h3 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--page-mute);
+  margin-bottom: 12px;
+  font-weight: 400;
+}
+.ann-section ul {
+  list-style: none;
+  display: flex; flex-direction: column;
+  gap: 9px;
+}
+.ann-section li {
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(245,245,247,0.85);
+  padding-left: 22px;
+  position: relative;
+}
+.ann-section li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 7px;
+  width: 12px; height: 1px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+.ann-section li strong { color: var(--page-fg); font-weight: 500; }
+.ann-section code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Popover · <em>Round 6 / dropdown polished</em></h1>
+<p>Размытый dropdown, поиск, прокрутка, валидация одинаковых языков.</p>
+<div class="nav">
+<a href="/popover-round-1/">R1</a>
+<a href="/popover-round-2/">R2</a>
+<a href="/popover-round-3/">R3</a>
+<a href="/popover-round-4/">R4</a>
+<a href="/popover-round-5/">R5</a>
+<a class="current" href="/popover-round-6/">R6</a>
+</div>
+</header>
+
+<main class="layout">
+
+<div class="demo-wrap">
+<div class="frame">
+<div class="menubar">
+<span class="app-name">Unison</span><span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span style="font-variant-numeric: tabular-nums">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover" id="popover">
+
+<div class="top-row">
+<span class="dot" id="dot"></span>
+<span class="brand-text">Unison</span>
+<span class="spacer"></span>
+<button class="gear-btn" id="gear-btn" aria-label="Настройки"><svg><use href="#icon-gear"/></svg></button>
+</div>
+
+<div class="mode-toggle" id="mode-toggle">
+<button class="mode-seg on" data-mode="call"><svg><use href="#icon-call"/></svg> Call</button>
+<button class="mode-seg" data-mode="listen"><svg><use href="#icon-listen"/></svg> Listen</button>
+</div>
+
+<div class="lang-bar">
+
+<div class="lang-side" id="lang-mine" data-side="mine">
+<div class="lang-lbl">Я говорю</div>
+<div class="lang-val">
+<span class="flag" id="flag-mine">🇷🇺</span>
+<span id="name-mine">Русский</span>
+<svg class="chev"><use href="#icon-chevron"/></svg>
+</div>
+<div class="lang-dropdown" id="dropdown-mine">
+<div class="search-row">
+<svg class="search-icon"><use href="#icon-search"/></svg>
+<input type="text" class="search-input" placeholder="Поиск" data-search="mine">
+</div>
+<div class="lang-list" id="list-mine"></div>
+</div>
+</div>
+
+<div class="arrow-wrap"><svg><use href="#arrow-a"/></svg></div>
+
+<div class="lang-side right" id="lang-peer" data-side="peer">
+<div class="lang-lbl">Собеседник</div>
+<div class="lang-val">
+<svg class="chev"><use href="#icon-chevron"/></svg>
+<span id="name-peer">English</span>
+<span class="flag" id="flag-peer">🇬🇧</span>
+</div>
+<div class="lang-dropdown" id="dropdown-peer">
+<div class="search-row">
+<svg class="search-icon"><use href="#icon-search"/></svg>
+<input type="text" class="search-input" placeholder="Поиск" data-search="peer">
+</div>
+<div class="lang-list" id="list-peer"></div>
+</div>
+</div>
+
+</div>
+
+<div class="warn-row" id="warn-row">
+<svg class="warn-icon"><use href="#icon-warning"/></svg>
+<span>Выбран одинаковый язык</span>
+</div>
+
+<button class="start-btn" id="start-btn">
+<svg id="start-icon"><use href="#icon-play"/></svg>
+<span id="start-label">Начать перевод</span>
+</button>
+
+<div class="timer" id="timer">00:00</div>
+
+</div>
+</div>
+</div>
+</div>
+
+<div class="annotations">
+<div class="ann-title">Round 6 · что доделано</div>
+<div class="ann-subtitle">База V2a без изменений, отполировали dropdown и добавили валидацию.</div>
+
+<div class="ann-section">
+<h3>Dropdown</h3>
+<ul>
+<li><strong>Размытие фона.</strong> <code>backdrop-filter: blur(36px) saturate(200%)</code> + затемнённый tint <code>rgba(20,20,30,0.62)</code>. Сквозь стекло читается, но текст контрастен.</li>
+<li><strong>Поиск.</strong> Input наверху с иконкой лупы. Фокусируется автоматически при открытии. Live-фильтр по подстроке в названии. Esc закрывает.</li>
+<li><strong>Прокрутка.</strong> <code>max-height: 200px</code> ≈ 6 строк + поиск. Кастомный скролл-бар 6px полупрозрачный.</li>
+<li><strong>Клавиатура.</strong> ↑/↓ — навигация по списку, Enter — выбрать, Esc — закрыть. Подсветка <code>keyboard-focused</code>.</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Валидация одинаковых языков</h3>
+<ul>
+<li><strong>Status-dot</strong> меняет цвет с зелёного <code>#58e09a</code> на жёлтый <code>#ffc060</code> когда <code>mine === peer</code>.</li>
+<li><strong>Warn-row</strong> появляется между lang-bar и Start: «<em>⚠ Выбран одинаковый язык</em>». Желтый акцент, fadeIn 0.2s.</li>
+<li><strong>Lang-bar</strong> получает тонкую жёлтую обводку чтобы подчеркнуть источник ошибки.</li>
+<li><strong>Start-button</strong> становится disabled — серый, <code>cursor: not-allowed</code>.</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Попробуй</h3>
+<ul>
+<li>Кликни «🇷🇺 Русский» — откроется dropdown с поиском</li>
+<li>Набери «en» / «esp» / «中» — фильтр работает</li>
+<li>Выбери English для «Я говорю» → языки совпадут с «Собеседник» — увидишь warn-row + дизейбл Start</li>
+<li>Поправь обратно — всё восстановится</li>
+</ul>
+</div>
+
+</div>
+
+</main>
+
+<script>
+const LANGS = [
+  { code: 'ru', flag: '🇷🇺', name: 'Русский' },
+  { code: 'en', flag: '🇬🇧', name: 'English' },
+  { code: 'es', flag: '🇪🇸', name: 'Español' },
+  { code: 'fr', flag: '🇫🇷', name: 'Français' },
+  { code: 'de', flag: '🇩🇪', name: 'Deutsch' },
+  { code: 'it', flag: '🇮🇹', name: 'Italiano' },
+  { code: 'pt', flag: '🇵🇹', name: 'Português' },
+  { code: 'zh', flag: '🇨🇳', name: '中文' },
+  { code: 'ja', flag: '🇯🇵', name: '日本語' },
+  { code: 'ko', flag: '🇰🇷', name: '한국어' },
+];
+
+const state = {
+  mine: 'ru',
+  peer: 'en',
+  mode: 'call',
+  translating: false,
+  timerStart: null,
+  timerInterval: null,
+  searchQuery: { mine: '', peer: '' },
+  keyboardFocus: { mine: -1, peer: -1 },
+};
+
+const popover = document.getElementById('popover');
+const startBtn = document.getElementById('start-btn');
+const startLabel = document.getElementById('start-label');
+const startIcon = document.getElementById('start-icon');
+const timer = document.getElementById('timer');
+
+// --- mode toggle
+document.querySelectorAll('#mode-toggle .mode-seg').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#mode-toggle .mode-seg').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    state.mode = btn.dataset.mode;
+  });
+});
+
+// --- validation
+function validate() {
+  const same = state.mine === state.peer;
+  popover.classList.toggle('warn', same);
+  startBtn.disabled = same || state.translating === 'invalid';
+}
+
+// --- dropdown render
+function filteredLangs(side) {
+  const q = state.searchQuery[side].trim().toLowerCase();
+  if (!q) return LANGS;
+  return LANGS.filter(l =>
+    l.name.toLowerCase().includes(q) ||
+    l.code.includes(q)
+  );
+}
+
+function renderList(side) {
+  const list = document.getElementById(`list-${side}`);
+  const langs = filteredLangs(side);
+  const currentCode = state[side];
+  if (langs.length === 0) {
+    list.innerHTML = '<div class="no-results">Ничего не найдено</div>';
+    return;
+  }
+  list.innerHTML = langs.map((l, i) => `
+    <div class="lang-option ${l.code === currentCode ? 'selected' : ''}
+                            ${i === state.keyboardFocus[side] ? 'keyboard-focused' : ''}"
+         data-code="${l.code}" data-index="${i}">
+      <span class="flag">${l.flag}</span>
+      <span>${l.name}</span>
+      <svg class="check"><use href="#icon-check"/></svg>
+    </div>
+  `).join('');
+  list.querySelectorAll('.lang-option').forEach(opt => {
+    opt.addEventListener('click', (e) => {
+      e.stopPropagation();
+      pickLanguage(side, opt.dataset.code);
+    });
+    opt.addEventListener('mouseenter', () => {
+      state.keyboardFocus[side] = parseInt(opt.dataset.index);
+      updateKeyboardFocus(side);
+    });
+  });
+}
+
+function updateKeyboardFocus(side) {
+  const list = document.getElementById(`list-${side}`);
+  list.querySelectorAll('.lang-option').forEach((opt, i) => {
+    opt.classList.toggle('keyboard-focused', i === state.keyboardFocus[side]);
+  });
+  // scroll into view
+  const focused = list.querySelector('.lang-option.keyboard-focused');
+  if (focused) focused.scrollIntoView({ block: 'nearest' });
+}
+
+function pickLanguage(side, code) {
+  const lang = LANGS.find(l => l.code === code);
+  state[side] = code;
+  document.getElementById(`flag-${side}`).textContent = lang.flag;
+  document.getElementById(`name-${side}`).textContent = lang.name;
+  closeDropdowns();
+  validate();
+}
+
+// --- dropdown open/close
+function openDropdown(side) {
+  closeDropdowns();
+  state.searchQuery[side] = '';
+  state.keyboardFocus[side] = LANGS.findIndex(l => l.code === state[side]);
+  const wrap = document.getElementById(`lang-${side}`);
+  wrap.classList.add('open');
+  renderList(side);
+  setTimeout(() => {
+    const input = wrap.querySelector('.search-input');
+    if (input) { input.value = ''; input.focus(); }
+  }, 50);
+}
+
+function closeDropdowns() {
+  document.querySelectorAll('.lang-side').forEach(el => el.classList.remove('open'));
+}
+
+document.getElementById('lang-mine').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const isOpen = e.currentTarget.classList.contains('open');
+  if (e.target.closest('.lang-dropdown')) return;
+  isOpen ? closeDropdowns() : openDropdown('mine');
+});
+document.getElementById('lang-peer').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const isOpen = e.currentTarget.classList.contains('open');
+  if (e.target.closest('.lang-dropdown')) return;
+  isOpen ? closeDropdowns() : openDropdown('peer');
+});
+
+document.addEventListener('click', closeDropdowns);
+
+// --- search input
+document.querySelectorAll('.search-input').forEach(input => {
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('input', (e) => {
+    const side = e.target.dataset.search;
+    state.searchQuery[side] = e.target.value;
+    const langs = filteredLangs(side);
+    state.keyboardFocus[side] = langs.length > 0 ? 0 : -1;
+    renderList(side);
+  });
+  input.addEventListener('keydown', (e) => {
+    const side = e.target.dataset.search;
+    const langs = filteredLangs(side);
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      state.keyboardFocus[side] = Math.min(langs.length - 1, state.keyboardFocus[side] + 1);
+      updateKeyboardFocus(side);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      state.keyboardFocus[side] = Math.max(0, state.keyboardFocus[side] - 1);
+      updateKeyboardFocus(side);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const idx = state.keyboardFocus[side];
+      if (idx >= 0 && langs[idx]) pickLanguage(side, langs[idx].code);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeDropdowns();
+    }
+  });
+});
+
+// --- start button
+function formatTime(seconds) {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = (seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function setTranslating(on) {
+  state.translating = on;
+  popover.classList.toggle('translating', on);
+  if (on) {
+    startLabel.textContent = 'Остановить';
+    startIcon.innerHTML = '<use href="#icon-stop"/>';
+    state.timerStart = Date.now();
+    state.timerInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - state.timerStart) / 1000);
+      timer.textContent = formatTime(elapsed);
+    }, 250);
+  } else {
+    startLabel.textContent = 'Начать перевод';
+    startIcon.innerHTML = '<use href="#icon-play"/>';
+    clearInterval(state.timerInterval);
+    timer.textContent = '00:00';
+  }
+}
+
+startBtn.addEventListener('click', () => {
+  if (startBtn.disabled) return;
+  setTranslating(!state.translating);
+});
+
+document.getElementById('gear-btn').addEventListener('click', () => {
+  console.log('Open settings');
+});
+
+// initial validate
+validate();
+</script>
+
+</body>
+</html>

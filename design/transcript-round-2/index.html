@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Transcript · R2 floating bubbles</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="liquidGlass" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="2" seed="9" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="3" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <symbol id="icon-close" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <line x1="4" y1="4" x2="12" y2="12"/>
+        <line x1="12" y1="4" x2="4" y2="12"/>
+      </g>
+    </symbol>
+    <symbol id="icon-drag" viewBox="0 0 16 16">
+      <g fill="currentColor">
+        <circle cx="6" cy="5" r="1"/>
+        <circle cx="10" cy="5" r="1"/>
+        <circle cx="6" cy="8" r="1"/>
+        <circle cx="10" cy="8" r="1"/>
+        <circle cx="6" cy="11" r="1"/>
+        <circle cx="10" cy="11" r="1"/>
+      </g>
+    </symbol>
+    <symbol id="icon-plus" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <line x1="8" y1="3" x2="8" y2="13"/>
+        <line x1="3" y1="8" x2="13" y2="8"/>
+      </g>
+    </symbol>
+    <symbol id="icon-play" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M4 2.5c0-.5.5-.8.95-.55l8.5 5.05c.45.27.45.93 0 1.2l-8.5 5.05c-.45.26-.95-.05-.95-.55v-10.2z"/>
+    </symbol>
+    <symbol id="icon-pause" viewBox="0 0 16 16">
+      <g fill="currentColor">
+        <rect x="4" y="3" width="3" height="10" rx="0.6"/>
+        <rect x="9" y="3" width="3" height="10" rx="0.6"/>
+      </g>
+    </symbol>
+    <symbol id="icon-trash" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="4" x2="13" y2="4"/>
+        <path d="M5 4 L5.5 13 a 1 1 0 0 0 1 1 H 9.5 a 1 1 0 0 0 1 -1 L 11 4"/>
+        <path d="M6 4 V 2.5 a 0.5 0.5 0 0 1 0.5 -0.5 H 9.5 a 0.5 0.5 0 0 1 0.5 0.5 V 4"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --me-color: #b6e0ff;
+  --peer-color: #ffd6c0;
+  --ready: #58e09a;
+  --active: #5ac8fa;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.03em; margin-bottom: 4px;
+}
+.page-header h1 .accent { color: var(--accent); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; }
+.page-header p code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11.5px;
+  background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;
+}
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.layout {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 56px 48px 64px;
+  display: grid;
+  grid-template-columns: minmax(540px, 660px) 1fr;
+  gap: 56px;
+  align-items: flex-start;
+}
+@media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+.demo-wrap { position: sticky; top: 160px; }
+
+.frame {
+  position: relative;
+  height: 620px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 32px 64px -16px rgba(0,0,0,0.7), 0 4px 16px rgba(0,0,0,0.5);
+}
+.menubar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex; align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px;
+  z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+.desktop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+
+/* Mock window inside desktop (Zoom-like) */
+.mock-window {
+  position: absolute;
+  top: 80px; left: 50px; right: 50px; bottom: 80px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #2a2a3a, #1a1a2a);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.3);
+  font-size: 14px;
+}
+.mock-window .video-area {
+  width: 60%; height: 60%;
+  background: linear-gradient(135deg, #3a3a4a, #2a2a3a);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 36px;
+  opacity: 0.4;
+}
+
+/* ════ Floating bubbles stack ════ */
+.bubbles-container {
+  position: absolute;
+  top: 38px; right: 18px;
+  width: 320px;
+  z-index: 5;
+  display: flex; flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+/* Control strip — draggable handle */
+.control-strip {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px;
+  background: rgba(20, 22, 32, 0.55);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  border-radius: 8px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  cursor: grab;
+  user-select: none;
+  align-self: flex-end;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+}
+.control-strip:active { cursor: grabbing; }
+.control-strip .dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--active);
+  box-shadow: 0 0 6px rgba(90, 200, 250, 0.7);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.control-strip .timer {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.5);
+}
+.control-strip .label { color: rgba(255,255,255,0.5); }
+.control-strip .spacer { flex: 1; }
+.control-strip .ctl-btn {
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.5);
+  border-radius: 4px;
+  cursor: pointer;
+  background: none; border: none;
+  transition: background 0.15s, color 0.15s;
+}
+.control-strip .ctl-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.control-strip .ctl-btn svg { width: 10px; height: 10px; }
+.control-strip .drag-grip { color: rgba(255,255,255,0.35); }
+.control-strip .drag-grip svg { width: 11px; height: 11px; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+/* Bubbles */
+.bubble {
+  max-width: 84%;
+  padding: 10px 13px;
+  border-radius: 14px;
+  font-size: 13px;
+  letter-spacing: -0.005em;
+  line-height: 1.4;
+  position: relative;
+  backdrop-filter: blur(18px) saturate(170%);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  box-shadow:
+    0 8px 22px rgba(0,0,0,0.32),
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    inset 0 -1px 0 rgba(0,0,0,0.2);
+  animation: bubbleIn 0.3s ease-out;
+  word-wrap: break-word;
+}
+.bubble .original {
+  font-weight: 500;
+  color: #fff;
+}
+.bubble .translated {
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.6);
+  font-style: italic;
+  margin-top: 4px;
+  padding-top: 5px;
+  border-top: 0.5px solid rgba(255,255,255,0.10);
+}
+.bubble.me {
+  align-self: flex-end;
+  background: linear-gradient(180deg, rgba(140, 200, 250, 0.32), rgba(80, 140, 210, 0.22));
+  border: 0.5px solid rgba(182, 224, 255, 0.28);
+}
+.bubble.peer {
+  align-self: flex-start;
+  background: linear-gradient(180deg, rgba(30, 32, 44, 0.62), rgba(20, 22, 32, 0.55));
+  border: 0.5px solid rgba(255,255,255,0.10);
+}
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.94); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.bubble.fade-out {
+  animation: bubbleOut 0.35s ease-in forwards;
+}
+@keyframes bubbleOut {
+  to { opacity: 0; transform: translateY(-8px) scale(0.94); height: 0; padding-top: 0; padding-bottom: 0; margin: 0; }
+}
+
+/* Empty hint when no bubbles */
+.empty-hint {
+  align-self: flex-end;
+  font-size: 11px;
+  color: rgba(255,255,255,0.4);
+  padding: 8px 12px;
+  letter-spacing: -0.005em;
+  font-style: italic;
+}
+
+/* annotations */
+.annotations { padding-top: 8px; }
+.ann-title {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+}
+.ann-subtitle {
+  color: var(--page-mute);
+  font-size: 13.5px;
+  margin-bottom: 22px;
+  max-width: 460px;
+  line-height: 1.55;
+}
+.ann-section { margin-bottom: 24px; }
+.ann-section h3 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--page-mute);
+  margin-bottom: 12px;
+  font-weight: 400;
+}
+.ann-section ul { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.ann-section li {
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(245,245,247,0.85);
+  padding-left: 22px;
+  position: relative;
+}
+.ann-section li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 7px;
+  width: 12px; height: 1px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+.ann-section li strong { color: var(--page-fg); font-weight: 500; }
+.ann-section code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Demo controls */
+.demo-controls {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 16px;
+  background: rgba(255,255,255,0.03);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  border-radius: 11px;
+  margin-bottom: 22px;
+}
+.demo-controls .row {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.btn-demo {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,0.08);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  color: #fff;
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.08s;
+}
+.btn-demo:hover { background: rgba(255,255,255,0.14); }
+.btn-demo:active { transform: scale(0.97); }
+.btn-demo svg { width: 11px; height: 11px; }
+.btn-demo.me { color: var(--me-color); }
+.btn-demo.peer { color: var(--peer-color); }
+.btn-demo.auto { color: var(--ready); }
+.btn-demo.auto.active { background: rgba(88, 224, 154, 0.18); border-color: rgba(88, 224, 154, 0.4); }
+.btn-demo.clear { color: rgba(255, 130, 130, 0.85); }
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Transcript · <span class="accent">R2 floating bubbles</span></h1>
+<p>Никакого контейнера — bubbles живут прямо поверх рабочего стола, каждый со своим стеклянным материалом. Маленький control-strip сверху для drag/close/timer. Полный интерактив.</p>
+<div class="nav">
+<a href="/popover-final/">Popover</a>
+<a href="/onboarding-final/">Onboarding</a>
+<a href="/transcript-round-1/">R1</a>
+<a class="current" href="/transcript-round-2/">R2</a>
+</div>
+</header>
+
+<main class="layout">
+
+<div class="demo-wrap">
+<div class="frame">
+<div class="menubar"><span class="app-name">Zoom</span><span>Meeting</span><span>View</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="mock-window">
+<div class="video-area">📹</div>
+</div>
+<div class="bubbles-container" id="bubbles-container">
+<div class="control-strip" id="control-strip">
+<span class="drag-grip"><svg><use href="#icon-drag"/></svg></span>
+<span class="dot"></span>
+<span class="label">Перевод</span>
+<span class="timer" id="timer">02:14</span>
+<span class="spacer"></span>
+<button class="ctl-btn" id="close-btn" title="Остановить"><svg><use href="#icon-close"/></svg></button>
+</div>
+<div id="bubbles-list"></div>
+</div>
+</div>
+</div>
+
+<div class="annotations">
+<div class="ann-title">R2 · что внутри</div>
+<div class="ann-subtitle">Bubbles теперь самостоятельные floating-элементы, каждый со своим backdrop-filter. Контейнер заменён на минимальный control-strip 24px.</div>
+
+<div class="ann-section">
+<h3>Демо-контролы</h3>
+<div class="demo-controls">
+<div class="row">
+<button class="btn-demo me" id="btn-add-me"><svg><use href="#icon-plus"/></svg> Моя фраза</button>
+<button class="btn-demo peer" id="btn-add-peer"><svg><use href="#icon-plus"/></svg> Фраза собеседника</button>
+</div>
+<div class="row">
+<button class="btn-demo auto" id="btn-auto"><svg><use href="#icon-play"/></svg> Авто-диалог</button>
+<button class="btn-demo clear" id="btn-clear"><svg><use href="#icon-trash"/></svg> Очистить</button>
+</div>
+</div>
+<p style="font-size:12px;color:rgba(255,255,255,0.5);margin-top:-10px;line-height:1.5">Авто-диалог запустит чередующиеся фразы каждые 2 сек. Старые bubbles автоматически уезжают после 8 turns.</p>
+</div>
+
+<div class="ann-section">
+<h3>Дизайн bubbles</h3>
+<ul>
+<li><strong>Без контейнера</strong> — каждый bubble имеет собственный <code>backdrop-filter: blur(18px) saturate(170%)</code> и shadow. Плавает прямо поверх рабочего стола</li>
+<li><strong>Me</strong> справа, голубой tint (<code>#b6e0ff</code>). <strong>Peer</strong> слева, нейтральный тёмный glass</li>
+<li><strong>В bubble</strong> — оригинал крупно + перевод курсивом через 0.5px hairline</li>
+<li><strong>Animation</strong> — slide-up 0.3s scale 0.94→1, opacity 0→1</li>
+<li><strong>Max 8 bubbles</strong> на экране, старые fade-out 0.35s после превышения</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Control-strip</h3>
+<ul>
+<li>Минимальный 24px высоты, ⋮⋮-drag handle слева + pulse-dot + timer + close-btn</li>
+<li>Стеклянная панель того же материала что и bubbles</li>
+<li>Перетаскивается на любую позицию (в Swift: <code>-webkit-app-region: drag</code> аналог = window-level drag handler)</li>
+<li>Close — останавливает сессию (в реальности зовёт <code>Orchestrator.stop()</code>)</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Попробуй</h3>
+<ul>
+<li>Жми «+ Моя фраза» — добавляется голубая bubble справа</li>
+<li>Жми «+ Фраза собеседника» — добавляется тёмная bubble слева</li>
+<li>«▶ Авто-диалог» — запускает имитацию реального разговора с интервалом 2 сек</li>
+<li>«⊗ Очистить» — убирает все bubbles</li>
+<li>При 8+ bubbles старые сами уезжают вверх</li>
+</ul>
+</div>
+
+</div>
+
+</main>
+
+<script>
+const MY_PHRASES = [
+  { o: 'Привет, как дела?', t: 'Hi, how are you?' },
+  { o: 'Давай встретимся завтра?', t: 'Let\'s meet tomorrow?' },
+  { o: 'Я готов начинать.', t: 'I\'m ready to start.' },
+  { o: 'Что насчёт пятницы?', t: 'What about Friday?' },
+  { o: 'Понял, спасибо.', t: 'Got it, thanks.' },
+  { o: 'Согласен.', t: 'Agreed.' },
+  { o: 'Давай в 10 утра.', t: 'Let\'s do 10 AM.' },
+  { o: 'Хорошо, до встречи.', t: 'Okay, see you then.' },
+  { o: 'Скинь ссылку на встречу.', t: 'Send me the meeting link.' },
+  { o: 'Я опоздаю на пять минут.', t: 'I\'ll be five minutes late.' },
+];
+
+const PEER_PHRASES = [
+  { o: 'I\'m good, thanks!', t: 'Хорошо, спасибо!' },
+  { o: 'Sounds good to me.', t: 'Звучит хорошо.' },
+  { o: 'Let me check my calendar.', t: 'Дай посмотрю календарь.' },
+  { o: 'Friday works for me.', t: 'Пятница подходит.' },
+  { o: 'See you then.', t: 'До встречи.' },
+  { o: 'What time exactly?', t: 'Во сколько именно?' },
+  { o: 'Perfect, sending it now.', t: 'Отлично, отправляю.' },
+  { o: 'Just got out of another call.', t: 'Только что закончил другой звонок.' },
+  { o: 'Take your time.', t: 'Не торопись.' },
+  { o: 'Talk soon.', t: 'Скоро спишемся.' },
+];
+
+const MAX_BUBBLES = 8;
+let myIndex = 0;
+let peerIndex = 0;
+let autoInterval = null;
+let autoLastSide = 'peer';
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
+const list = document.getElementById('bubbles-list');
+const btnAddMe = document.getElementById('btn-add-me');
+const btnAddPeer = document.getElementById('btn-add-peer');
+const btnAuto = document.getElementById('btn-auto');
+const btnClear = document.getElementById('btn-clear');
+const closeBtn = document.getElementById('close-btn');
+
+function addBubble(side, phrase) {
+  const bubble = document.createElement('div');
+  bubble.className = `bubble ${side}`;
+  bubble.innerHTML = `
+    <div class="original">${escapeHtml(phrase.o)}</div>
+    <div class="translated">${escapeHtml(phrase.t)}</div>
+  `;
+  list.appendChild(bubble);
+  prune();
+}
+
+function prune() {
+  const all = list.querySelectorAll('.bubble:not(.fade-out)');
+  if (all.length > MAX_BUBBLES) {
+    const toRemove = all.length - MAX_BUBBLES;
+    for (let i = 0; i < toRemove; i++) {
+      all[i].classList.add('fade-out');
+      setTimeout(() => all[i].remove(), 360);
+    }
+  }
+}
+
+function clearAll() {
+  list.querySelectorAll('.bubble').forEach(b => {
+    b.classList.add('fade-out');
+    setTimeout(() => b.remove(), 360);
+  });
+}
+
+btnAddMe.addEventListener('click', () => {
+  const phrase = MY_PHRASES[myIndex % MY_PHRASES.length];
+  myIndex++;
+  addBubble('me', phrase);
+});
+btnAddPeer.addEventListener('click', () => {
+  const phrase = PEER_PHRASES[peerIndex % PEER_PHRASES.length];
+  peerIndex++;
+  addBubble('peer', phrase);
+});
+btnClear.addEventListener('click', clearAll);
+
+btnAuto.addEventListener('click', () => {
+  if (autoInterval) {
+    clearInterval(autoInterval);
+    autoInterval = null;
+    btnAuto.classList.remove('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-play"/></svg> Авто-диалог';
+  } else {
+    btnAuto.classList.add('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-pause"/></svg> Стоп авто';
+    autoInterval = setInterval(() => {
+      if (autoLastSide === 'me') {
+        btnAddPeer.click();
+        autoLastSide = 'peer';
+      } else {
+        btnAddMe.click();
+        autoLastSide = 'me';
+      }
+    }, 2000);
+    // Trigger first immediately
+    if (autoLastSide === 'me') {
+      btnAddPeer.click();
+      autoLastSide = 'peer';
+    } else {
+      btnAddMe.click();
+      autoLastSide = 'me';
+    }
+  }
+});
+
+closeBtn.addEventListener('click', () => {
+  if (autoInterval) {
+    clearInterval(autoInterval);
+    autoInterval = null;
+    btnAuto.classList.remove('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-play"/></svg> Авто-диалог';
+  }
+  clearAll();
+  console.log('Stop session (placeholder)');
+});
+
+// Timer simulation
+let seconds = 134;
+setInterval(() => {
+  seconds++;
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = (seconds % 60).toString().padStart(2, '0');
+  document.getElementById('timer').textContent = `${m}:${s}`;
+}, 1000);
+
+// Drag the control strip (and the whole stack)
+const container = document.getElementById('bubbles-container');
+const strip = document.getElementById('control-strip');
+let dragging = false;
+let dragStart = { x: 0, y: 0, cx: 0, cy: 0 };
+
+strip.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.ctl-btn')) return;  // don't drag from buttons
+  dragging = true;
+  const rect = container.getBoundingClientRect();
+  dragStart = { x: e.clientX, y: e.clientY, cx: rect.left, cy: rect.top };
+  e.preventDefault();
+});
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const frame = container.closest('.frame');
+  const fRect = frame.getBoundingClientRect();
+  const dx = e.clientX - dragStart.x;
+  const dy = e.clientY - dragStart.y;
+  let newX = dragStart.cx + dx - fRect.left;
+  let newY = dragStart.cy + dy - fRect.top;
+  // constrain within frame
+  newX = Math.max(8, Math.min(newX, fRect.width - 320 - 8));
+  newY = Math.max(28, Math.min(newY, fRect.height - 60));
+  container.style.left = newX + 'px';
+  container.style.top = newY + 'px';
+  container.style.right = 'auto';
+});
+window.addEventListener('mouseup', () => { dragging = false; });
+
+// Initial demo bubbles
+setTimeout(() => addBubble('me', MY_PHRASES[myIndex++]), 200);
+setTimeout(() => addBubble('peer', PEER_PHRASES[peerIndex++]), 700);
+setTimeout(() => addBubble('me', MY_PHRASES[myIndex++]), 1200);
+</script>
+
+</body>
+</html>

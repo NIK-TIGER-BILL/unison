@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Onboarding · R4</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,200;9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="liquidGlass" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="2" seed="9" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="3" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+
+    <symbol id="icon-check" viewBox="0 0 16 16">
+      <polyline points="3,8 7,12 13,4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+
+    <symbol id="icon-audio" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2.5 6 L5.5 6 L9 3 L9 13 L5.5 10 L2.5 10 Z" fill="currentColor" stroke="none"/>
+        <path d="M11 6.5 a3 3 0 0 1 0 3"/>
+        <path d="M12.8 4.5 a5.5 5.5 0 0 1 0 7"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-mic" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="6" y="2" width="4" height="8" rx="2"/>
+        <path d="M3.5 7.5v1a4.5 4.5 0 0 0 9 0v-1"/>
+        <line x1="8" y1="13" x2="8" y2="14.5"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-key" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="4.5" cy="8" r="2.5"/>
+        <line x1="7" y1="8" x2="14" y2="8"/>
+        <line x1="11" y1="8" x2="11" y2="11"/>
+        <line x1="13" y1="8" x2="13" y2="11"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-close" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <line x1="4" y1="4" x2="12" y2="12"/>
+        <line x1="12" y1="4" x2="4" y2="12"/>
+      </g>
+    </symbol>
+
+    <!-- Minimal eye: 3 lines + dot -->
+    <symbol id="icon-eye" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <path d="M2 8 Q 8 3.5 14 8 Q 8 12.5 2 8"/>
+        <circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/>
+      </g>
+    </symbol>
+
+    <!-- Minimal eye-off: same with diagonal strike -->
+    <symbol id="icon-eye-off" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <path d="M2 8 Q 8 3.5 14 8 Q 8 12.5 2 8" opacity="0.45"/>
+        <circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none" opacity="0.45"/>
+        <line x1="3" y1="3" x2="13" y2="13"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-spinner" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <path d="M8 2 A6 6 0 0 1 14 8" opacity="0.95"/>
+        <path d="M14 8 A6 6 0 0 1 8 14" opacity="0.4"/>
+        <path d="M8 14 A6 6 0 0 1 2 8" opacity="0.15"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-alert" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <circle cx="8" cy="8" r="6.5"/>
+        <line x1="8" y1="5" x2="8" y2="9"/>
+        <circle cx="8" cy="11.4" r="0.5" fill="currentColor"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-external" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 3 H 13 V 7"/>
+        <line x1="7" y1="9" x2="13" y2="3"/>
+        <path d="M11 9 V 12 a 1 1 0 0 1 -1 1 H 4 a 1 1 0 0 1 -1 -1 V 6 a 1 1 0 0 1 1 -1 H 7"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --warn: #ffc060;
+  --ready: #58e09a;
+  --active: #5ac8fa;
+  --error: #ff7a8c;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300;
+  font-size: 30px;
+  letter-spacing: -0.03em;
+  margin-bottom: 4px;
+  line-height: 1.1;
+}
+.page-header h1 .accent { color: var(--accent); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; }
+.page-header p code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11.5px;
+  background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;
+}
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.layout {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 56px 48px 64px;
+  display: grid;
+  grid-template-columns: minmax(480px, 580px) 1fr;
+  gap: 56px;
+  align-items: flex-start;
+}
+@media (max-width: 1100px) { .layout { grid-template-columns: 1fr; } }
+
+.demo-wrap { position: sticky; top: 160px; }
+
+.frame {
+  position: relative;
+  height: 620px;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 32px 64px -16px rgba(0,0,0,0.7), 0 4px 16px rgba(0,0,0,0.5);
+}
+.menubar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex; align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px;
+  z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+.desktop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+.window-wrap {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+}
+
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+button:focus-visible { outline: 1.5px solid rgba(255, 200, 230, 0.6); outline-offset: 1px; }
+
+.btn-primary {
+  background: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08));
+  border: 0.5px solid rgba(255,255,255,0.22);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 9px;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 4px 10px rgba(0,0,0,0.25);
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+  transition: background 0.16s, transform 0.08s, opacity 0.16s, box-shadow 0.16s;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  flex-shrink: 0;
+}
+.btn-primary:hover { background: linear-gradient(180deg, rgba(255,255,255,0.30), rgba(255,255,255,0.12)); }
+.btn-primary:active:not(:disabled) { transform: scale(0.97); }
+.btn-primary:disabled {
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  color: rgba(255,255,255,0.4);
+  cursor: not-allowed;
+  border-color: rgba(255,255,255,0.10);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.btn-primary svg { width: 11px; height: 11px; }
+
+.btn-ghost {
+  color: rgba(255,255,255,0.7);
+  font-size: 12.5px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-ghost:hover { background: rgba(255,255,255,0.08); color: #fff; }
+
+/* Onboarding window */
+.onboarding {
+  width: 480px;
+  padding: 24px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  backdrop-filter: blur(24px) saturate(160%) url(#liquidGlass);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border-radius: 22px;
+  color: #f5f5f7;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 32px 80px -8px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -1px 0 rgba(0,0,0,0.4),
+    inset 1px 0 0 rgba(255,255,255,0.06),
+    inset -1px 0 0 rgba(255,255,255,0.06);
+}
+.onboarding::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 60%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.16) 0%, transparent 35%),
+    radial-gradient(ellipse 100% 60% at 30% 0%, rgba(255,255,255,0.22), transparent 70%);
+  border-radius: 22px 22px 50% 50% / 22px 22px 30% 30%;
+  pointer-events: none; mix-blend-mode: screen;
+}
+.onboarding::after {
+  content: "";
+  position: absolute; inset: 0;
+  border-radius: 22px;
+  padding: 1px;
+  background: conic-gradient(from 135deg at 50% 50%,
+    rgba(255,255,255,0.4), rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.4) 50%, rgba(255,255,255,0.05) 75%, rgba(255,255,255,0.4));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; opacity: 0.55;
+}
+
+.head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 20px;
+  position: relative; z-index: 1;
+}
+.title-block { display: flex; flex-direction: column; gap: 4px; }
+.title {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300;
+  font-size: 26px;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  color: #f5f5f7;
+}
+.subtitle {
+  font-size: 13px;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: -0.005em;
+  margin-top: 2px;
+}
+
+.close-btn {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.5);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.close-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.close-btn svg { width: 12px; height: 12px; }
+
+.cards {
+  display: flex; flex-direction: column; gap: 10px;
+  position: relative; z-index: 1;
+}
+
+.step-card {
+  background: rgba(0,0,0,0.18);
+  border: 0.5px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+  padding: 16px 18px;
+  transition: background 0.2s, border-color 0.2s;
+}
+.step-card.done {
+  background: rgba(88, 224, 154, 0.04);
+  border-color: rgba(88, 224, 154, 0.18);
+}
+.step-card.error {
+  background: rgba(255, 122, 140, 0.05);
+  border-color: rgba(255, 122, 140, 0.28);
+}
+
+.card-head {
+  display: flex; align-items: center; gap: 12px;
+}
+.card-icon {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.7);
+  background: rgba(255,255,255,0.06);
+  border-radius: 10px;
+  border: 0.5px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+.card-icon svg { width: 18px; height: 18px; }
+.step-card.done .card-icon {
+  color: var(--ready);
+  background: rgba(88, 224, 154, 0.14);
+  border-color: rgba(88, 224, 154, 0.35);
+}
+.step-card.error .card-icon {
+  color: var(--error);
+  background: rgba(255, 122, 140, 0.12);
+  border-color: rgba(255, 122, 140, 0.32);
+}
+
+.card-title {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14.5px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  flex: 1; min-width: 0;
+}
+.card-status-icon {
+  width: 22px; height: 22px;
+  display: none;
+  align-items: center; justify-content: center;
+  color: var(--ready);
+  flex-shrink: 0;
+}
+.card-status-icon svg { width: 16px; height: 16px; }
+.step-card.done .card-status-icon { display: inline-flex; }
+
+.card-action {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 0.5px dashed rgba(255,255,255,0.08);
+}
+.step-card.done .card-action { display: none; }
+
+.card-action .hint {
+  font-size: 12.5px;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: -0.005em;
+  flex: 1; min-width: 0;
+  line-height: 1.4;
+}
+
+/* Error row inside card */
+.error-row {
+  display: none;
+  align-items: flex-start; gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 122, 140, 0.08);
+  border: 0.5px solid rgba(255, 122, 140, 0.22);
+  border-radius: 9px;
+  position: relative; z-index: 1;
+  animation: errFade 0.22s ease-out;
+}
+.step-card.error .error-row { display: flex; }
+.step-card.error .card-action {
+  border-top-color: rgba(255, 122, 140, 0.18);
+}
+.error-row .err-icon {
+  width: 13px; height: 13px;
+  color: var(--error);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.error-row .err-text {
+  flex: 1; min-width: 0;
+  font-size: 12px;
+  color: rgba(255, 200, 210, 0.95);
+  letter-spacing: -0.005em;
+  line-height: 1.45;
+}
+.error-row .err-text strong { color: #fff; font-weight: 500; display: block; margin-bottom: 1px; }
+.error-row .err-action {
+  flex-shrink: 0;
+  padding: 4px 9px;
+  font-size: 11.5px;
+  color: var(--error);
+  border-radius: 6px;
+  background: rgba(255, 122, 140, 0.08);
+  border: 0.5px solid rgba(255, 122, 140, 0.2);
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+  transition: background 0.15s;
+}
+.error-row .err-action:hover { background: rgba(255, 122, 140, 0.16); color: #fff; }
+.error-row .err-action svg { width: 10px; height: 10px; }
+@keyframes errFade {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* API key input */
+.key-input-row {
+  display: flex; align-items: stretch; gap: 8px;
+  width: 100%;
+}
+.key-input-wrap {
+  display: flex; align-items: center; gap: 6px;
+  flex: 1; min-width: 0;
+  background: rgba(0,0,0,0.22);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 0 10px;
+  transition: border-color 0.15s;
+}
+.key-input-wrap:focus-within { border-color: rgba(255, 182, 224, 0.4); }
+.step-card.error .key-input-wrap { border-color: rgba(255, 122, 140, 0.4); }
+.key-input {
+  flex: 1; min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font: inherit;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  padding: 8px 0;
+}
+.key-input::placeholder { color: rgba(255,255,255,0.35); }
+
+.toggle-text {
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  padding: 4px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  letter-spacing: -0.005em;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+  font-weight: 500;
+}
+.toggle-text:hover { color: rgba(255,255,255,0.95); background: rgba(255,255,255,0.06); }
+
+.api-link-row {
+  display: flex; align-items: center; justify-content: flex-start;
+  margin-top: 8px;
+  font-size: 11.5px;
+  letter-spacing: -0.005em;
+  /* sit under the input, not under the save button */
+  padding-right: 96px;
+}
+.api-link {
+  color: rgba(255,255,255,0.5);
+  text-decoration: none;
+  cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border-radius: 5px;
+  transition: color 0.15s, background 0.15s;
+}
+.api-link:hover { color: rgba(255,255,255,0.95); background: rgba(255,255,255,0.06); }
+.api-link svg { width: 10px; height: 10px; opacity: 0.7; }
+
+.spinning { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.footer {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 22px;
+  position: relative; z-index: 1;
+}
+.footer .progress-text {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 0.06em;
+}
+
+/* annotations */
+.annotations { padding-top: 8px; }
+.ann-title {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+}
+.ann-subtitle {
+  color: var(--page-mute);
+  font-size: 13.5px;
+  margin-bottom: 22px;
+  max-width: 460px;
+  line-height: 1.55;
+}
+.ann-section { margin-bottom: 26px; }
+.ann-section h3 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--page-mute);
+  margin-bottom: 12px;
+  font-weight: 400;
+}
+.ann-section ul { list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.ann-section li {
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(245,245,247,0.85);
+  padding-left: 22px;
+  position: relative;
+}
+.ann-section li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 7px;
+  width: 12px; height: 1px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+.ann-section li strong { color: var(--page-fg); font-weight: 500; }
+.ann-section code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Demo error triggers */
+.demo-triggers {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  padding: 14px 0;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 22px;
+}
+.trigger-btn {
+  font-size: 11.5px;
+  color: rgba(255, 200, 210, 0.85);
+  background: rgba(255, 122, 140, 0.08);
+  border: 0.5px solid rgba(255, 122, 140, 0.25);
+  padding: 6px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  letter-spacing: -0.005em;
+  transition: background 0.15s;
+}
+.trigger-btn:hover { background: rgba(255, 122, 140, 0.16); color: #fff; }
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Onboarding · <span class="accent">R4</span></h1>
+<p>Текстовый toggle вместо иконки глаза, короткие подсказки, ссылка на OpenAI.</p>
+<div class="nav">
+<a href="/popover-final/">Popover FINAL</a>
+<a href="/onboarding-round-1/">Onboarding R1</a>
+<a href="/onboarding-round-2/">R2</a>
+<a href="/onboarding-round-3/">R3</a>
+<a class="current" href="/onboarding-round-4/">R4</a>
+</div>
+</header>
+
+<main class="layout">
+
+<div class="demo-wrap">
+<div class="frame">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="window-wrap">
+<div class="onboarding" id="onboarding">
+<div class="head">
+<div class="title-block">
+<div class="title">Установка</div>
+</div>
+<a class="close-btn" id="close-btn"><svg><use href="#icon-close"/></svg></a>
+</div>
+
+<div class="cards">
+
+<!-- Card 1: BlackHole -->
+<div class="step-card" id="card-audio" data-step="audio">
+<div class="card-head">
+<div class="card-icon"><svg><use href="#icon-audio"/></svg></div>
+<div class="card-title">Аудиодрайвер</div>
+<div class="card-status-icon"><svg><use href="#icon-check"/></svg></div>
+</div>
+<div class="card-action">
+<div class="hint">Нужен пароль системы.</div>
+<button class="btn-primary" id="btn-audio">Установить</button>
+</div>
+<div class="error-row" id="err-audio">
+<svg class="err-icon"><use href="#icon-alert"/></svg>
+<div class="err-text"><strong>Не удалось установить</strong>Скорее всего не введён пароль администратора.</div>
+<button class="err-action" id="err-action-audio">Повторить</button>
+</div>
+</div>
+
+<!-- Card 2: Mic -->
+<div class="step-card" id="card-mic" data-step="mic">
+<div class="card-head">
+<div class="card-icon"><svg><use href="#icon-mic"/></svg></div>
+<div class="card-title">Доступ к микрофону</div>
+<div class="card-status-icon"><svg><use href="#icon-check"/></svg></div>
+</div>
+<div class="card-action">
+<div class="hint">macOS попросит подтверждение.</div>
+<button class="btn-primary" id="btn-mic">Разрешить</button>
+</div>
+<div class="error-row" id="err-mic">
+<svg class="err-icon"><use href="#icon-alert"/></svg>
+<div class="err-text"><strong>Доступ запрещён</strong>Включите микрофон для Unison в Настройках системы.</div>
+<button class="err-action" id="err-action-mic">Открыть Настройки <svg><use href="#icon-external"/></svg></button>
+</div>
+</div>
+
+<!-- Card 3: API key -->
+<div class="step-card" id="card-key" data-step="key">
+<div class="card-head">
+<div class="card-icon"><svg><use href="#icon-key"/></svg></div>
+<div class="card-title">Ключ OpenAI</div>
+<div class="card-status-icon"><svg><use href="#icon-check"/></svg></div>
+</div>
+<div class="card-action">
+<div style="width:100%; display:flex; flex-direction:column;">
+<div class="key-input-row">
+<div class="key-input-wrap">
+<input type="password" class="key-input" id="key-input" placeholder="sk-proj-...">
+<button class="toggle-text" id="eye-btn">Показать</button>
+</div>
+<button class="btn-primary" id="btn-key" disabled>Сохранить</button>
+</div>
+<div class="api-link-row">
+<a class="api-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">
+Получить ключ <svg><use href="#icon-external"/></svg>
+</a>
+</div>
+</div>
+</div>
+<div class="error-row" id="err-key">
+<svg class="err-icon"><use href="#icon-alert"/></svg>
+<div class="err-text"><strong>Неверный ключ</strong>Ключ должен начинаться с <code style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:rgba(255,255,255,0.06);padding:0 3px;border-radius:3px">sk-</code> и быть длиннее 20 символов.</div>
+</div>
+</div>
+
+</div>
+
+<div class="footer">
+<span class="progress-text" id="progress-text">0 / 3 готово</span>
+<button class="btn-primary" id="btn-done" disabled>Готово</button>
+</div>
+
+</div>
+</div>
+</div>
+</div>
+
+<div class="annotations">
+<div class="ann-title">R4 · что изменилось</div>
+<div class="ann-subtitle">Иконка глаза заменена на текстовый toggle, подсказки укорочены, под полем ключа — ссылка на платформу OpenAI.</div>
+
+<div class="ann-section">
+<h3>Toggle видимости ключа</h3>
+<ul>
+<li>Вместо иконки — <strong>«Показать» / «Скрыть»</strong> в виде маленькой ghost-кнопки внутри input (11px, мутед)</li>
+<li>Hover осветляет, состояния явные и без двусмысленности</li>
+<li>Accessibility-friendly — screen-reader'ы озвучивают action понятно</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Сокращённые подсказки</h3>
+<ul>
+<li><strong>BlackHole</strong>: «Нужен пароль системы.» — было длинно про 2ch/16ch</li>
+<li><strong>Микрофон</strong>: «macOS попросит подтверждение.» — убрано «в системном диалоге»</li>
+<li>Заголовок без подзаголовка «Три шага и можно переводить.» — лишнее</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Ссылка на OpenAI</h3>
+<ul>
+<li>Под input полем ключа — мини-строка «Получить ключ ↗»</li>
+<li>Расположена слева, под input — не под кнопкой Сохранить (<code>padding-right: 96px</code> резервирует место для кнопки)</li>
+<li>Ведёт на <code>platform.openai.com/api-keys</code></li>
+<li>Нейтральный цвет <code>rgba(255,255,255,0.5)</code> — как обычные hint-подписи. Hover осветляет до белого</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Error-state · паттерн</h3>
+<ul>
+<li><strong>Карточка</strong> получает coral-обводку и лёгкий розовый wash фона</li>
+<li><strong>Иконка слева</strong> становится coral fill + coral border</li>
+<li><strong>Error-row</strong> появляется под действием (или вместо): coral-фон, иконка ⓘ, текст в две строки (заголовок + детали), и контекстная кнопка действия</li>
+<li><strong>Кнопки восстановления</strong>: «Повторить» (audio), «Открыть Настройки» с external-иконкой (mic), inline-валидация (key)</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Триггеры для демо</h3>
+<p style="font-size:12.5px;color:rgba(255,255,255,0.65);margin-bottom:8px;line-height:1.5">Используй эти кнопки чтобы посмотреть как выглядит каждая ошибка. «Повторить» в самой ошибке восстанавливает нормальный flow.</p>
+<div class="demo-triggers">
+<button class="trigger-btn" data-err="audio">Симулировать ошибку BlackHole</button>
+<button class="trigger-btn" data-err="mic">Симулировать отказ микрофона</button>
+<button class="trigger-btn" data-err="key">Сохранить неверный ключ (напр. <code>abc</code>)</button>
+</div>
+</div>
+
+<div class="ann-section">
+<h3>Error-states (без изменений из R3)</h3>
+<ul>
+<li>Coral-обводка карточки + coral-иконка + error-row с детальным сообщением и контекстной кнопкой</li>
+<li><strong>Audio</strong>: «Повторить» (запускает install заново)</li>
+<li><strong>Mic</strong>: «Открыть Настройки ↗» (deep-link на System Settings)</li>
+<li><strong>Key</strong>: inline-валидация — нужно <code>sk-</code> + 20+ символов</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Попробуй</h3>
+<ul>
+<li>Введи в поле ключа <code>abc</code> → нажми «Сохранить» — validation error</li>
+<li>Введи <code>sk-proj-...</code> подлиннее → save → done</li>
+<li>Кликни «Показать» — пароль становится виден, label меняется на «Скрыть»</li>
+<li>Кликни «Получить ключ ↗» — откроется platform.openai.com</li>
+<li>Кнопки симуляции ошибок ниже</li>
+</ul>
+</div>
+
+</div>
+
+</main>
+
+<script>
+const state = {
+  audio: false,
+  mic: false,
+  key: false,
+  errors: { audio: false, mic: false, key: false },
+  keyValue: '',
+};
+
+const cards = {
+  audio: document.getElementById('card-audio'),
+  mic: document.getElementById('card-mic'),
+  key: document.getElementById('card-key'),
+};
+
+const progressText = document.getElementById('progress-text');
+const btnDone = document.getElementById('btn-done');
+
+function update() {
+  const total = 3;
+  const doneCount = ['audio', 'mic', 'key'].filter(k => state[k]).length;
+  progressText.textContent = `${doneCount} / ${total} готово`;
+  btnDone.disabled = doneCount !== total;
+  ['audio', 'mic', 'key'].forEach(k => {
+    cards[k].classList.toggle('done', state[k]);
+    cards[k].classList.toggle('error', state.errors[k]);
+  });
+}
+
+// --- Audio install
+const btnAudio = document.getElementById('btn-audio');
+btnAudio.addEventListener('click', () => {
+  if (state.audio) return;
+  state.errors.audio = false;
+  btnAudio.disabled = true;
+  btnAudio.innerHTML = '<svg class="spinning"><use href="#icon-spinner"/></svg> Установка...';
+  setTimeout(() => {
+    state.audio = true;
+    btnAudio.innerHTML = 'Установить';
+    btnAudio.disabled = false;
+    update();
+  }, 1800);
+});
+document.getElementById('err-action-audio').addEventListener('click', () => {
+  state.errors.audio = false;
+  btnAudio.innerHTML = 'Установить';
+  btnAudio.disabled = false;
+  update();
+  btnAudio.click();
+});
+
+// --- Mic permission
+const btnMic = document.getElementById('btn-mic');
+btnMic.addEventListener('click', () => {
+  if (state.mic) return;
+  state.errors.mic = false;
+  btnMic.disabled = true;
+  btnMic.innerHTML = '<svg class="spinning"><use href="#icon-spinner"/></svg>';
+  setTimeout(() => {
+    state.mic = true;
+    btnMic.innerHTML = 'Разрешить';
+    btnMic.disabled = false;
+    update();
+  }, 600);
+});
+document.getElementById('err-action-mic').addEventListener('click', () => {
+  // Placeholder: open system settings deep link
+  console.log('Open System Settings');
+});
+
+// --- API key input
+const keyInput = document.getElementById('key-input');
+const btnKey = document.getElementById('btn-key');
+const eyeBtn = document.getElementById('eye-btn');
+
+function validateKey(v) {
+  return v.startsWith('sk-') && v.length >= 20;
+}
+
+keyInput.addEventListener('input', () => {
+  state.keyValue = keyInput.value;
+  btnKey.disabled = state.keyValue.trim().length === 0;
+  // Clear error while editing
+  if (state.errors.key) {
+    state.errors.key = false;
+    update();
+  }
+});
+
+btnKey.addEventListener('click', () => {
+  if (btnKey.disabled || state.key) return;
+  if (validateKey(state.keyValue)) {
+    state.errors.key = false;
+    state.key = true;
+  } else {
+    state.errors.key = true;
+  }
+  update();
+});
+
+let visible = false;
+eyeBtn.addEventListener('click', () => {
+  visible = !visible;
+  keyInput.type = visible ? 'text' : 'password';
+  eyeBtn.textContent = visible ? 'Скрыть' : 'Показать';
+});
+
+// Done
+btnDone.addEventListener('click', () => {
+  if (btnDone.disabled) return;
+  const window = document.getElementById('onboarding');
+  window.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+  window.style.opacity = '0';
+  window.style.transform = 'scale(0.96) translateY(8px)';
+  setTimeout(() => {
+    window.style.transition = '';
+    window.style.opacity = '';
+    window.style.transform = '';
+    state.audio = state.mic = state.key = false;
+    state.errors = { audio: false, mic: false, key: false };
+    state.keyValue = '';
+    keyInput.value = '';
+    btnKey.disabled = true;
+    update();
+  }, 1200);
+});
+
+document.getElementById('close-btn').addEventListener('click', () => {
+  console.log('Close (placeholder)');
+});
+
+// Demo error triggers
+document.querySelectorAll('.trigger-btn[data-err]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const step = btn.dataset.err;
+    if (state[step]) return;  // already done
+    if (step === 'key') {
+      // Trigger key validation error
+      keyInput.value = 'abc';
+      state.keyValue = 'abc';
+      btnKey.disabled = false;
+      state.errors.key = true;
+    } else {
+      state.errors[step] = true;
+    }
+    update();
+  });
+});
+
+update();
+</script>
+
+</body>
+</html>

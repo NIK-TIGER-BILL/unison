@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Popover · Round 8 · search variations</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="liquidGlass" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="2" seed="9" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="3" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+
+    <symbol id="icon-gear" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <line x1="2.5" y1="4.5" x2="6" y2="4.5"/>
+        <circle cx="8.5" cy="4.5" r="1.6" fill="currentColor" stroke="none"/>
+        <line x1="11" y1="4.5" x2="13.5" y2="4.5"/>
+        <line x1="2.5" y1="11.5" x2="9.5" y2="11.5"/>
+        <circle cx="12" cy="11.5" r="1.6" fill="currentColor" stroke="none"/>
+      </g>
+    </symbol>
+    <symbol id="icon-play" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M4 2.5c0-.5.5-.8.95-.55l8.5 5.05c.45.27.45.93 0 1.2l-8.5 5.05c-.45.26-.95-.05-.95-.55v-10.2z"/>
+    </symbol>
+    <symbol id="icon-call" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.6 17.6 0 0 0 4.168 6.608 17.6 17.6 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z"/>
+    </symbol>
+    <symbol id="icon-listen" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M2.5 11v-3a5.5 5.5 0 0 1 11 0v3"/>
+      </g>
+      <rect x="1.7" y="10.4" width="2.8" height="4" rx="1" fill="currentColor"/>
+      <rect x="11.5" y="10.4" width="2.8" height="4" rx="1" fill="currentColor"/>
+    </symbol>
+    <symbol id="arrow-a" viewBox="0 0 40 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="6" y1="8" x2="34" y2="8"/>
+        <polyline points="10,4 6,8 10,12"/>
+        <polyline points="30,4 34,8 30,12"/>
+      </g>
+    </symbol>
+    <symbol id="icon-chevron" viewBox="0 0 16 16">
+      <polyline points="4,6 8,10 12,6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="icon-check" viewBox="0 0 16 16">
+      <polyline points="3,8 7,12 13,4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="icon-search" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <circle cx="7" cy="7" r="4"/>
+        <line x1="10" y1="10" x2="13" y2="13"/>
+      </g>
+    </symbol>
+    <symbol id="icon-back" viewBox="0 0 16 16">
+      <polyline points="10,4 6,8 10,12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+  </defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --warn: #ffc060;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'Fraunces', serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.025em; margin-bottom: 4px;
+}
+.page-header h1 em { font-style: italic; color: var(--accent); font-weight: 300; }
+.page-header p {
+  color: var(--page-mute);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.page-header p code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+  gap: 48px;
+  padding: 48px 48px 64px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.card { display: flex; flex-direction: column; gap: 14px; }
+.card-label {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 2px;
+}
+.card-label .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; color: var(--page-mute);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.card-desc { font-size: 12.5px; color: var(--page-mute); line-height: 1.55; max-width: 380px; }
+.card-desc strong { color: var(--page-fg); font-weight: 500; }
+.card-desc code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 4px; border-radius: 3px;
+}
+
+.frame {
+  position: relative;
+  height: 500px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 24px 64px -16px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4);
+}
+.menubar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex; align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, 'SF Pro Text', sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px;
+  z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+.desktop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+.popover-wrap {
+  position: absolute;
+  top: 26%; left: 50%;
+  transform: translate(-50%, 0);
+  z-index: 5;
+}
+
+.popover {
+  width: 308px;
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  backdrop-filter: blur(20px) saturate(160%) url(#liquidGlass);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border-radius: 22px;
+  color: #f5f5f7;
+  position: relative;
+  overflow: visible;
+  box-shadow:
+    0 28px 64px -8px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -1px 0 rgba(0,0,0,0.4),
+    inset 1px 0 0 rgba(255,255,255,0.06),
+    inset -1px 0 0 rgba(255,255,255,0.06);
+}
+.popover::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 60%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.16) 0%, transparent 35%),
+    radial-gradient(ellipse 100% 60% at 30% 0%, rgba(255,255,255,0.22), transparent 70%);
+  border-radius: 22px 22px 50% 50% / 22px 22px 30% 30%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.popover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 22px;
+  padding: 1px;
+  background: conic-gradient(from 135deg at 50% 50%,
+    rgba(255,255,255,0.4), rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.4) 50%, rgba(255,255,255,0.05) 75%, rgba(255,255,255,0.4));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.top-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+}
+.dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #58e09a;
+  box-shadow: 0 0 8px rgba(88, 224, 154, 0.65);
+}
+.brand-text { font-size: 13px; font-weight: 600; letter-spacing: -0.02em; }
+.top-row .spacer { flex: 1; }
+.gear-btn {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.55);
+  border-radius: 7px;
+}
+.gear-btn svg { width: 14px; height: 14px; }
+
+.mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 2px; background: rgba(0,0,0,0.22);
+  padding: 3px; border-radius: 10px;
+  margin-bottom: 10px;
+  position: relative; z-index: 1;
+}
+.mode-seg {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 7px 0; font-size: 12px;
+  color: rgba(255,255,255,0.55);
+  border-radius: 8px; font-weight: 500;
+}
+.mode-seg.on {
+  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06));
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25);
+}
+.mode-seg svg { width: 12px; height: 12px; }
+
+.lang-bar {
+  background: rgba(0,0,0,0.16);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  position: relative; z-index: 1;
+  display: flex; align-items: flex-end;
+}
+.lang-side {
+  flex: 1; min-width: 0;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  border-radius: 8px;
+  position: relative;
+}
+.lang-side.right { text-align: right; }
+.lang-side.open { background: rgba(255,255,255,0.06); }
+.lang-lbl {
+  font-size: 9.5px;
+  color: rgba(255,255,255,0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.lang-val {
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  display: flex; align-items: center; gap: 6px;
+}
+.lang-side.right .lang-val { justify-content: flex-end; }
+.lang-val .flag { font-size: 13px; }
+.lang-val .chev {
+  width: 9px; height: 9px;
+  color: rgba(255,255,255,0.4);
+}
+.lang-side.open .chev { transform: rotate(180deg); color: var(--accent); }
+.arrow-wrap {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 8px 2px;
+  color: rgba(255,255,255,0.55);
+  flex-shrink: 0;
+}
+.arrow-wrap svg { width: 32px; height: 12px; }
+
+.start-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%;
+  background: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08));
+  border: 0.5px solid rgba(255,255,255,0.22);
+  color: #fff;
+  padding: 12px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 13.5px;
+  letter-spacing: -0.005em;
+  position: relative; z-index: 1;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    0 4px 12px rgba(0,0,0,0.28);
+}
+.start-btn svg { width: 11px; height: 11px; }
+
+/* dropdown — shared base */
+.lang-dropdown {
+  position: absolute;
+  top: 250px;
+  left: 14px;
+  width: 195px;
+  background: rgba(20, 20, 30, 0.62);
+  backdrop-filter: blur(36px) saturate(200%);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border-radius: 13px;
+  padding: 5px;
+  z-index: 100;
+  box-shadow:
+    0 18px 44px rgba(0,0,0,0.6),
+    inset 0 1px 0 rgba(255,255,255,0.12);
+  border: 0.5px solid rgba(255,255,255,0.12);
+}
+
+.lang-list {
+  max-height: 184px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.18) transparent;
+}
+.lang-list::-webkit-scrollbar { width: 6px; }
+.lang-list::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.18);
+  border-radius: 3px;
+}
+.lang-option {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: rgba(255,255,255,0.85);
+}
+.lang-option.selected { color: var(--accent); }
+.lang-option .flag { font-size: 14px; }
+.lang-option .check {
+  width: 11px; height: 11px;
+  margin-left: auto;
+  color: var(--accent);
+  opacity: 0;
+}
+.lang-option.selected .check { opacity: 1; }
+
+/* ═════ Search variations ═════ */
+
+/* S1 — Ghost underline */
+.s1 .search-row {
+  display: flex; align-items: center; gap: 7px;
+  padding: 8px 10px 7px;
+  border-bottom: 0.5px solid rgba(255,255,255,0.12);
+  margin: 0 2px 6px;
+}
+.s1 .search-row .search-icon {
+  width: 11px; height: 11px;
+  color: rgba(255,255,255,0.35);
+}
+.s1 .search-input {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: rgba(255,255,255,0.95);
+  font: inherit; font-size: 12.5px;
+  letter-spacing: -0.005em;
+}
+.s1 .search-input::placeholder { color: rgba(255,255,255,0.35); }
+
+/* S2 — Light glass match */
+.s2 .search-row {
+  display: flex; align-items: center; gap: 7px;
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  padding: 7px 11px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.06),
+    inset 0 -1px 0 rgba(0,0,0,0.15);
+}
+.s2 .search-row .search-icon {
+  width: 11px; height: 11px;
+  color: rgba(255,255,255,0.4);
+}
+.s2 .search-input {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: rgba(255,255,255,0.95); font: inherit; font-size: 12.5px;
+}
+.s2 .search-input::placeholder { color: rgba(255,255,255,0.4); }
+
+/* S3 — Pill */
+.s3 .search-row {
+  display: flex; align-items: center; gap: 7px;
+  background: rgba(255,255,255,0.05);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  padding: 5px 12px;
+  border-radius: 99px;
+  margin-bottom: 5px;
+}
+.s3 .search-row .search-icon {
+  width: 10px; height: 10px;
+  color: rgba(255,255,255,0.4);
+}
+.s3 .search-input {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: rgba(255,255,255,0.95); font: inherit; font-size: 12px;
+}
+.s3 .search-input::placeholder { color: rgba(255,255,255,0.4); }
+
+/* S4 — Edge-to-edge with separator */
+.s4 .search-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 14px;
+  margin: -5px -5px 0;
+  border-bottom: 0.5px solid rgba(255,255,255,0.08);
+}
+.s4 .search-row .search-icon {
+  width: 11px; height: 11px;
+  color: rgba(255,255,255,0.4);
+}
+.s4 .search-input {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: rgba(255,255,255,0.95); font: inherit; font-size: 12.5px;
+  letter-spacing: -0.005em;
+}
+.s4 .search-input::placeholder { color: rgba(255,255,255,0.4); }
+.s4 .lang-list { padding-top: 5px; }
+
+/* S5 — Header-as-search */
+.s5 .search-row {
+  padding: 4px 10px 10px;
+  border-bottom: 0.5px solid rgba(255,255,255,0.10);
+  margin: 0 2px 4px;
+}
+.s5 .search-row .search-label {
+  font-size: 9.5px;
+  color: rgba(255,255,255,0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-weight: 500;
+  margin-bottom: 4px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.s5 .search-row .search-back {
+  width: 14px; height: 14px;
+  color: rgba(255,255,255,0.45);
+  cursor: pointer;
+}
+.s5 .search-row .search-back svg { width: 10px; height: 10px; }
+.s5 .search-row .lang-val-line {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.s5 .search-row .lang-val-line .flag { font-size: 13px; }
+.s5 .search-row .search-input {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: rgba(255,255,255,0.95); font: inherit; font-size: 14px;
+  font-weight: 500; letter-spacing: -0.01em;
+}
+.s5 .search-row .search-input::placeholder { color: rgba(255,255,255,0.4); }
+.s5 .search-row .search-cursor {
+  display: inline-block;
+  width: 1.5px; height: 14px;
+  background: var(--accent);
+  vertical-align: -2px;
+  animation: blink 1s steps(2) infinite;
+}
+@keyframes blink { 0%,49% { opacity:1 } 50%,100% { opacity:0 } }
+
+/* S6 — Mono-monospace bracket */
+.s6 .search-row {
+  display: flex; align-items: center; gap: 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 5px;
+  background: rgba(0,0,0,0.18);
+}
+.s6 .search-row .bracket {
+  color: rgba(255, 182, 224, 0.55);
+  font-size: 12px;
+  font-weight: 500;
+}
+.s6 .search-input {
+  flex: 1; background: transparent; border: none; outline: none;
+  color: rgba(255,255,255,0.95);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  letter-spacing: -0.005em;
+}
+.s6 .search-input::placeholder { color: rgba(255,255,255,0.32); font-style: italic; }
+.s6 .search-row .typing-cursor {
+  display: inline-block;
+  width: 1px; height: 10px;
+  background: var(--accent);
+  vertical-align: -1px;
+  animation: blink 1s steps(2) infinite;
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Popover · <em>Round 8 · search variations</em></h1>
+<p>«Собеседник» → <strong>«Слушаю»</strong>. И шесть подходов к поиску в dropdown'е — от полного отсутствия фона до моно-варианта.</p>
+<div class="nav">
+<a href="/popover-round-1/">R1</a>
+<a href="/popover-round-2/">R2</a>
+<a href="/popover-round-3/">R3</a>
+<a href="/popover-round-4/">R4</a>
+<a href="/popover-round-5/">R5</a>
+<a href="/popover-round-6/">R6</a>
+<a href="/popover-round-7/">R7</a>
+<a class="current" href="/popover-round-8/">R8</a>
+</div>
+</header>
+
+<main class="grid">
+
+<!-- S1 — Ghost underline -->
+<div class="card">
+<div class="card-label"><span class="num">S1 · Ghost underline</span></div>
+<div class="frame">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span>🌐</span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row"><span class="dot"></span><span class="brand-text">Unison</span><span class="spacer"></span><a class="gear-btn"><svg><use href="#icon-gear"/></svg></a></div>
+<div class="mode-toggle">
+<div class="mode-seg on"><svg><use href="#icon-call"/></svg> Call</div>
+<div class="mode-seg"><svg><use href="#icon-listen"/></svg> Listen</div>
+</div>
+<div class="lang-bar">
+<div class="lang-side open"><div class="lang-lbl">Я говорю</div><div class="lang-val"><span class="flag">🇷🇺</span>Русский<svg class="chev"><use href="#icon-chevron"/></svg></div></div>
+<div class="arrow-wrap"><svg><use href="#arrow-a"/></svg></div>
+<div class="lang-side right"><div class="lang-lbl">Слушаю</div><div class="lang-val"><svg class="chev"><use href="#icon-chevron"/></svg>English<span class="flag">🇬🇧</span></div></div>
+</div>
+<button class="start-btn"><svg><use href="#icon-play"/></svg> Начать перевод</button>
+</div>
+<div class="lang-dropdown s1">
+<div class="search-row">
+<svg class="search-icon"><use href="#icon-search"/></svg>
+<input class="search-input" placeholder="Поиск" value="">
+</div>
+<div class="lang-list">
+<div class="lang-option selected"><span class="flag">🇷🇺</span><span>Русский</span><svg class="check"><use href="#icon-check"/></svg></div>
+<div class="lang-option"><span class="flag">🇬🇧</span><span>English</span><svg class="check"><use href="#icon-check"/></svg></div>
+<div class="lang-option"><span class="flag">🇪🇸</span><span>Español</span></div>
+<div class="lang-option"><span class="flag">🇫🇷</span><span>Français</span></div>
+<div class="lang-option"><span class="flag">🇩🇪</span><span>Deutsch</span></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Без фона, hairline-underline.</strong> Search-row ничем не выделяется кроме тонкой линии снизу. Самый невидимый — глаз не цепляется, читается как часть списка. На focus underline станет розовым.</p>
+</div>
+
+<!-- S2 — Light glass match -->
+<div class="card">
+<div class="card-label"><span class="num">S2 · Light glass match</span></div>
+<div class="frame">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span>🌐</span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row"><span class="dot"></span><span class="brand-text">Unison</span><span class="spacer"></span><a class="gear-btn"><svg><use href="#icon-gear"/></svg></a></div>
+<div class="mode-toggle">
+<div class="mode-seg on"><svg><use href="#icon-call"/></svg> Call</div>
+<div class="mode-seg"><svg><use href="#icon-listen"/></svg> Listen</div>
+</div>
+<div class="lang-bar">
+<div class="lang-side open"><div class="lang-lbl">Я говорю</div><div class="lang-val"><span class="flag">🇷🇺</span>Русский<svg class="chev"><use href="#icon-chevron"/></svg></div></div>
+<div class="arrow-wrap"><svg><use href="#arrow-a"/></svg></div>
+<div class="lang-side right"><div class="lang-lbl">Слушаю</div><div class="lang-val"><svg class="chev"><use href="#icon-chevron"/></svg>English<span class="flag">🇬🇧</span></div></div>
+</div>
+<button class="start-btn"><svg><use href="#icon-play"/></svg> Начать перевод</button>
+</div>
+<div class="lang-dropdown s2">
+<div class="search-row">
+<svg class="search-icon"><use href="#icon-search"/></svg>
+<input class="search-input" placeholder="Поиск" value="">
+</div>
+<div class="lang-list">
+<div class="lang-option selected"><span class="flag">🇷🇺</span><span>Русский</span><svg class="check"><use href="#icon-check"/></svg></div>
+<div class="lang-option"><span class="flag">🇬🇧</span><span>English</span></div>
+<div class="lang-option"><span class="flag">🇪🇸</span><span>Español</span></div>
+<div class="lang-option"><span class="flag">🇫🇷</span><span>Français</span></div>
+<div class="lang-option"><span class="flag">🇩🇪</span><span>Deutsch</span></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Светлый glass match.</strong> Поиск — такой же материал что и dropdown, чуть светлее (<code>rgba(255,255,255,0.06)</code>) с тонким верхним highlight'ом. Не выпадает из эстетики стекла.</p>
+</div>
+
+<!-- S3 — Pill -->
+<div class="card">
+<div class="card-label"><span class="num">S3 · Pill</span></div>
+<div class="frame">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span>🌐</span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row"><span class="dot"></span><span class="brand-text">Unison</span><span class="spacer"></span><a class="gear-btn"><svg><use href="#icon-gear"/></svg></a></div>
+<div class="mode-toggle">
+<div class="mode-seg on"><svg><use href="#icon-call"/></svg> Call</div>
+<div class="mode-seg"><svg><use href="#icon-listen"/></svg> Listen</div>
+</div>
+<div class="lang-bar">
+<div class="lang-side open"><div class="lang-lbl">Я говорю</div><div class="lang-val"><span class="flag">🇷🇺</span>Русский<svg class="chev"><use href="#icon-chevron"/></svg></div></div>
+<div class="arrow-wrap"><svg><use href="#arrow-a"/></svg></div>
+<div class="lang-side right"><div class="lang-lbl">Слушаю</div><div class="lang-val"><svg class="chev"><use href="#icon-chevron"/></svg>English<span class="flag">🇬🇧</span></div></div>
+</div>
+<button class="start-btn"><svg><use href="#icon-play"/></svg> Начать перевод</button>
+</div>
+<div class="lang-dropdown s3">
+<div class="search-row">
+<svg class="search-icon"><use href="#icon-search"/></svg>
+<input class="search-input" placeholder="Поиск" value="">
+</div>
+<div class="lang-list">
+<div class="lang-option selected"><span class="flag">🇷🇺</span><span>Русский</span><svg class="check"><use href="#icon-check"/></svg></div>
+<div class="lang-option"><span class="flag">🇬🇧</span><span>English</span></div>
+<div class="lang-option"><span class="flag">🇪🇸</span><span>Español</span></div>
+<div class="lang-option"><span class="flag">🇫🇷</span><span>Français</span></div>
+<div class="lang-option"><span class="flag">🇩🇪</span><span>Deutsch</span></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Pill capsule.</strong> Скруглённый 99px, лёгкий outline, узкий по высоте. Намёк на iOS-style search bar Spotlight'а. Чуть отдельный визуальный объект, но мягкий.</p>
+</div>
+
+<!-- S4 — Edge-to-edge separator -->
+<div class="card">
+<div class="card-label"><span class="num">S4 · Edge-to-edge</span></div>
+<div class="frame">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span>🌐</span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row"><span class="dot"></span><span class="brand-text">Unison</span><span class="spacer"></span><a class="gear-btn"><svg><use href="#icon-gear"/></svg></a></div>
+<div class="mode-toggle">
+<div class="mode-seg on"><svg><use href="#icon-call"/></svg> Call</div>
+<div class="mode-seg"><svg><use href="#icon-listen"/></svg> Listen</div>
+</div>
+<div class="lang-bar">
+<div class="lang-side open"><div class="lang-lbl">Я говорю</div><div class="lang-val"><span class="flag">🇷🇺</span>Русский<svg class="chev"><use href="#icon-chevron"/></svg></div></div>
+<div class="arrow-wrap"><svg><use href="#arrow-a"/></svg></div>
+<div class="lang-side right"><div class="lang-lbl">Слушаю</div><div class="lang-val"><svg class="chev"><use href="#icon-chevron"/></svg>English<span class="flag">🇬🇧</span></div></div>
+</div>
+<button class="start-btn"><svg><use href="#icon-play"/></svg> Начать перевод</button>
+</div>
+<div class="lang-dropdown s4">
+<div class="search-row">
+<svg class="search-icon"><use href="#icon-search"/></svg>
+<input class="search-input" placeholder="Поиск" value="">
+</div>
+<div class="lang-list">
+<div class="lang-option selected"><span class="flag">🇷🇺</span><span>Русский</span><svg class="check"><use href="#icon-check"/></svg></div>
+<div class="lang-option"><span class="flag">🇬🇧</span><span>English</span></div>
+<div class="lang-option"><span class="flag">🇪🇸</span><span>Español</span></div>
+<div class="lang-option"><span class="flag">🇫🇷</span><span>Français</span></div>
+<div class="lang-option"><span class="flag">🇩🇪</span><span>Deutsch</span></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Edge-to-edge с separator'ом.</strong> Search занимает всю ширину dropdown'a, тонкий hairline отделяет от списка. Как в Spotlight или macOS Finder. Самый «нативный» вид.</p>
+</div>
+
+<!-- S5 — Header-as-search -->
+<div class="card">
+<div class="card-label"><span class="num">S5 · Header-as-search</span></div>
+<div class="frame">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span>🌐</span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row"><span class="dot"></span><span class="brand-text">Unison</span><span class="spacer"></span><a class="gear-btn"><svg><use href="#icon-gear"/></svg></a></div>
+<div class="mode-toggle">
+<div class="mode-seg on"><svg><use href="#icon-call"/></svg> Call</div>
+<div class="mode-seg"><svg><use href="#icon-listen"/></svg> Listen</div>
+</div>
+<div class="lang-bar">
+<div class="lang-side open"><div class="lang-lbl">Я говорю</div><div class="lang-val"><span class="flag">🇷🇺</span>Русский<svg class="chev"><use href="#icon-chevron"/></svg></div></div>
+<div class="arrow-wrap"><svg><use href="#arrow-a"/></svg></div>
+<div class="lang-side right"><div class="lang-lbl">Слушаю</div><div class="lang-val"><svg class="chev"><use href="#icon-chevron"/></svg>English<span class="flag">🇬🇧</span></div></div>
+</div>
+<button class="start-btn"><svg><use href="#icon-play"/></svg> Начать перевод</button>
+</div>
+<div class="lang-dropdown s5">
+<div class="search-row">
+<div class="search-label">
+<span>Я говорю</span>
+<a class="search-back"><svg><use href="#icon-back"/></svg></a>
+</div>
+<div class="lang-val-line">
+<span class="flag">🇷🇺</span>
+<input class="search-input" placeholder="Русский" value="">
+<span class="search-cursor"></span>
+</div>
+</div>
+<div class="lang-list">
+<div class="lang-option selected"><span class="flag">🇷🇺</span><span>Русский</span><svg class="check"><use href="#icon-check"/></svg></div>
+<div class="lang-option"><span class="flag">🇬🇧</span><span>English</span></div>
+<div class="lang-option"><span class="flag">🇪🇸</span><span>Español</span></div>
+<div class="lang-option"><span class="flag">🇫🇷</span><span>Français</span></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Header-as-search.</strong> Нет отдельного поля. Шапка dropdown'a показывает «Я говорю» и текущий выбор — это И есть input. Сразу можешь печатать чтобы заменить. Самое целостное по концепции, но менее очевидно.</p>
+</div>
+
+<!-- S6 — Monospace bracket -->
+<div class="card">
+<div class="card-label"><span class="num">S6 · Monospace bracket</span></div>
+<div class="frame">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span>🌐</span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover">
+<div class="top-row"><span class="dot"></span><span class="brand-text">Unison</span><span class="spacer"></span><a class="gear-btn"><svg><use href="#icon-gear"/></svg></a></div>
+<div class="mode-toggle">
+<div class="mode-seg on"><svg><use href="#icon-call"/></svg> Call</div>
+<div class="mode-seg"><svg><use href="#icon-listen"/></svg> Listen</div>
+</div>
+<div class="lang-bar">
+<div class="lang-side open"><div class="lang-lbl">Я говорю</div><div class="lang-val"><span class="flag">🇷🇺</span>Русский<svg class="chev"><use href="#icon-chevron"/></svg></div></div>
+<div class="arrow-wrap"><svg><use href="#arrow-a"/></svg></div>
+<div class="lang-side right"><div class="lang-lbl">Слушаю</div><div class="lang-val"><svg class="chev"><use href="#icon-chevron"/></svg>English<span class="flag">🇬🇧</span></div></div>
+</div>
+<button class="start-btn"><svg><use href="#icon-play"/></svg> Начать перевод</button>
+</div>
+<div class="lang-dropdown s6">
+<div class="search-row">
+<span class="bracket">/</span>
+<input class="search-input" placeholder="ищу..." value="">
+<span class="typing-cursor"></span>
+</div>
+<div class="lang-list">
+<div class="lang-option selected"><span class="flag">🇷🇺</span><span>Русский</span><svg class="check"><use href="#icon-check"/></svg></div>
+<div class="lang-option"><span class="flag">🇬🇧</span><span>English</span></div>
+<div class="lang-option"><span class="flag">🇪🇸</span><span>Español</span></div>
+<div class="lang-option"><span class="flag">🇫🇷</span><span>Français</span></div>
+<div class="lang-option"><span class="flag">🇩🇪</span><span>Deutsch</span></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Monospace bracket.</strong> Шрифт IBM Plex Mono, символ <code>/</code> вместо иконки лупы (как Vim/CLI search), мигающий курсор. Гик-вайб, контраст с серифным брендом — может работать как «инструментарная» деталь.</p>
+</div>
+
+</main>
+
+</body>
+</html>

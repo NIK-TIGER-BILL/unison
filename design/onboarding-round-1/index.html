@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Onboarding · Round 1</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=Fraunces:opsz,wght@9..144,200;9..144,300;9..144,400;9..144,500&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="liquidGlass" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="2" seed="9" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="3" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+
+    <symbol id="icon-check" viewBox="0 0 16 16">
+      <polyline points="3,8 7,12 13,4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="icon-audio" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="6" width="2.5" height="4" rx="0.6"/>
+        <rect x="11.5" y="6" width="2.5" height="4" rx="0.6"/>
+        <path d="M4.5 8a3.5 3.5 0 0 1 7 0"/>
+        <line x1="6.5" y1="5" x2="6.5" y2="11"/>
+        <line x1="9.5" y1="5" x2="9.5" y2="11"/>
+      </g>
+    </symbol>
+    <symbol id="icon-mic" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <rect x="6" y="2" width="4" height="8" rx="2"/>
+        <path d="M3.5 7.5v1a4.5 4.5 0 0 0 9 0v-1M8 13v1.5"/>
+      </g>
+    </symbol>
+    <symbol id="icon-key" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="5" cy="11" r="2.5"/>
+        <line x1="7" y1="9" x2="14" y2="2"/>
+        <line x1="11" y1="5" x2="13" y2="7"/>
+      </g>
+    </symbol>
+    <symbol id="icon-arrow-right" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="8" x2="13" y2="8"/>
+        <polyline points="9,4 13,8 9,12"/>
+      </g>
+    </symbol>
+    <symbol id="icon-close" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <line x1="4" y1="4" x2="12" y2="12"/>
+        <line x1="12" y1="4" x2="4" y2="12"/>
+      </g>
+    </symbol>
+  </defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --warn: #ffc060;
+  --ready: #58e09a;
+  --active: #5ac8fa;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'Fraunces', serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.025em; margin-bottom: 4px;
+}
+.page-header h1 em { font-style: italic; color: var(--accent); font-weight: 300; }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; }
+.page-header p code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11.5px;
+  background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;
+}
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+  gap: 48px;
+  padding: 48px 48px 64px;
+  max-width: 1800px;
+  margin: 0 auto;
+}
+.card { display: flex; flex-direction: column; gap: 14px; }
+.card-label {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 2px;
+}
+.card-label .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; color: var(--page-mute);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.card-desc { font-size: 12.5px; color: var(--page-mute); line-height: 1.55; max-width: 460px; }
+.card-desc strong { color: var(--page-fg); font-weight: 500; }
+.card-desc code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px;
+}
+
+.frame {
+  position: relative;
+  height: 600px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 24px 64px -16px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4);
+}
+.menubar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex; align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px;
+  z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+.desktop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+.window-wrap {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+}
+
+/* ════ Shared onboarding window (Liquid Glass base) ════ */
+.onboarding {
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  backdrop-filter: blur(24px) saturate(160%) url(#liquidGlass);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border-radius: 22px;
+  color: #f5f5f7;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 32px 80px -8px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -1px 0 rgba(0,0,0,0.4),
+    inset 1px 0 0 rgba(255,255,255,0.06),
+    inset -1px 0 0 rgba(255,255,255,0.06);
+}
+.onboarding::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 60%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.16) 0%, transparent 35%),
+    radial-gradient(ellipse 100% 60% at 30% 0%, rgba(255,255,255,0.22), transparent 70%);
+  border-radius: 22px 22px 50% 50% / 22px 22px 30% 30%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.onboarding::after {
+  content: "";
+  position: absolute; inset: 0;
+  border-radius: 22px;
+  padding: 1px;
+  background: conic-gradient(from 135deg at 50% 50%,
+    rgba(255,255,255,0.4), rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.4) 50%, rgba(255,255,255,0.05) 75%, rgba(255,255,255,0.4));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; opacity: 0.55;
+}
+
+/* shared buttons */
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+.btn-primary {
+  background: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08));
+  border: 0.5px solid rgba(255,255,255,0.22);
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 9px;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    0 4px 10px rgba(0,0,0,0.25);
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+  transition: background 0.16s, transform 0.08s;
+}
+.btn-primary:hover { background: linear-gradient(180deg, rgba(255,255,255,0.30), rgba(255,255,255,0.12)); }
+.btn-primary:active { transform: scale(0.97); }
+.btn-ghost {
+  color: rgba(255,255,255,0.7);
+  font-size: 12.5px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-ghost:hover { background: rgba(255,255,255,0.08); color: #fff; }
+
+.brand-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600;
+  letter-spacing: -0.02em;
+  color: rgba(255,255,255,0.85);
+}
+.brand-row .dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--ready);
+  box-shadow: 0 0 8px rgba(88, 224, 154, 0.65);
+}
+
+.close-btn {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.5);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.close-btn:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.close-btn svg { width: 12px; height: 12px; }
+
+/* ═══════════════════════ V1 — Classic vertical checklist ═══════════════════════ */
+.v1 .onboarding { width: 460px; padding: 28px 28px 24px; }
+.v1 .head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 8px;
+  position: relative; z-index: 1;
+}
+.v1 .title {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-size: 30px;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  margin-bottom: 4px;
+  position: relative; z-index: 1;
+}
+.v1 .subtitle {
+  font-size: 13.5px;
+  color: rgba(255,255,255,0.55);
+  margin-bottom: 24px;
+  position: relative; z-index: 1;
+}
+.v1 .steps {
+  display: flex; flex-direction: column;
+  gap: 10px;
+  position: relative; z-index: 1;
+}
+.v1 .step {
+  display: flex; align-items: center; gap: 14px;
+  padding: 16px 18px;
+  background: rgba(0,0,0,0.16);
+  border-radius: 13px;
+  border: 0.5px solid rgba(255,255,255,0.04);
+  transition: background 0.15s, border-color 0.15s;
+}
+.v1 .step.current {
+  background: rgba(255, 182, 224, 0.04);
+  border-color: rgba(255, 182, 224, 0.2);
+}
+.v1 .step.done { opacity: 0.55; }
+.v1 .step-status {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.2);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+}
+.v1 .step.done .step-status {
+  background: rgba(88, 224, 154, 0.18);
+  border-color: rgba(88, 224, 154, 0.45);
+  color: var(--ready);
+}
+.v1 .step.done .step-status svg { width: 14px; height: 14px; }
+.v1 .step.current .step-status {
+  background: rgba(0,0,0,0.25);
+  color: var(--accent);
+}
+.v1 .step-icon {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.55);
+  flex-shrink: 0;
+}
+.v1 .step-icon svg { width: 17px; height: 17px; }
+.v1 .step-body { flex: 1; min-width: 0; }
+.v1 .step-title {
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin-bottom: 2px;
+}
+.v1 .step-hint {
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: -0.005em;
+}
+.v1 .step-action { flex-shrink: 0; }
+.v1 .footer {
+  display: flex; justify-content: flex-end;
+  margin-top: 20px;
+  position: relative; z-index: 1;
+}
+
+/* ═══════════════════════ V2 — Numbered progression ═══════════════════════ */
+.v2 .onboarding { width: 460px; padding: 28px 28px 24px; }
+.v2 .head { margin-bottom: 24px; position: relative; z-index: 1; }
+.v2 .title {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-size: 28px;
+  letter-spacing: -0.025em;
+  margin-bottom: 4px;
+}
+.v2 .subtitle {
+  font-size: 13px;
+  color: rgba(255,255,255,0.55);
+}
+.v2 .progress {
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 22px;
+  position: relative; z-index: 1;
+}
+.v2 .progress-dot {
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  background: rgba(0,0,0,0.2);
+  border: 0.5px solid rgba(255,255,255,0.08);
+}
+.v2 .progress-dot.done {
+  background: rgba(88, 224, 154, 0.18);
+  border-color: rgba(88, 224, 154, 0.45);
+  color: var(--ready);
+}
+.v2 .progress-dot.done svg { width: 11px; height: 11px; }
+.v2 .progress-dot.current {
+  background: rgba(255, 182, 224, 0.12);
+  border-color: rgba(255, 182, 224, 0.4);
+  color: var(--accent);
+}
+.v2 .progress-line {
+  flex: 1; height: 1px;
+  background: rgba(255,255,255,0.10);
+}
+.v2 .progress-line.done { background: rgba(88, 224, 154, 0.4); }
+.v2 .step {
+  padding: 0 0;
+  position: relative; z-index: 1;
+  margin-bottom: 12px;
+}
+.v2 .step .step-num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.v2 .step .step-title-row {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 6px;
+}
+.v2 .step-icon {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.65);
+  background: rgba(255,255,255,0.06);
+  border-radius: 10px;
+  border: 0.5px solid rgba(255,255,255,0.08);
+  flex-shrink: 0;
+}
+.v2 .step-icon svg { width: 18px; height: 18px; }
+.v2 .step-text { flex: 1; min-width: 0; }
+.v2 .step-title { font-size: 15px; font-weight: 500; letter-spacing: -0.01em; }
+.v2 .step-hint {
+  font-size: 12px; color: rgba(255,255,255,0.55);
+  margin-top: 2px;
+}
+.v2 .step-action { padding-left: 48px; }
+.v2 .footer {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 16px;
+  position: relative; z-index: 1;
+}
+.v2 .footer .progress-text {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 0.04em;
+}
+
+/* ═══════════════════════ V3 — All inline forms ═══════════════════════ */
+.v3 .onboarding { width: 480px; padding: 28px 28px 24px; }
+.v3 .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; position: relative; z-index: 1; }
+.v3 .title {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-size: 28px;
+  letter-spacing: -0.025em;
+  margin-bottom: 4px;
+}
+.v3 .subtitle {
+  font-size: 13px; color: rgba(255,255,255,0.55);
+}
+.v3 .sections {
+  display: flex; flex-direction: column; gap: 16px;
+  position: relative; z-index: 1;
+}
+.v3 .section {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.v3 .section-label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10.5px; color: rgba(255,255,255,0.55);
+  text-transform: uppercase; letter-spacing: 0.12em;
+  font-weight: 500;
+}
+.v3 .section-label svg { width: 13px; height: 13px; }
+.v3 .section-label .done-mark {
+  margin-left: auto;
+  width: 14px; height: 14px;
+  color: var(--ready);
+  display: none;
+}
+.v3 .section.done .done-mark { display: inline-flex; }
+.v3 .section-action {
+  display: flex; align-items: center; gap: 10px;
+}
+.v3 .section .hint {
+  font-size: 12px; color: rgba(255,255,255,0.5);
+  flex: 1;
+  letter-spacing: -0.005em;
+}
+.v3 .section.done .hint { color: rgba(88, 224, 154, 0.8); }
+.v3 .key-input {
+  flex: 1;
+  background: rgba(0,0,0,0.22);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  color: #fff;
+  font: inherit; font-size: 12px;
+  font-family: 'IBM Plex Mono', monospace;
+  padding: 8px 10px;
+  border-radius: 8px;
+  outline: none;
+}
+.v3 .key-input::placeholder { color: rgba(255,255,255,0.35); }
+.v3 .key-input:focus { border-color: rgba(255, 182, 224, 0.4); }
+.v3 .footer {
+  display: flex; justify-content: flex-end; margin-top: 22px;
+  position: relative; z-index: 1;
+}
+
+/* ═══════════════════════ V4 — Card-based ═══════════════════════ */
+.v4 .onboarding { width: 480px; padding: 24px; }
+.v4 .head { margin-bottom: 18px; position: relative; z-index: 1; }
+.v4 .title {
+  font-family: 'Fraunces', serif;
+  font-weight: 300; font-size: 26px;
+  letter-spacing: -0.025em;
+}
+.v4 .subtitle { font-size: 12.5px; color: rgba(255,255,255,0.55); margin-top: 2px; }
+.v4 .cards {
+  display: flex; flex-direction: column; gap: 10px;
+  position: relative; z-index: 1;
+}
+.v4 .step-card {
+  background: rgba(0,0,0,0.18);
+  border: 0.5px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+  padding: 16px;
+  position: relative;
+  transition: background 0.15s, border-color 0.15s;
+}
+.v4 .step-card.done {
+  background: rgba(88, 224, 154, 0.06);
+  border-color: rgba(88, 224, 154, 0.18);
+}
+.v4 .step-card.current {
+  background: rgba(255, 182, 224, 0.04);
+  border-color: rgba(255, 182, 224, 0.22);
+}
+.v4 .card-head {
+  display: flex; align-items: center; gap: 11px;
+  margin-bottom: 4px;
+}
+.v4 .card-icon {
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.7);
+  background: rgba(255,255,255,0.06);
+  border-radius: 9px;
+}
+.v4 .card-icon svg { width: 16px; height: 16px; }
+.v4 .step-card.done .card-icon { color: var(--ready); background: rgba(88, 224, 154, 0.14); }
+.v4 .card-body { flex: 1; min-width: 0; }
+.v4 .card-title { font-size: 14px; font-weight: 500; letter-spacing: -0.005em; }
+.v4 .card-status {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: rgba(255,255,255,0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+.v4 .step-card.done .card-status { color: var(--ready); }
+.v4 .card-action {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 0.5px dashed rgba(255,255,255,0.08);
+}
+.v4 .step-card.done .card-action { display: none; }
+.v4 .card-action .hint {
+  font-size: 12px; color: rgba(255,255,255,0.5);
+  letter-spacing: -0.005em;
+}
+
+/* ═══════════════════════ V5 — Sentence narrative ═══════════════════════ */
+.v5 .onboarding { width: 440px; padding: 36px 32px 28px; }
+.v5 .head { margin-bottom: 16px; position: relative; z-index: 1; }
+.v5 .greeting {
+  font-family: 'Fraunces', serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 32px;
+  letter-spacing: -0.025em;
+  margin-bottom: 4px;
+}
+.v5 .lead {
+  font-size: 14px;
+  color: rgba(255,255,255,0.7);
+  line-height: 1.55;
+  margin-bottom: 24px;
+  position: relative; z-index: 1;
+}
+.v5 .body-text {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-size: 17px;
+  line-height: 1.55;
+  letter-spacing: -0.015em;
+  margin-bottom: 18px;
+  color: rgba(255,255,255,0.85);
+  position: relative; z-index: 1;
+}
+.v5 .body-text .verb {
+  font-style: italic;
+  color: var(--accent);
+}
+.v5 .body-text .strike {
+  text-decoration: line-through;
+  text-decoration-color: rgba(88, 224, 154, 0.7);
+  text-decoration-thickness: 1px;
+  color: rgba(255,255,255,0.5);
+}
+.v5 .action-row {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+}
+.v5 .action-row .ready-mark {
+  width: 16px; height: 16px;
+  color: var(--ready);
+  display: none;
+}
+.v5 .action-row.done .ready-mark { display: inline-flex; }
+.v5 .footer {
+  display: flex; justify-content: flex-end;
+  margin-top: 24px;
+  position: relative; z-index: 1;
+}
+
+/* ═══════════════════════ V6 — Compact dashboard ═══════════════════════ */
+.v6 .onboarding { width: 480px; padding: 22px 22px 18px; }
+.v6 .head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 0.5px solid rgba(255,255,255,0.08);
+  margin-bottom: 4px;
+  position: relative; z-index: 1;
+}
+.v6 .title-block { display: flex; flex-direction: column; gap: 2px; }
+.v6 .brand {
+  font-family: 'Fraunces', serif;
+  font-weight: 400; font-size: 18px;
+  letter-spacing: -0.02em;
+}
+.v6 .subtitle {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.v6 .progress-mini {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 0.04em;
+}
+.v6 .row {
+  display: flex; align-items: center; gap: 14px;
+  padding: 13px 4px;
+  border-bottom: 0.5px solid rgba(255,255,255,0.06);
+  position: relative; z-index: 1;
+}
+.v6 .row:last-of-type { border-bottom: none; }
+.v6 .row-status {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.2);
+}
+.v6 .row.done .row-status { background: var(--ready); box-shadow: 0 0 6px rgba(88, 224, 154, 0.55); }
+.v6 .row.current .row-status { background: var(--accent); box-shadow: 0 0 6px rgba(255, 182, 224, 0.55); }
+.v6 .row-icon {
+  width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.55);
+  flex-shrink: 0;
+}
+.v6 .row-icon svg { width: 14px; height: 14px; }
+.v6 .row-title { flex: 1; font-size: 13.5px; font-weight: 500; letter-spacing: -0.005em; }
+.v6 .row.done .row-title { color: rgba(255,255,255,0.55); text-decoration: line-through; text-decoration-thickness: 0.5px; text-decoration-color: rgba(255,255,255,0.3); }
+.v6 .row-action { flex-shrink: 0; }
+.v6 .row-action .btn-primary { padding: 5px 12px; font-size: 11.5px; border-radius: 7px; }
+.v6 .row-action .done-mark {
+  width: 14px; height: 14px;
+  color: var(--ready);
+}
+.v6 .footer {
+  display: flex; justify-content: flex-end; align-items: center;
+  padding-top: 14px;
+  margin-top: 6px;
+  border-top: 0.5px solid rgba(255,255,255,0.08);
+  position: relative; z-index: 1;
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Onboarding · <em>Round 1</em></h1>
+<p>Первое окно при первом запуске. 3 шага: BlackHole driver, доступ к микрофону, OpenAI API ключ. Та же эстетика Aurora Liquid Glass из <code>DESIGN.md</code>. Шесть UX-моделей содержания.</p>
+<div class="nav">
+<a href="/popover-final/">← Popover FINAL</a>
+<a class="current" href="/onboarding-round-1/">Onboarding R1</a>
+</div>
+</header>
+
+<main class="grid">
+
+<!-- V1 -->
+<div class="card">
+<div class="card-label"><span class="num">V1 · Classic vertical checklist</span></div>
+<div class="frame v1">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="window-wrap">
+<div class="onboarding">
+<div class="head">
+<div class="brand-row"><span class="dot"></span> Unison</div>
+<a class="close-btn"><svg><use href="#icon-close"/></svg></a>
+</div>
+<div class="title">Добро пожаловать</div>
+<div class="subtitle">Три шага и можно переводить звонки.</div>
+<div class="steps">
+<div class="step done">
+<div class="step-status"><svg><use href="#icon-check"/></svg></div>
+<div class="step-icon"><svg><use href="#icon-audio"/></svg></div>
+<div class="step-body">
+<div class="step-title">Аудиодрайвер</div>
+<div class="step-hint">BlackHole установлен</div>
+</div>
+</div>
+<div class="step current">
+<div class="step-status">2</div>
+<div class="step-icon"><svg><use href="#icon-mic"/></svg></div>
+<div class="step-body">
+<div class="step-title">Доступ к микрофону</div>
+<div class="step-hint">Нужно разрешение системы</div>
+</div>
+<div class="step-action"><button class="btn-primary">Разрешить</button></div>
+</div>
+<div class="step">
+<div class="step-status">3</div>
+<div class="step-icon"><svg><use href="#icon-key"/></svg></div>
+<div class="step-body">
+<div class="step-title">Ключ OpenAI</div>
+<div class="step-hint">Хранится в Keychain</div>
+</div>
+<div class="step-action"><button class="btn-ghost">Ввести</button></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Вертикальный чек-лист.</strong> Каждая строка — самостоятельный блок с status-кругом, иконкой, заголовком, hint и кнопкой действия. Done-state с галочкой и opacity 0.55. Current подсвечен accent'ом. Самый структурный и читаемый.</p>
+</div>
+
+<!-- V2 -->
+<div class="card">
+<div class="card-label"><span class="num">V2 · Numbered progression</span></div>
+<div class="frame v2">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="window-wrap">
+<div class="onboarding">
+<div class="head">
+<div class="title">Подготовка</div>
+<div class="subtitle">Один экран · три шага · около минуты.</div>
+</div>
+<div class="progress">
+<div class="progress-dot done"><svg><use href="#icon-check"/></svg></div>
+<div class="progress-line done"></div>
+<div class="progress-dot current">2</div>
+<div class="progress-line"></div>
+<div class="progress-dot">3</div>
+</div>
+<div class="step">
+<div class="step-num">Шаг 2 · сейчас</div>
+<div class="step-title-row">
+<div class="step-icon"><svg><use href="#icon-mic"/></svg></div>
+<div class="step-text">
+<div class="step-title">Доступ к микрофону</div>
+<div class="step-hint">macOS попросит подтверждение в системном диалоге.</div>
+</div>
+</div>
+<div class="step-action"><button class="btn-primary">Разрешить</button></div>
+</div>
+<div class="footer">
+<span class="progress-text">1 / 3 готово</span>
+<button class="btn-ghost">Пропустить пока</button>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Numbered progression.</strong> Сверху progress-индикатор (1✓-2-3) с линиями между. В фокусе — только текущий шаг с большой иконкой, подсказкой и кнопкой. После выполнения переключается на следующий. Самый Wizard-style, но на одном экране.</p>
+</div>
+
+<!-- V3 -->
+<div class="card">
+<div class="card-label"><span class="num">V3 · All inline forms</span></div>
+<div class="frame v3">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="window-wrap">
+<div class="onboarding">
+<div class="head">
+<div>
+<div class="title">Настройка</div>
+<div class="subtitle">Все три действия — на одном экране, в любом порядке.</div>
+</div>
+<a class="close-btn"><svg><use href="#icon-close"/></svg></a>
+</div>
+<div class="sections">
+<div class="section done">
+<div class="section-label">
+<svg><use href="#icon-audio"/></svg>
+<span>Аудиодрайвер</span>
+<svg class="done-mark"><use href="#icon-check"/></svg>
+</div>
+<div class="section-action">
+<div class="hint">BlackHole 2ch + 16ch установлены</div>
+</div>
+</div>
+<div class="section">
+<div class="section-label">
+<svg><use href="#icon-mic"/></svg>
+<span>Микрофон</span>
+</div>
+<div class="section-action">
+<div class="hint">Нужно разрешение системы</div>
+<button class="btn-primary">Разрешить</button>
+</div>
+</div>
+<div class="section">
+<div class="section-label">
+<svg><use href="#icon-key"/></svg>
+<span>Ключ OpenAI</span>
+</div>
+<div class="section-action">
+<input class="key-input" placeholder="sk-..." value="">
+<button class="btn-primary">Сохранить</button>
+</div>
+</div>
+</div>
+<div class="footer">
+<button class="btn-primary" style="opacity:0.4; cursor: not-allowed">Готово</button>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>All inline.</strong> Все действия видны одновременно, выполняются в любом порядке. Done-секция превращается в плоскую подпись с зелёной галочкой. Поле API-ключа сразу под рукой — не нужен дополнительный клик. Подходит юзерам которые любят видеть всё сразу.</p>
+</div>
+
+<!-- V4 -->
+<div class="card">
+<div class="card-label"><span class="num">V4 · Card-based</span></div>
+<div class="frame v4">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="window-wrap">
+<div class="onboarding">
+<div class="head">
+<div class="title">Установка</div>
+<div class="subtitle">Каждая карточка — независимый шаг.</div>
+</div>
+<div class="cards">
+<div class="step-card done">
+<div class="card-head">
+<div class="card-icon"><svg><use href="#icon-audio"/></svg></div>
+<div class="card-body">
+<div class="card-title">Аудиодрайвер</div>
+<div class="card-status">Готово</div>
+</div>
+</div>
+</div>
+<div class="step-card current">
+<div class="card-head">
+<div class="card-icon"><svg><use href="#icon-mic"/></svg></div>
+<div class="card-body">
+<div class="card-title">Микрофон</div>
+<div class="card-status">Сейчас</div>
+</div>
+</div>
+<div class="card-action">
+<div class="hint">macOS покажет системный диалог</div>
+<button class="btn-primary">Разрешить</button>
+</div>
+</div>
+<div class="step-card">
+<div class="card-head">
+<div class="card-icon"><svg><use href="#icon-key"/></svg></div>
+<div class="card-body">
+<div class="card-title">Ключ OpenAI</div>
+<div class="card-status">Дальше</div>
+</div>
+</div>
+<div class="card-action">
+<div class="hint">Хранится в Keychain локально</div>
+<button class="btn-ghost">Ввести</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Card-based.</strong> Каждый шаг — отдельная стеклянная карточка с собственным статусом, иконкой и действием. Done-карточка сворачивается (без action блока). Current — accent borderline. Самый «плотный» вариант.</p>
+</div>
+
+<!-- V5 -->
+<div class="card">
+<div class="card-label"><span class="num">V5 · Sentence narrative</span></div>
+<div class="frame v5">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="window-wrap">
+<div class="onboarding">
+<div class="head">
+<div class="greeting">Привет.</div>
+</div>
+<div class="lead">Чтобы переводить звонки нужно сделать три вещи:</div>
+<div class="body-text">
+<span class="strike">Поставить аудиодрайвер,</span> <span class="verb">разрешить микрофон</span>, и ввести ключ OpenAI.
+</div>
+<div class="action-row">
+<button class="btn-primary">Разрешить микрофон</button>
+<span style="font-size:12px; color: rgba(255,255,255,0.5)">— текущий шаг</span>
+</div>
+<div class="footer">
+<button class="btn-ghost">Пропустить</button>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Sentence narrative.</strong> Конверсейшнл tone. «Привет.» italic-Fraunces. Сами шаги — внутри одного предложения с inline-strike для done и accent-italic для current. Кнопка действия — глагол + объект из предложения. Самый «человечный» из всех.</p>
+</div>
+
+<!-- V6 -->
+<div class="card">
+<div class="card-label"><span class="num">V6 · Compact dashboard</span></div>
+<div class="frame v6">
+<div class="menubar"><span class="app-name">Unison</span><span>File</span><span>Edit</span><span class="spacer"></span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="window-wrap">
+<div class="onboarding">
+<div class="head">
+<div class="title-block">
+<div class="brand">Unison</div>
+<div class="subtitle">Установка · 1/3</div>
+</div>
+<div class="progress-mini">1 из 3</div>
+</div>
+<div class="row done">
+<span class="row-status"></span>
+<div class="row-icon"><svg><use href="#icon-audio"/></svg></div>
+<div class="row-title">Аудиодрайвер</div>
+<div class="row-action"><svg class="done-mark"><use href="#icon-check"/></svg></div>
+</div>
+<div class="row current">
+<span class="row-status"></span>
+<div class="row-icon"><svg><use href="#icon-mic"/></svg></div>
+<div class="row-title">Микрофон</div>
+<div class="row-action"><button class="btn-primary">Разрешить</button></div>
+</div>
+<div class="row">
+<span class="row-status"></span>
+<div class="row-icon"><svg><use href="#icon-key"/></svg></div>
+<div class="row-title">Ключ OpenAI</div>
+<div class="row-action"><button class="btn-ghost">Ввести</button></div>
+</div>
+<div class="footer">
+<button class="btn-ghost">Закрыть</button>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Compact dashboard.</strong> Табличный, минималистичный. Status-dot · иконка · название · action. Done-строка получает strikethrough. Никаких карточек или сложных блоков — функциональный вид «настройки на скорую руку».</p>
+</div>
+
+</main>
+
+</body>
+</html>

@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Settings · FINAL</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<filter id="liquidGlassSubtle" x="-10%" y="-10%" width="120%" height="120%">
+<feTurbulence type="fractalNoise" baseFrequency="0.014 0.02" numOctaves="2" seed="3" result="noise"/>
+<feGaussianBlur in="noise" stdDeviation="2.5" result="blurredNoise"/>
+<feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="12" xChannelSelector="R" yChannelSelector="G"/>
+</filter>
+
+<symbol id="icon-chevron-down" viewBox="0 0 16 16"><path d="M4 6 L8 10 L12 6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="icon-search" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><line x1="10.5" y1="10.5" x2="13.5" y2="13.5"/></g></symbol>
+<symbol id="icon-mic" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="6" y="2" width="4" height="7" rx="2"/><path d="M4 8a4 4 0 0 0 8 0"/><line x1="8" y1="12" x2="8" y2="14"/></g></symbol>
+<symbol id="icon-speaker" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6 L3 10 L6 10 L10 13 L10 3 L6 6 Z"/><path d="M12 6 Q13.5 8 12 10"/></g></symbol>
+<symbol id="icon-key" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="11" r="2.5"/><path d="M7 9 L13 3 M11 5 L13 7 M9 7 L11 9"/></g></symbol>
+<symbol id="icon-kbd" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><rect x="2" y="4" width="12" height="8" rx="1.5"/><line x1="4" y1="7" x2="4.5" y2="7"/><line x1="6" y1="7" x2="6.5" y2="7"/><line x1="8" y1="7" x2="8.5" y2="7"/><line x1="10" y1="7" x2="10.5" y2="7"/><line x1="12" y1="7" x2="12.5" y2="7"/><line x1="5" y1="10" x2="11" y2="10"/></g></symbol>
+<symbol id="icon-check" viewBox="0 0 16 16"><path d="M3.5 8.5 L7 12 L13 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="icon-extlink" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3 H13 V7"/><line x1="13" y1="3" x2="8" y2="8"/><path d="M11 9 V12 a 1 1 0 0 1 -1 1 H 4 a 1 1 0 0 1 -1 -1 V 6 a 1 1 0 0 1 1 -1 H 7"/></g></symbol>
+<symbol id="icon-refresh" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8 a 5 5 0 0 1 9 -3 L 13 6"/><path d="M13 3 V 6 H 10"/><path d="M13 8 a 5 5 0 0 1 -9 3 L 3 10"/><path d="M3 13 V 10 H 6"/></g></symbol>
+</defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --ready: #58e09a;
+  --warn: #ffb454;
+  --error: #ff7a8c;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg); color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.03em; margin-bottom: 4px;
+}
+.page-header h1 .accent { color: var(--accent); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; max-width: 760px; }
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px; letter-spacing: 0.04em; flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.layout {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 48px 64px;
+  display: flex; justify-content: center;
+}
+
+.stage {
+  background:
+    radial-gradient(ellipse 60% 50% at 70% 30%, rgba(100, 230, 255, 0.35), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 30% 70%, rgba(255, 110, 200, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+  padding: 56px;
+  border-radius: 18px;
+  box-shadow: 0 24px 64px -16px rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* ═══ Shared Liquid Glass ═══ */
+.glass {
+  position: relative;
+  background: rgba(20, 22, 30, 0.55);
+  backdrop-filter: blur(36px) saturate(200%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border: 0.5px solid rgba(255,255,255,0.13);
+  box-shadow:
+    0 16px 36px rgba(0,0,0,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.16);
+}
+.glass::after {
+  content: ""; position: absolute; inset: 0;
+  border-radius: inherit; padding: 1px;
+  background: conic-gradient(from 120deg at 50% 50%,
+    rgba(255,255,255,0.45), rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.35) 50%, rgba(255,255,255,0.05) 75%, rgba(255,255,255,0.45));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; opacity: 0.5;
+}
+
+/* ═══ Settings window ═══ */
+.settings-window {
+  width: 560px;
+  border-radius: 14px;
+  color: var(--page-fg);
+  overflow: hidden;
+  position: relative;
+}
+.titlebar {
+  height: 32px;
+  display: flex; align-items: center;
+  padding: 0 14px;
+  gap: 8px;
+  border-bottom: 0.5px solid rgba(255,255,255,0.07);
+  position: relative; z-index: 2;
+}
+.traffic { display: flex; gap: 6px; }
+.traffic span { width: 11px; height: 11px; border-radius: 50%; display: block; cursor: pointer; }
+.traffic .close { background: #ff5f57; }
+.traffic .min { background: #febc2e; }
+.traffic .max { background: #28c840; }
+.titlebar .title {
+  font-size: 12.5px; font-weight: 500;
+  color: rgba(255,255,255,0.85);
+  margin-left: 6px;
+  letter-spacing: -0.005em;
+}
+
+.content-scroll {
+  max-height: 540px;
+  overflow-y: auto;
+  position: relative; z-index: 2;
+  padding-bottom: 6px;
+}
+.content-scroll::-webkit-scrollbar { width: 6px; }
+.content-scroll::-webkit-scrollbar-track { background: transparent; }
+.content-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+.content-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+/* Section header */
+.section-head {
+  padding: 18px 16px 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: rgba(255,255,255,0.42);
+  font-weight: 400;
+}
+.section-head:first-child { padding-top: 12px; }
+
+/* Row primitives */
+.row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px;
+  font-size: 12.5px;
+  letter-spacing: -0.005em;
+  min-height: 40px;
+  gap: 14px;
+}
+.row + .row { border-top: 0.5px solid rgba(255,255,255,0.05); }
+.row-label {
+  display: flex; align-items: center; gap: 9px;
+  color: rgba(255,255,255,0.88);
+  flex-shrink: 0;
+}
+.row-label svg { width: 13px; height: 13px; color: rgba(255,255,255,0.55); flex-shrink: 0; }
+.row-value {
+  display: flex; align-items: center; gap: 6px;
+  color: rgba(255,255,255,0.55);
+  font-size: 12px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.row-hint {
+  font-size: 11px;
+  color: rgba(255,255,255,0.45);
+  letter-spacing: -0.005em;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.row-stack {
+  display: flex; flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Dropdown trigger (chip) */
+.dd-trigger {
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  padding: 5px 9px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.92);
+  display: inline-flex; align-items: center; gap: 6px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  min-width: 0;
+  max-width: 200px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dd-trigger:hover { background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.14); }
+.dd-trigger.open { background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.22); color: #fff; }
+.dd-trigger.open svg { color: rgba(255,255,255,0.85); transform: rotate(180deg); }
+.dd-trigger svg {
+  width: 10px; height: 10px;
+  color: rgba(255,255,255,0.55);
+  transition: transform 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.dd-trigger-label { overflow: hidden; text-overflow: ellipsis; }
+
+/* Dropdown panel (portal-style — positioned via JS) */
+.dd-panel {
+  position: fixed;
+  background: rgba(20, 22, 30, 0.78);
+  backdrop-filter: blur(36px) saturate(200%);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border: 0.5px solid rgba(255,255,255,0.14);
+  border-radius: 10px;
+  box-shadow: 0 24px 56px rgba(0,0,0,0.6);
+  padding: 4px;
+  z-index: 5000;
+  min-width: 180px; max-width: 280px;
+  max-height: 280px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 0.14s, transform 0.14s;
+}
+.dd-panel.shown {
+  opacity: 1; transform: translateY(0); pointer-events: auto;
+}
+.dd-search-wrap {
+  padding: 4px 8px 6px;
+  border-bottom: 0.5px solid rgba(255,255,255,0.06);
+  display: flex; align-items: center; gap: 6px;
+  margin-bottom: 4px;
+}
+.dd-search-wrap svg { width: 11px; height: 11px; color: rgba(255,255,255,0.45); }
+.dd-search-wrap input {
+  background: none; border: none; outline: none;
+  font: inherit; font-size: 12px; color: #fff;
+  flex: 1;
+}
+.dd-search-wrap input::placeholder { color: rgba(255,255,255,0.35); }
+.dd-list {
+  flex: 1; overflow-y: auto;
+  display: flex; flex-direction: column;
+  gap: 1px;
+}
+.dd-list::-webkit-scrollbar { width: 4px; }
+.dd-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+.dd-item {
+  display: flex; align-items: center;
+  padding: 6px 9px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.85);
+  border-radius: 6px;
+  cursor: pointer;
+  letter-spacing: -0.005em;
+}
+.dd-item:hover { background: rgba(255,255,255,0.07); color: #fff; }
+.dd-item.selected { background: rgba(255,255,255,0.10); color: #fff; font-weight: 600; }
+.dd-item.selected::after {
+  content: "";
+  margin-left: auto;
+  width: 12px; height: 12px;
+  background: #fff;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3.5 8.5 L7 12 L13 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / contain no-repeat;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M3.5 8.5 L7 12 L13 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / contain no-repeat;
+}
+.dd-empty {
+  padding: 14px 9px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.4);
+  text-align: center;
+}
+
+/* Status dot */
+.status-dot {
+  display: inline-block; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--ready);
+  box-shadow: 0 0 6px rgba(88, 224, 154, 0.6);
+}
+.status-dot.warn { background: var(--warn); box-shadow: 0 0 6px rgba(255, 180, 84, 0.55); }
+.status-dot.error { background: var(--error); box-shadow: 0 0 6px rgba(255, 122, 140, 0.55); }
+
+/* Toggle */
+.toggle {
+  width: 34px; height: 19px;
+  background: rgba(255,255,255,0.10);
+  border-radius: 10px;
+  position: relative;
+  cursor: pointer;
+  border: 0.5px solid rgba(255,255,255,0.12);
+  transition: background 0.18s, border-color 0.18s;
+  flex-shrink: 0;
+}
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 1.5px; left: 1.5px;
+  width: 14px; height: 14px;
+  background: linear-gradient(180deg, #fff, #d8d8da);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  transition: left 0.18s cubic-bezier(0.32, 0.94, 0.6, 1);
+}
+.toggle.on { background: rgba(88, 224, 154, 0.32); border-color: rgba(88, 224, 154, 0.55); }
+.toggle.on::after { left: 17px; }
+
+/* Slider (T2) */
+.slider {
+  -webkit-appearance: none; appearance: none;
+  width: 140px; height: 6px;
+  border-radius: 3px;
+  --val: 50%; --val-opacity: 0.55;
+  background: linear-gradient(to right,
+    rgba(255,255,255, var(--val-opacity)) 0%,
+    rgba(255,255,255, var(--val-opacity)) var(--val),
+    rgba(255,255,255, 0.10) var(--val),
+    rgba(255,255,255, 0.10) 100%);
+  outline: none; cursor: pointer;
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 4px; height: 18px;
+  background: linear-gradient(180deg, #fff, #ddd);
+  border: none; border-radius: 2px;
+  cursor: grab;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  transition: height 140ms ease, box-shadow 140ms ease;
+}
+.slider:hover::-webkit-slider-thumb { height: 20px; box-shadow: 0 3px 9px rgba(0,0,0,0.55); }
+.slider-value {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.04em;
+  min-width: 36px;
+  text-align: right;
+}
+
+/* Secret input */
+.secret-input {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  padding: 4px 6px 4px 9px;
+  border-radius: 7px;
+  width: 220px;
+}
+.secret-input input {
+  background: none; border: none; outline: none;
+  font: inherit; font-size: 11.5px;
+  font-family: 'IBM Plex Mono', monospace;
+  color: rgba(255,255,255,0.85);
+  letter-spacing: 0.04em;
+  flex: 1; min-width: 0;
+}
+.secret-input .toggle-text {
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.5);
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.secret-input .toggle-text:hover { color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.06); }
+
+/* Hotkey recorder */
+.kbd-recorder {
+  font-family: 'IBM Plex Mono', monospace;
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: rgba(255,255,255,0.85);
+  cursor: pointer;
+  display: inline-flex; align-items: center;
+  min-width: 60px; justify-content: center;
+  transition: background 0.12s, border-color 0.12s;
+  user-select: none;
+}
+.kbd-recorder:hover { background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.16); }
+.kbd-recorder.recording {
+  background: rgba(255,255,255,0.14);
+  border-color: rgba(255,255,255,0.32);
+  color: #fff;
+  animation: pulseKbd 1.2s ease-in-out infinite;
+}
+@keyframes pulseKbd { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+/* Inline button (small) */
+.btn-inline {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  padding: 4px 9px;
+  border-radius: 6px;
+  font-size: 11px; font-weight: 500;
+  color: rgba(255,255,255,0.85);
+  cursor: pointer;
+  transition: background 0.12s;
+  letter-spacing: -0.005em;
+}
+.btn-inline:hover { background: rgba(255,255,255,0.12); }
+.btn-inline.primary {
+  background: rgba(255,255,255,0.16);
+  border-color: rgba(255,255,255,0.28);
+  color: #fff;
+}
+.btn-inline.primary:hover { background: rgba(255,255,255,0.22); }
+.btn-inline.primary[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.10);
+  color: rgba(255,255,255,0.5);
+}
+.btn-inline svg { width: 11px; height: 11px; }
+
+/* Link */
+.link-muted {
+  color: rgba(255,255,255,0.5);
+  text-decoration: none;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.link-muted:hover { color: rgba(255,255,255,0.95); }
+.link-muted svg { width: 10px; height: 10px; opacity: 0.7; }
+
+/* About info row */
+.about-line {
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: -0.005em;
+}
+.about-line strong { color: rgba(255,255,255,0.88); font-weight: 500; }
+
+/* Save indicator */
+.save-indicator {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10.5px;
+  font-family: 'IBM Plex Mono', monospace;
+  color: rgba(255,255,255,0.4);
+  letter-spacing: 0.04em;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+.save-indicator.shown { opacity: 1; }
+.save-indicator svg { width: 10px; height: 10px; color: var(--ready); }
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Settings · <span class="accent">FINAL</span></h1>
+<p>V2 · Single column scrollable. Полный функционал: dropdowns с поиском, toggle'ы, slider T2, secret input, hotkey-рекордер, переустановка BlackHole. Изменения авто-сохраняются.</p>
+<div class="nav">
+<a href="/popover-final/">Popover</a>
+<a href="/onboarding-final/">Onboarding</a>
+<a href="/transcript-final/">Transcript</a>
+<a class="current" href="/settings-final/">Settings</a>
+</div>
+</header>
+
+<main class="layout">
+<div class="stage">
+<div class="glass settings-window" id="settings-window">
+<div class="titlebar">
+<div class="traffic"><span class="close"></span><span class="min"></span><span class="max"></span></div>
+<span class="title">Unison · Настройки</span>
+<span style="flex:1"></span>
+<span class="save-indicator" id="save-indicator"><svg><use href="#icon-check"/></svg>сохранено</span>
+</div>
+<div class="content-scroll" id="scroll-area">
+
+<div class="section-head">Аудио</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-mic"/></svg> Микрофон</span>
+<div class="row-value">
+<button class="dd-trigger" data-dropdown="mic">
+<span class="dd-trigger-label">MacBook Pro Mic</span>
+<svg><use href="#icon-chevron-down"/></svg>
+</button>
+</div>
+</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-speaker"/></svg> Динамик</span>
+<div class="row-value">
+<button class="dd-trigger" data-dropdown="speaker">
+<span class="dd-trigger-label">AirPods Pro</span>
+<svg><use href="#icon-chevron-down"/></svg>
+</button>
+</div>
+</div>
+<div class="row">
+<div class="row-stack">
+<span class="row-label">Громкость оригинала</span>
+<span class="row-hint">Тихий фон под переводом во время звонка.</span>
+</div>
+<div class="row-value">
+<input type="range" class="slider" id="vol-slider" min="0" max="100" step="1" value="20">
+<span class="slider-value" id="vol-value">20%</span>
+</div>
+</div>
+
+<div class="section-head">Языки по умолчанию</div>
+<div class="row">
+<span class="row-label">Я говорю</span>
+<div class="row-value">
+<button class="dd-trigger" data-dropdown="lang-mine">
+<span class="dd-trigger-label">Русский</span>
+<svg><use href="#icon-chevron-down"/></svg>
+</button>
+</div>
+</div>
+<div class="row">
+<span class="row-label">Слушаю</span>
+<div class="row-value">
+<button class="dd-trigger" data-dropdown="lang-peer">
+<span class="dd-trigger-label">English</span>
+<svg><use href="#icon-chevron-down"/></svg>
+</button>
+</div>
+</div>
+
+<div class="section-head">OpenAI</div>
+<div class="row">
+<div class="row-stack">
+<span class="row-label"><svg><use href="#icon-key"/></svg> API ключ</span>
+<span class="row-hint">Хранится в Keychain. <a class="link-muted" href="https://platform.openai.com/api-keys" target="_blank">Получить ключ <svg><use href="#icon-extlink"/></svg></a></span>
+</div>
+<div class="row-value">
+<div class="secret-input">
+<input type="password" id="api-key-input" value="sk-abc123_NPI8VJSdhfu9w0c2bfQ-Lk7c2a" autocomplete="off" spellcheck="false">
+<span class="toggle-text" id="api-key-toggle">Показать</span>
+</div>
+</div>
+</div>
+
+<div class="section-head">Hotkeys</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-kbd"/></svg> Старт / стоп</span>
+<div class="row-value">
+<button class="kbd-recorder" data-hotkey="toggle">⌃⌥U</button>
+</div>
+</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-kbd"/></svg> Показать транскрипт</span>
+<div class="row-value">
+<button class="kbd-recorder" data-hotkey="transcript">⌃⌥T</button>
+</div>
+</div>
+
+<div class="section-head">BlackHole</div>
+<div class="row">
+<span class="row-label">BlackHole 2ch</span>
+<div class="row-value"><span class="status-dot" id="bh-2-dot"></span> <span id="bh-2-text">установлен</span></div>
+</div>
+<div class="row">
+<span class="row-label">BlackHole 16ch</span>
+<div class="row-value"><span class="status-dot" id="bh-16-dot"></span> <span id="bh-16-text">установлен</span></div>
+</div>
+<div class="row">
+<div class="row-stack">
+<span class="row-label">Виртуальные аудио-устройства</span>
+<span class="row-hint">Нужны для перехвата звука с приложений и подачи перевода обратно.</span>
+</div>
+<div class="row-value">
+<button class="btn-inline" id="bh-reinstall"><svg><use href="#icon-refresh"/></svg> Переустановить</button>
+</div>
+</div>
+
+<div class="section-head">Поведение</div>
+<div class="row">
+<span class="row-label">Запускать при логине</span>
+<div class="row-value"><div class="toggle on" data-toggle="autostart"></div></div>
+</div>
+<div class="row">
+<span class="row-label">Скрывать меню при старте сессии</span>
+<div class="row-value"><div class="toggle" data-toggle="hidemenu"></div></div>
+</div>
+
+<div class="section-head">О приложении</div>
+<div class="row">
+<span class="row-label">Версия</span>
+<div class="row-value about-line"><strong>1.0.0</strong> · build 42</div>
+</div>
+<div class="row">
+<span class="row-label">Лицензия</span>
+<div class="row-value"><a class="link-muted" href="#">MIT <svg><use href="#icon-extlink"/></svg></a></div>
+</div>
+<div class="row">
+<span class="row-label">Исходный код</span>
+<div class="row-value"><a class="link-muted" href="https://github.com" target="_blank">github.com/unison <svg><use href="#icon-extlink"/></svg></a></div>
+</div>
+
+</div>
+</div>
+</div>
+</main>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+// Data
+// ════════════════════════════════════════════════════════════════
+const MIC_DEVICES = [
+  'MacBook Pro Mic',
+  'AirPods Pro',
+  'External USB Mic',
+  'BlackHole 2ch (Inbound Sink)',
+];
+const SPEAKER_DEVICES = [
+  'AirPods Pro',
+  'MacBook Pro Speakers',
+  'External Display',
+  'BlackHole 2ch (Outgoing Mic)',
+];
+const LANGUAGES = [
+  { code: 'ru', name: 'Русский' },
+  { code: 'en', name: 'English' },
+  { code: 'es', name: 'Español' },
+  { code: 'fr', name: 'Français' },
+  { code: 'de', name: 'Deutsch' },
+  { code: 'it', name: 'Italiano' },
+  { code: 'pt', name: 'Português' },
+  { code: 'pl', name: 'Polski' },
+  { code: 'tr', name: 'Türkçe' },
+  { code: 'ja', name: '日本語' },
+  { code: 'zh', name: '中文' },
+  { code: 'ko', name: '한국어' },
+  { code: 'ar', name: 'العربية' },
+  { code: 'hi', name: 'हिन्दी' },
+  { code: 'nl', name: 'Nederlands' },
+  { code: 'sv', name: 'Svenska' },
+];
+
+const DROPDOWN_SOURCES = {
+  'mic': { items: MIC_DEVICES.map(d => ({label: d})), search: true },
+  'speaker': { items: SPEAKER_DEVICES.map(d => ({label: d})), search: true },
+  'lang-mine': { items: LANGUAGES.map(l => ({label: l.name, code: l.code})), search: true },
+  'lang-peer': { items: LANGUAGES.map(l => ({label: l.name, code: l.code})), search: true },
+};
+
+const state = {
+  mic: 'MacBook Pro Mic',
+  speaker: 'AirPods Pro',
+  'lang-mine': 'Русский',
+  'lang-peer': 'English',
+  volume: 20,
+  apiKey: 'sk-abc123_NPI8VJSdhfu9w0c2bfQ-Lk7c2a',
+  apiKeyVisible: false,
+  hotkeys: { toggle: '⌃⌥U', transcript: '⌃⌥T' },
+  toggles: { autostart: true, hidemenu: false },
+  bh2: 'ready', bh16: 'ready',
+};
+
+// ════════════════════════════════════════════════════════════════
+// Save indicator (auto-save imitation)
+// ════════════════════════════════════════════════════════════════
+const saveIndicator = document.getElementById('save-indicator');
+let saveTimer = null;
+function markSaved() {
+  saveIndicator.classList.add('shown');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => saveIndicator.classList.remove('shown'), 1600);
+}
+
+// ════════════════════════════════════════════════════════════════
+// Dropdowns (portal pattern)
+// ════════════════════════════════════════════════════════════════
+let activeDropdown = null;
+let ddPanel = null;
+
+function buildDropdown(key, trigger) {
+  closeDropdown();
+  const src = DROPDOWN_SOURCES[key];
+  if (!src) return;
+
+  ddPanel = document.createElement('div');
+  ddPanel.className = 'dd-panel';
+
+  const search = src.search && src.items.length > 6;
+  if (search) {
+    ddPanel.innerHTML = `<div class="dd-search-wrap"><svg><use href="#icon-search"/></svg><input type="text" placeholder="Найти…" id="dd-search-input"></div>`;
+  }
+
+  const list = document.createElement('div');
+  list.className = 'dd-list';
+  ddPanel.appendChild(list);
+
+  function renderItems(filter = '') {
+    list.innerHTML = '';
+    const filtered = src.items.filter(item => item.label.toLowerCase().includes(filter.toLowerCase()));
+    if (filtered.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'dd-empty';
+      empty.textContent = 'Не найдено';
+      list.appendChild(empty);
+      return;
+    }
+    filtered.forEach(item => {
+      const el = document.createElement('div');
+      el.className = 'dd-item';
+      if (state[key] === item.label) el.classList.add('selected');
+      el.innerHTML = `<span>${item.label}</span>`;
+      el.addEventListener('click', () => {
+        state[key] = item.label;
+        trigger.querySelector('.dd-trigger-label').textContent = item.label;
+        closeDropdown();
+        markSaved();
+      });
+      list.appendChild(el);
+    });
+  }
+  renderItems();
+
+  document.body.appendChild(ddPanel);
+
+  // Position panel
+  const rect = trigger.getBoundingClientRect();
+  ddPanel.style.minWidth = Math.max(rect.width, 180) + 'px';
+  // Default: place below trigger, right-aligned
+  ddPanel.style.left = (rect.right - Math.max(rect.width, 180)) + 'px';
+  ddPanel.style.top = (rect.bottom + 6) + 'px';
+
+  // After render — check if overflows viewport and flip
+  requestAnimationFrame(() => {
+    const r = ddPanel.getBoundingClientRect();
+    if (r.bottom > window.innerHeight - 20) {
+      ddPanel.style.top = (rect.top - r.height - 6) + 'px';
+    }
+    if (r.left < 8) ddPanel.style.left = '8px';
+    if (r.right > window.innerWidth - 8) ddPanel.style.left = (window.innerWidth - r.width - 8) + 'px';
+    ddPanel.classList.add('shown');
+  });
+
+  trigger.classList.add('open');
+  activeDropdown = { key, trigger };
+
+  if (search) {
+    const input = ddPanel.querySelector('#dd-search-input');
+    input.focus();
+    input.addEventListener('input', () => renderItems(input.value));
+  }
+}
+
+function closeDropdown() {
+  if (ddPanel) {
+    ddPanel.classList.remove('shown');
+    setTimeout(() => { if (ddPanel) ddPanel.remove(); ddPanel = null; }, 150);
+  }
+  if (activeDropdown) {
+    activeDropdown.trigger.classList.remove('open');
+    activeDropdown = null;
+  }
+}
+
+document.querySelectorAll('.dd-trigger').forEach(trigger => {
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const key = trigger.getAttribute('data-dropdown');
+    if (activeDropdown && activeDropdown.key === key) {
+      closeDropdown();
+    } else {
+      buildDropdown(key, trigger);
+    }
+  });
+});
+document.addEventListener('click', (e) => {
+  if (ddPanel && !ddPanel.contains(e.target)) closeDropdown();
+});
+document.getElementById('scroll-area').addEventListener('scroll', closeDropdown);
+
+// ════════════════════════════════════════════════════════════════
+// Volume slider
+// ════════════════════════════════════════════════════════════════
+const volSlider = document.getElementById('vol-slider');
+const volValue = document.getElementById('vol-value');
+function updateSliderFill(el) {
+  const min = +el.min, max = +el.max, val = +el.value;
+  const pct = (val - min) / (max - min);
+  el.style.setProperty('--val', (pct * 100) + '%');
+  el.style.setProperty('--val-opacity', (0.12 + pct * 0.73).toFixed(3));
+}
+volSlider.addEventListener('input', () => {
+  state.volume = parseInt(volSlider.value);
+  volValue.textContent = `${state.volume}%`;
+  updateSliderFill(volSlider);
+});
+volSlider.addEventListener('change', markSaved);
+updateSliderFill(volSlider);
+
+// ════════════════════════════════════════════════════════════════
+// API key (show/hide + edit)
+// ════════════════════════════════════════════════════════════════
+const apiInput = document.getElementById('api-key-input');
+const apiToggle = document.getElementById('api-key-toggle');
+apiToggle.addEventListener('click', () => {
+  state.apiKeyVisible = !state.apiKeyVisible;
+  apiInput.type = state.apiKeyVisible ? 'text' : 'password';
+  apiToggle.textContent = state.apiKeyVisible ? 'Скрыть' : 'Показать';
+});
+apiInput.addEventListener('change', () => {
+  state.apiKey = apiInput.value;
+  markSaved();
+});
+
+// ════════════════════════════════════════════════════════════════
+// Toggles
+// ════════════════════════════════════════════════════════════════
+document.querySelectorAll('.toggle').forEach(t => {
+  t.addEventListener('click', () => {
+    t.classList.toggle('on');
+    const key = t.getAttribute('data-toggle');
+    if (key) {
+      state.toggles[key] = t.classList.contains('on');
+      markSaved();
+    }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// Hotkey recorder
+// ════════════════════════════════════════════════════════════════
+const MOD_MAP = { 'Meta': '⌘', 'Control': '⌃', 'Alt': '⌥', 'Shift': '⇧' };
+const KEY_SPECIAL = {
+  'ArrowUp': '↑', 'ArrowDown': '↓', 'ArrowLeft': '←', 'ArrowRight': '→',
+  ' ': '␣', 'Escape': 'esc', 'Enter': '↵', 'Tab': '⇥', 'Backspace': '⌫',
+};
+let recordingKbd = null;
+let lastHotkeyValue = null;
+
+function formatHotkey(e) {
+  const parts = [];
+  if (e.ctrlKey) parts.push('⌃');
+  if (e.altKey) parts.push('⌥');
+  if (e.shiftKey) parts.push('⇧');
+  if (e.metaKey) parts.push('⌘');
+  let k = e.key;
+  if (KEY_SPECIAL[k]) k = KEY_SPECIAL[k];
+  else if (k.length === 1) k = k.toUpperCase();
+  else if (Object.values(MOD_MAP).includes(k)) return null;
+  else if (['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) return null;
+  parts.push(k);
+  return parts.join('');
+}
+
+function startRecording(btn) {
+  if (recordingKbd && recordingKbd !== btn) stopRecording();
+  recordingKbd = btn;
+  lastHotkeyValue = btn.textContent;
+  btn.classList.add('recording');
+  btn.textContent = 'нажмите…';
+}
+function stopRecording(revert = false) {
+  if (!recordingKbd) return;
+  recordingKbd.classList.remove('recording');
+  if (revert && lastHotkeyValue) recordingKbd.textContent = lastHotkeyValue;
+  recordingKbd = null;
+  lastHotkeyValue = null;
+}
+
+document.querySelectorAll('.kbd-recorder').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (recordingKbd === btn) stopRecording(true);
+    else startRecording(btn);
+  });
+});
+window.addEventListener('keydown', (e) => {
+  if (!recordingKbd) return;
+  e.preventDefault();
+  if (e.key === 'Escape') { stopRecording(true); return; }
+  const formatted = formatHotkey(e);
+  if (!formatted) return;
+  // Require at least one modifier
+  if (!e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) return;
+  recordingKbd.textContent = formatted;
+  const key = recordingKbd.getAttribute('data-hotkey');
+  state.hotkeys[key] = formatted;
+  recordingKbd.classList.remove('recording');
+  recordingKbd = null;
+  markSaved();
+});
+document.addEventListener('click', (e) => {
+  if (recordingKbd && !recordingKbd.contains(e.target)) stopRecording(true);
+});
+
+// ════════════════════════════════════════════════════════════════
+// BlackHole reinstall (mock)
+// ════════════════════════════════════════════════════════════════
+const bhBtn = document.getElementById('bh-reinstall');
+const bh2Dot = document.getElementById('bh-2-dot');
+const bh16Dot = document.getElementById('bh-16-dot');
+const bh2Text = document.getElementById('bh-2-text');
+const bh16Text = document.getElementById('bh-16-text');
+
+bhBtn.addEventListener('click', () => {
+  bhBtn.disabled = true;
+  const originalHTML = bhBtn.innerHTML;
+  bhBtn.innerHTML = '<svg><use href="#icon-refresh"/></svg> Установка…';
+  bhBtn.style.opacity = '0.7';
+  [bh2Dot, bh16Dot].forEach(d => { d.classList.remove('error'); d.classList.add('warn'); });
+  bh2Text.textContent = 'устанавливается…';
+  bh16Text.textContent = 'устанавливается…';
+
+  setTimeout(() => {
+    bhBtn.innerHTML = originalHTML;
+    bhBtn.disabled = false;
+    bhBtn.style.opacity = '';
+    [bh2Dot, bh16Dot].forEach(d => { d.classList.remove('warn'); });
+    bh2Text.textContent = 'установлен';
+    bh16Text.textContent = 'установлен';
+    markSaved();
+  }, 2000);
+});
+
+// ════════════════════════════════════════════════════════════════
+// Traffic light buttons (mock)
+// ════════════════════════════════════════════════════════════════
+document.querySelector('.traffic .close').addEventListener('click', () => {
+  alert('Окно настроек закрывается.');
+});
+
+</script>
+
+</body>
+</html>

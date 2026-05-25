@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Popover · Round 5 · V2a interactive</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="liquidGlass" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="2" seed="9" result="noise"/>
+      <feGaussianBlur in="noise" stdDeviation="3" result="blurredNoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="14" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+
+    <!-- Minimal sliders gear (slider.horizontal.3 style) -->
+    <symbol id="icon-gear" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+        <line x1="2.5" y1="4.5" x2="6" y2="4.5"/>
+        <circle cx="8.5" cy="4.5" r="1.6" fill="currentColor" stroke="none"/>
+        <line x1="11" y1="4.5" x2="13.5" y2="4.5"/>
+        <line x1="2.5" y1="11.5" x2="9.5" y2="11.5"/>
+        <circle cx="12" cy="11.5" r="1.6" fill="currentColor" stroke="none"/>
+        <line x1="14.5" y1="11.5" x2="13.5" y2="11.5"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-play" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M4 2.5c0-.5.5-.8.95-.55l8.5 5.05c.45.27.45.93 0 1.2l-8.5 5.05c-.45.26-.95-.05-.95-.55v-10.2z"/>
+    </symbol>
+
+    <symbol id="icon-stop" viewBox="0 0 16 16">
+      <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/>
+    </symbol>
+
+    <!-- Phone handset (Call) — classic curved receiver -->
+    <symbol id="icon-call" viewBox="0 0 16 16">
+      <path fill="currentColor" d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.6 17.6 0 0 0 4.168 6.608 17.6 17.6 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z"/>
+    </symbol>
+
+    <!-- Headphones (Listen) — band + earcups -->
+    <symbol id="icon-listen" viewBox="0 0 16 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M2.5 11v-3a5.5 5.5 0 0 1 11 0v3"/>
+      </g>
+      <rect x="1.7" y="10.4" width="2.8" height="4" rx="1" fill="currentColor"/>
+      <rect x="11.5" y="10.4" width="2.8" height="4" rx="1" fill="currentColor"/>
+    </symbol>
+
+    <symbol id="arrow-a" viewBox="0 0 40 16">
+      <g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="6" y1="8" x2="34" y2="8"/>
+        <polyline points="10,4 6,8 10,12"/>
+        <polyline points="30,4 34,8 30,12"/>
+      </g>
+    </symbol>
+
+    <symbol id="icon-chevron" viewBox="0 0 16 16">
+      <polyline points="4,6 8,10 12,6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+
+    <symbol id="icon-check" viewBox="0 0 16 16">
+      <polyline points="3,8 7,12 13,4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+  </defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --start-grad: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08));
+  --start-grad-hover: linear-gradient(180deg, rgba(255,255,255,0.30), rgba(255,255,255,0.12));
+  --start-grad-active: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.04));
+  --stop-grad: linear-gradient(180deg, rgba(255, 110, 130, 0.42), rgba(220, 60, 90, 0.28));
+  --stop-grad-hover: linear-gradient(180deg, rgba(255, 130, 150, 0.55), rgba(230, 75, 105, 0.38));
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--page-bg);
+  color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 56px 48px 28px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'Fraunces', serif;
+  font-weight: 300; font-size: 32px;
+  letter-spacing: -0.025em; margin-bottom: 6px;
+}
+.page-header h1 em { font-style: italic; color: var(--accent); font-weight: 300; }
+.page-header p {
+  color: var(--page-mute);
+  font-size: 13.5px; max-width: 720px;
+  line-height: 1.55;
+}
+.page-header p code, .annotations code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.page-header .nav {
+  margin-top: 14px;
+  display: flex; gap: 16px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.layout {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 48px 48px 64px;
+  display: grid;
+  grid-template-columns: minmax(420px, 540px) 1fr;
+  gap: 64px;
+  align-items: flex-start;
+}
+
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: 1fr; }
+}
+
+.demo-wrap {
+  position: sticky; top: 180px;
+}
+
+.frame {
+  position: relative;
+  height: 540px;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 32px 64px -16px rgba(0,0,0,0.7), 0 4px 16px rgba(0,0,0,0.5);
+}
+
+.menubar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex; align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, 'SF Pro Text', sans-serif;
+  font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px;
+  z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+
+.desktop {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+
+.popover-wrap {
+  position: absolute;
+  top: 56%; left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 5;
+}
+
+.popover {
+  width: 340px;
+  padding: 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  backdrop-filter: blur(20px) saturate(160%) url(#liquidGlass);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border-radius: 24px;
+  color: #f5f5f7;
+  font-family: 'DM Sans', sans-serif;
+  position: relative;
+  overflow: visible;
+  box-shadow:
+    0 32px 80px -8px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -1px 0 rgba(0,0,0,0.4),
+    inset 1px 0 0 rgba(255,255,255,0.06),
+    inset -1px 0 0 rgba(255,255,255,0.06);
+}
+.popover::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 60%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.16) 0%, transparent 35%),
+    radial-gradient(ellipse 100% 60% at 30% 0%, rgba(255,255,255,0.22), transparent 70%);
+  border-radius: 24px 24px 50% 50% / 24px 24px 30% 30%;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.popover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 24px;
+  padding: 1px;
+  background: conic-gradient(from 135deg at 50% 50%,
+    rgba(255,255,255,0.4),
+    rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.4) 50%,
+    rgba(255,255,255,0.05) 75%,
+    rgba(255,255,255,0.4));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+/* — header — */
+.top-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 14px;
+  position: relative; z-index: 1;
+}
+.dot {
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #58e09a;
+  box-shadow: 0 0 8px rgba(88, 224, 154, 0.65);
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+.popover.translating .dot {
+  background: #5ac8fa;
+  box-shadow: 0 0 8px rgba(90, 200, 250, 0.75);
+  animation: dotPulse 1.6s ease-in-out infinite;
+}
+@keyframes dotPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.brand-text {
+  font-size: 13px; font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.top-row .spacer { flex: 1; }
+
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+button:focus-visible { outline: 1.5px solid rgba(255, 200, 230, 0.6); outline-offset: 1px; }
+
+.gear-btn {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.55);
+  border-radius: 7px;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+.gear-btn:hover { color: rgba(255,255,255,0.95); background: rgba(255,255,255,0.10); }
+.gear-btn:active { transform: scale(0.94); background: rgba(255,255,255,0.06); }
+.gear-btn svg { width: 14px; height: 14px; }
+
+/* — mode toggle — */
+.mode-toggle {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 2px; background: rgba(0,0,0,0.22);
+  padding: 3px; border-radius: 11px;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.25);
+}
+.mode-seg {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 0;
+  font-size: 12.5px;
+  color: rgba(255,255,255,0.55);
+  border-radius: 8px; font-weight: 500;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.1s ease, box-shadow 0.18s ease;
+}
+.mode-seg:hover { color: rgba(255,255,255,0.85); }
+.mode-seg:active { transform: scale(0.97); }
+.mode-seg.on {
+  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06));
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.25),
+    inset 0 -1px 0 rgba(0,0,0,0.1),
+    0 1px 2px rgba(0,0,0,0.2);
+}
+.mode-seg svg { width: 13px; height: 13px; }
+
+/* — language bar — */
+.lang-bar {
+  background: rgba(0,0,0,0.16);
+  border-radius: 13px;
+  padding: 14px 14px;
+  margin-bottom: 12px;
+  position: relative; z-index: 1;
+  display: flex; align-items: flex-end;
+}
+.lang-side {
+  flex: 1; min-width: 0;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+  position: relative;
+}
+.lang-side:hover { background: rgba(255,255,255,0.06); }
+.lang-side:active { transform: scale(0.98); }
+.lang-side.right { text-align: right; }
+.lang-lbl {
+  font-size: 9.5px;
+  color: rgba(255,255,255,0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.lang-val {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  display: flex; align-items: center; gap: 6px;
+}
+.lang-side.right .lang-val { justify-content: flex-end; }
+.lang-val .flag { font-size: 14px; }
+.lang-val .chev {
+  width: 9px; height: 9px;
+  color: rgba(255,255,255,0.4);
+  transition: transform 0.18s ease;
+}
+.lang-side.open .lang-val .chev { transform: rotate(180deg); color: var(--accent); }
+.arrow-wrap {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 8px 2px;
+  color: rgba(255,255,255,0.55);
+  flex-shrink: 0;
+}
+.arrow-wrap svg { width: 36px; height: 14px; }
+
+/* — dropdown for languages — */
+.lang-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  background: rgba(20, 20, 30, 0.92);
+  backdrop-filter: blur(28px) saturate(170%);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  border-radius: 11px;
+  padding: 4px;
+  min-width: 130px;
+  z-index: 50;
+  box-shadow:
+    0 16px 36px rgba(0,0,0,0.55),
+    inset 0 1px 0 rgba(255,255,255,0.10);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  opacity: 0;
+  transform: translateY(-4px) scale(0.96);
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.lang-side.open .lang-dropdown {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.lang-side .lang-dropdown { left: 0; }
+.lang-side.right .lang-dropdown { right: 0; left: auto; }
+.lang-option {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-size: 13px;
+  letter-spacing: -0.005em;
+  color: rgba(255,255,255,0.85);
+  cursor: pointer;
+  transition: background 0.12s ease;
+  white-space: nowrap;
+}
+.lang-option:hover { background: rgba(255,255,255,0.08); }
+.lang-option.selected { background: rgba(255, 182, 224, 0.12); color: var(--accent); }
+.lang-option .flag { font-size: 14px; }
+.lang-option .check {
+  width: 11px; height: 11px;
+  margin-left: auto;
+  color: var(--accent);
+  opacity: 0;
+}
+.lang-option.selected .check { opacity: 1; }
+
+/* — Start button — */
+.start-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%;
+  background: var(--start-grad);
+  border: 0.5px solid rgba(255,255,255,0.22);
+  color: #fff;
+  padding: 13px;
+  border-radius: 13px;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  position: relative; z-index: 1;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    inset 0 -1px 0 rgba(0,0,0,0.15),
+    0 4px 12px rgba(0,0,0,0.28);
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+  transition: background 0.16s ease, transform 0.08s ease, box-shadow 0.16s ease;
+}
+.start-btn:hover {
+  background: var(--start-grad-hover);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.32),
+    inset 0 -1px 0 rgba(0,0,0,0.15),
+    0 6px 16px rgba(0,0,0,0.35);
+}
+.start-btn:active {
+  background: var(--start-grad-active);
+  transform: scale(0.98);
+  box-shadow:
+    inset 0 1px 1px rgba(0,0,0,0.15),
+    0 1px 4px rgba(0,0,0,0.2);
+}
+.start-btn svg { width: 11px; height: 11px; }
+
+.popover.translating .start-btn {
+  background: var(--stop-grad);
+  border-color: rgba(255, 110, 130, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    inset 0 -1px 0 rgba(0,0,0,0.2),
+    0 4px 14px rgba(220, 60, 90, 0.32);
+}
+.popover.translating .start-btn:hover {
+  background: var(--stop-grad-hover);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.25),
+    inset 0 -1px 0 rgba(0,0,0,0.2),
+    0 6px 18px rgba(220, 60, 90, 0.42);
+}
+
+/* — running timer (shown when translating) — */
+.timer {
+  display: none;
+  text-align: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.08em;
+  margin-top: 10px;
+  position: relative; z-index: 1;
+  font-variant-numeric: tabular-nums;
+}
+.popover.translating .timer { display: block; }
+
+/* — Right column: annotations — */
+.annotations { padding-top: 8px; }
+.ann-title {
+  font-family: 'Fraunces', serif;
+  font-weight: 400;
+  font-size: 22px;
+  letter-spacing: -0.015em;
+  margin-bottom: 4px;
+}
+.ann-subtitle {
+  color: var(--page-mute);
+  font-size: 13.5px;
+  margin-bottom: 24px;
+  max-width: 460px;
+  line-height: 1.55;
+}
+.ann-section {
+  margin-bottom: 32px;
+}
+.ann-section h3 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--page-mute);
+  margin-bottom: 12px;
+  font-weight: 400;
+}
+.ann-section ul {
+  list-style: none;
+  display: flex; flex-direction: column;
+  gap: 10px;
+}
+.ann-section li {
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(245,245,247,0.85);
+  padding-left: 22px;
+  position: relative;
+}
+.ann-section li::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 7px;
+  width: 12px; height: 1px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+.ann-section li strong { color: var(--page-fg); font-weight: 500; }
+.ann-section li code { font-size: 12px; }
+
+.icon-row {
+  display: flex; gap: 24px;
+  margin-bottom: 18px;
+  padding: 14px 0;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.icon-spec {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.icon-spec .icon-box {
+  width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.06);
+  border-radius: 10px;
+  color: rgba(255,255,255,0.9);
+}
+.icon-spec .icon-box svg { width: 18px; height: 18px; }
+.icon-spec .lbl {
+  font-size: 11px;
+  color: var(--page-mute);
+  text-align: center;
+  letter-spacing: -0.005em;
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Popover · <em>Round 5 / V2a interactive</em></h1>
+<p>Финальная версия V2a с обновлёнными иконками и интерактивом. Кликай по mode-toggle, по lang-side, по Start-кнопке — всё работает. Открой в Chrome для рефракции стекла.</p>
+<div class="nav">
+<a href="/popover-round-1/">R1</a>
+<a href="/popover-round-2/">R2</a>
+<a href="/popover-round-3/">R3</a>
+<a href="/popover-round-4/">R4</a>
+<a class="current" href="/popover-round-5/">R5</a>
+</div>
+</header>
+
+<main class="layout">
+
+<div class="demo-wrap">
+<div class="frame">
+<div class="menubar">
+<span class="app-name">Unison</span><span>File</span><span>Edit</span>
+<span class="spacer"></span><span>🌐</span><span style="font-variant-numeric: tabular-nums">14:38</span>
+</div>
+<div class="desktop"></div>
+<div class="popover-wrap">
+<div class="popover" id="popover">
+
+<div class="top-row">
+<span class="dot" id="dot"></span>
+<span class="brand-text">Unison</span>
+<span class="spacer"></span>
+<button class="gear-btn" id="gear-btn" aria-label="Настройки"><svg><use href="#icon-gear"/></svg></button>
+</div>
+
+<div class="mode-toggle" id="mode-toggle">
+<button class="mode-seg on" data-mode="call"><svg><use href="#icon-call"/></svg> Call</button>
+<button class="mode-seg" data-mode="listen"><svg><use href="#icon-listen"/></svg> Listen</button>
+</div>
+
+<div class="lang-bar">
+
+<div class="lang-side" id="lang-mine" data-side="mine">
+<div class="lang-lbl">Я говорю</div>
+<div class="lang-val">
+<span class="flag" id="flag-mine">🇷🇺</span>
+<span id="name-mine">Русский</span>
+<svg class="chev"><use href="#icon-chevron"/></svg>
+</div>
+<div class="lang-dropdown" id="dropdown-mine"></div>
+</div>
+
+<div class="arrow-wrap"><svg><use href="#arrow-a"/></svg></div>
+
+<div class="lang-side right" id="lang-peer" data-side="peer">
+<div class="lang-lbl">Собеседник</div>
+<div class="lang-val">
+<svg class="chev"><use href="#icon-chevron"/></svg>
+<span id="name-peer">English</span>
+<span class="flag" id="flag-peer">🇬🇧</span>
+</div>
+<div class="lang-dropdown" id="dropdown-peer"></div>
+</div>
+
+</div>
+
+<button class="start-btn" id="start-btn">
+<svg id="start-icon"><use href="#icon-play"/></svg>
+<span id="start-label">Начать перевод</span>
+</button>
+
+<div class="timer" id="timer">00:00</div>
+
+</div>
+</div>
+</div>
+</div>
+
+<div class="annotations">
+<div class="ann-title">Что нового</div>
+<div class="ann-subtitle">Иконки, состояния, интерактив. База V2a сохранена: full-width Start, мини-лейблы «Я говорю» / «Собеседник», stroke ↔.</div>
+
+<div class="icon-row">
+<div class="icon-spec">
+<div class="icon-box"><svg><use href="#icon-gear"/></svg></div>
+<div class="lbl">gear<br>(sliders)</div>
+</div>
+<div class="icon-spec">
+<div class="icon-box"><svg><use href="#icon-call"/></svg></div>
+<div class="lbl">Call<br>(телефон)</div>
+</div>
+<div class="icon-spec">
+<div class="icon-box"><svg><use href="#icon-listen"/></svg></div>
+<div class="lbl">Listen<br>(наушники)</div>
+</div>
+</div>
+
+<div class="ann-section">
+<h3>Иконки</h3>
+<ul>
+<li><strong>Settings</strong> — минимальный <code>slider.horizontal.3</code> (две полоски с круглыми регуляторами). Меньше деталей чем gear-with-teeth, лучше работает в маленьком размере 14×14.</li>
+<li><strong>Call</strong> — классическая телефонная трубка. Сразу читается как «звонок», без двусмысленности.</li>
+<li><strong>Listen</strong> — наушники с дугой над ушами. «Слушаю» — про потребление аудио, а не про микрофон.</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Интерактив</h3>
+<ul>
+<li><strong>Mode-toggle</strong> — клик переключает Call / Listen, slide-animation на pill. Hover осветляет неактивную вкладку.</li>
+<li><strong>Lang side</strong> — клик открывает dropdown со всеми 10 языками. Chevron поворачивается на 180°, активная строка подсвечена розовым с галочкой.</li>
+<li><strong>Start button</strong> — состояния <code>:hover</code> / <code>:active</code> (scale 0.98) / <code>:focus-visible</code>. Клик переводит в режим Translating: цвет → красный «Stop», статус-точка → синяя пульсация, появляется таймер.</li>
+<li><strong>Gear button</strong> — hover-подсветка, нажатие даёт <code>scale(0.94)</code> — мини-feedback.</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Состояния</h3>
+<ul>
+<li><strong>● зелёный</strong> — Ready (idle). <strong>● синий пульсирует</strong> — Translating. (Жёлтый — reconnecting, красный — error — добавим когда нужно.)</li>
+<li><strong>Кнопка</strong> переходит из «Начать перевод» в «Остановить» с красным градиентом и stop-иконкой ▪</li>
+<li><strong>Таймер</strong> моноширинный <code>00:00</code> появляется под кнопкой, считает реальное время сессии.</li>
+</ul>
+</div>
+
+<div class="ann-section">
+<h3>Что ещё можно дотюнить</h3>
+<ul>
+<li>Подсветка кнопки <code>:focus-visible</code> сейчас базовая — можно сделать accent-ring аккуратнее</li>
+<li>Анимация slide-pill между Call / Listen (сейчас вкладки просто меняют фон — можно добавить плавно скользящий highlight)</li>
+<li>Когда меняешь язык — flag можно скейлить short bounce-in для тактильности</li>
+</ul>
+</div>
+
+</div>
+
+</main>
+
+<script>
+// --- Languages catalog
+const LANGS = [
+  { code: 'ru', flag: '🇷🇺', name: 'Русский' },
+  { code: 'en', flag: '🇬🇧', name: 'English' },
+  { code: 'es', flag: '🇪🇸', name: 'Español' },
+  { code: 'fr', flag: '🇫🇷', name: 'Français' },
+  { code: 'de', flag: '🇩🇪', name: 'Deutsch' },
+  { code: 'it', flag: '🇮🇹', name: 'Italiano' },
+  { code: 'pt', flag: '🇵🇹', name: 'Português' },
+  { code: 'zh', flag: '🇨🇳', name: '中文' },
+  { code: 'ja', flag: '🇯🇵', name: '日本語' },
+  { code: 'ko', flag: '🇰🇷', name: '한국어' },
+];
+
+const state = {
+  mine: 'ru',
+  peer: 'en',
+  mode: 'call',
+  translating: false,
+  timerStart: null,
+  timerInterval: null,
+};
+
+// --- Mode toggle
+document.querySelectorAll('#mode-toggle .mode-seg').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#mode-toggle .mode-seg').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    state.mode = btn.dataset.mode;
+  });
+});
+
+// --- Language dropdowns
+function renderDropdown(side) {
+  const drop = document.getElementById(`dropdown-${side}`);
+  const currentCode = state[side];
+  drop.innerHTML = LANGS.map(l => `
+    <div class="lang-option ${l.code === currentCode ? 'selected' : ''}" data-code="${l.code}">
+      <span class="flag">${l.flag}</span>
+      <span>${l.name}</span>
+      <svg class="check"><use href="#icon-check"/></svg>
+    </div>
+  `).join('');
+  drop.querySelectorAll('.lang-option').forEach(opt => {
+    opt.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const code = opt.dataset.code;
+      const lang = LANGS.find(l => l.code === code);
+      state[side] = code;
+      document.getElementById(`flag-${side}`).textContent = lang.flag;
+      document.getElementById(`name-${side}`).textContent = lang.name;
+      closeAllDropdowns();
+    });
+  });
+}
+
+function openDropdown(side) {
+  closeAllDropdowns();
+  renderDropdown(side);
+  document.getElementById(`lang-${side}`).classList.add('open');
+}
+
+function closeAllDropdowns() {
+  document.querySelectorAll('.lang-side').forEach(el => el.classList.remove('open'));
+}
+
+['mine', 'peer'].forEach(side => {
+  document.getElementById(`lang-${side}`).addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (document.getElementById(`lang-${side}`).classList.contains('open')) {
+      closeAllDropdowns();
+    } else {
+      openDropdown(side);
+    }
+  });
+});
+
+document.addEventListener('click', closeAllDropdowns);
+
+// --- Start button
+const startBtn = document.getElementById('start-btn');
+const startLabel = document.getElementById('start-label');
+const startIcon = document.getElementById('start-icon');
+const popover = document.getElementById('popover');
+const timer = document.getElementById('timer');
+
+function formatTime(seconds) {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = (seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function setTranslating(on) {
+  state.translating = on;
+  popover.classList.toggle('translating', on);
+  if (on) {
+    startLabel.textContent = 'Остановить';
+    startIcon.innerHTML = '<use href="#icon-stop"/>';
+    state.timerStart = Date.now();
+    state.timerInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - state.timerStart) / 1000);
+      timer.textContent = formatTime(elapsed);
+    }, 250);
+  } else {
+    startLabel.textContent = 'Начать перевод';
+    startIcon.innerHTML = '<use href="#icon-play"/>';
+    clearInterval(state.timerInterval);
+    timer.textContent = '00:00';
+  }
+}
+
+startBtn.addEventListener('click', () => setTranslating(!state.translating));
+
+// --- Gear button (placeholder action)
+document.getElementById('gear-btn').addEventListener('click', () => {
+  // Future: open settings window
+  console.log('Open settings');
+});
+</script>
+
+</body>
+</html>

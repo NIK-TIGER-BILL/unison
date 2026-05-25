@@ -1,0 +1,178 @@
+import Foundation
+import UnisonDomain
+
+/// Pure-function transcript grouping. Mirrors the JS algorithm in
+/// `design/transcript-final/index.html` so the SwiftUI rendering matches
+/// the HTML mock exactly.
+///
+/// - Runs of same-speaker entries collapse into a `BubbleGroup`.
+/// - Long messages split at sentence boundaries (`.`, `!`, `?`) into
+///   ≤`splitThreshold` character chunks; the first non-empty chunk gets
+///   `isFirstInGroup`, the last gets `isLastInGroup`.
+/// - `liveEntryId`, when non-nil and matching the very last entry, marks
+///   the last bubble of the last group as `isLive` (renders typing dots).
+public enum TranscriptGrouping {
+    public static let defaultSplitThreshold = 240
+
+    public static func group(
+        entries: [TranscriptEntry],
+        splitThreshold: Int = defaultSplitThreshold,
+        liveEntryId: UUID? = nil
+    ) -> [BubbleGroup] {
+        guard !entries.isEmpty else { return [] }
+
+        // 1. Bucket entries into runs of the same speaker.
+        var runs: [[TranscriptEntry]] = []
+        for entry in entries {
+            if var last = runs.last, last.last?.speaker == entry.speaker {
+                last.append(entry)
+                runs[runs.count - 1] = last
+            } else {
+                runs.append([entry])
+            }
+        }
+
+        // 2. Build a bubble list per run, then mark first/last/live.
+        var groups: [BubbleGroup] = []
+        for (runIndex, run) in runs.enumerated() {
+            var rawBubbles: [BubbleViewModel] = []
+            for entry in run {
+                rawBubbles.append(contentsOf: bubbles(for: entry, splitThreshold: splitThreshold))
+            }
+            guard let first = rawBubbles.first else { continue }
+            let last = rawBubbles.last!
+            // Mark first and last by re-emitting; replace flags via a new
+            // immutable instance (BubbleViewModel is a value type).
+            let isLastRun = runIndex == runs.count - 1
+            var flagged: [BubbleViewModel] = []
+            for (i, b) in rawBubbles.enumerated() {
+                let isFirst = (i == 0)
+                let isLast = (i == rawBubbles.count - 1)
+                let isLive = isLastRun && isLast
+                    && liveEntryId != nil
+                    && run.last?.id == liveEntryId
+                flagged.append(
+                    BubbleViewModel(
+                        id: b.id,
+                        speaker: b.speaker,
+                        primaryText: b.primaryText,
+                        secondaryText: b.secondaryText,
+                        isFirstInGroup: isFirst,
+                        isLastInGroup: isLast,
+                        isLive: isLive
+                    )
+                )
+            }
+            _ = first; _ = last
+            groups.append(BubbleGroup(id: flagged[0].id, speaker: run[0].speaker, bubbles: flagged))
+        }
+        return groups
+    }
+
+    // MARK: - Private
+
+    /// Expand one `TranscriptEntry` into one or more bubbles.
+    /// - For a `.me` entry: primary = `originalText`, secondary = `translatedText`.
+    /// - For a `.peer` entry: primary = `translatedText`, secondary = `originalText`.
+    /// - Long primary/secondary strings split at sentence boundaries.
+    static func bubbles(for entry: TranscriptEntry, splitThreshold: Int) -> [BubbleViewModel] {
+        let primaryRaw: String
+        let secondaryRaw: String
+        switch entry.speaker {
+        case .me:
+            primaryRaw = entry.originalText ?? ""
+            secondaryRaw = entry.translatedText
+        case .peer:
+            primaryRaw = entry.translatedText
+            secondaryRaw = entry.originalText ?? ""
+        }
+        let primaryParts = splitOnSentence(primaryRaw, threshold: splitThreshold)
+        let secondaryParts = splitOnSentence(secondaryRaw, threshold: splitThreshold)
+        let n = max(primaryParts.count, secondaryParts.count, 1)
+        var out: [BubbleViewModel] = []
+        out.reserveCapacity(n)
+        for i in 0..<n {
+            let p = primaryParts[safe: i] ?? primaryParts.last ?? primaryRaw
+            let s = secondaryParts[safe: i] ?? secondaryParts.last ?? secondaryRaw
+            // Stable derivative id so SwiftUI diffing works across re-groups.
+            let bubbleId = derive(entry.id, suffix: i)
+            out.append(
+                BubbleViewModel(
+                    id: bubbleId,
+                    speaker: entry.speaker,
+                    primaryText: p,
+                    secondaryText: s,
+                    isFirstInGroup: false,
+                    isLastInGroup: false,
+                    isLive: false
+                )
+            )
+        }
+        return out
+    }
+
+    /// Split a string into chunks ≤ `threshold` characters, breaking only
+    /// at sentence-terminator runs (`.`, `!`, `?` plus trailing whitespace).
+    /// If the string is short enough, returns a single-element array.
+    /// Empty strings produce an empty array (so callers can pad with the
+    /// previous chunk).
+    static func splitOnSentence(_ text: String, threshold: Int) -> [String] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        if trimmed.count <= threshold { return [trimmed] }
+
+        // Match sentences as `[^.!?]+[.!?]+\s*` — same regex as the JS source.
+        let pattern = #"[^.!?]+[.!?]+\s*"#
+        let nsText = trimmed as NSString
+        var sentences: [String] = []
+        if let regex = try? NSRegularExpression(pattern: pattern) {
+            let matches = regex.matches(in: trimmed, range: NSRange(location: 0, length: nsText.length))
+            for m in matches {
+                sentences.append(nsText.substring(with: m.range))
+            }
+        }
+        if sentences.isEmpty {
+            // Fallback: a single sentence with no terminator; hard-split by length.
+            sentences = [trimmed]
+        }
+
+        var chunks: [String] = []
+        var buffer = ""
+        for s in sentences {
+            // If adding this sentence would overflow AND we already have
+            // content in the buffer, flush.
+            if (buffer + s).count > threshold && !buffer.isEmpty {
+                chunks.append(buffer.trimmingCharacters(in: .whitespacesAndNewlines))
+                buffer = s
+            } else {
+                buffer += s
+            }
+        }
+        let tail = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tail.isEmpty { chunks.append(tail) }
+        return chunks.isEmpty ? [trimmed] : chunks
+    }
+
+    /// Deterministic child id from the entry id + chunk index, so SwiftUI's
+    /// ForEach can diff bubble-by-bubble across re-renders without flicker.
+    static func derive(_ parent: UUID, suffix: Int) -> UUID {
+        if suffix == 0 { return parent }
+        // Mix the suffix into the high bytes of the UUID's bytes.
+        var bytes = withUnsafeBytes(of: parent.uuid) { Array($0) }
+        let mix = UInt8(suffix & 0xFF)
+        bytes[15] ^= mix
+        bytes[14] ^= UInt8((suffix >> 8) & 0xFF)
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}

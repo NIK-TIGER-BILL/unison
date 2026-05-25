@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Settings · R1</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<filter id="liquidGlassSubtle" x="-10%" y="-10%" width="120%" height="120%">
+<feTurbulence type="fractalNoise" baseFrequency="0.014 0.02" numOctaves="2" seed="3" result="noise"/>
+<feGaussianBlur in="noise" stdDeviation="2.5" result="blurredNoise"/>
+<feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="12" xChannelSelector="R" yChannelSelector="G"/>
+</filter>
+
+<symbol id="icon-chevron-down" viewBox="0 0 16 16"><path d="M4 6 L8 10 L12 6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="icon-chevron-right" viewBox="0 0 16 16"><path d="M6 4 L10 8 L6 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="icon-search" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><line x1="10.5" y1="10.5" x2="13.5" y2="13.5"/></g></symbol>
+<symbol id="icon-mic" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="6" y="2" width="4" height="7" rx="2"/><path d="M4 8a4 4 0 0 0 8 0"/><line x1="8" y1="12" x2="8" y2="14"/></g></symbol>
+<symbol id="icon-speaker" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6 L3 10 L6 10 L10 13 L10 3 L6 6 Z"/><path d="M12 6 Q13.5 8 12 10"/></g></symbol>
+<symbol id="icon-lang" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><line x1="2" y1="8" x2="14" y2="8"/><path d="M8 2 Q4.5 8 8 14"/><path d="M8 2 Q11.5 8 8 14"/></g></symbol>
+<symbol id="icon-key" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="11" r="2.5"/><path d="M7 9 L13 3 M11 5 L13 7 M9 7 L11 9"/></g></symbol>
+<symbol id="icon-kbd" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><rect x="2" y="4" width="12" height="8" rx="1.5"/><line x1="4" y1="7" x2="4.5" y2="7"/><line x1="6" y1="7" x2="6.5" y2="7"/><line x1="8" y1="7" x2="8.5" y2="7"/><line x1="10" y1="7" x2="10.5" y2="7"/><line x1="12" y1="7" x2="12.5" y2="7"/><line x1="5" y1="10" x2="11" y2="10"/></g></symbol>
+<symbol id="icon-info" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><line x1="8" y1="11.5" x2="8" y2="7.5"/><circle cx="8" cy="5" r="0.5" fill="currentColor"/></g></symbol>
+<symbol id="icon-check" viewBox="0 0 16 16"><path d="M3.5 8.5 L7 12 L13 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+<symbol id="icon-plus" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><line x1="8" y1="3" x2="8" y2="13"/><line x1="3" y1="8" x2="13" y2="8"/></g></symbol>
+</defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --ready: #58e09a;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg); color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.03em; margin-bottom: 4px;
+}
+.page-header h1 .accent { color: var(--accent); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; max-width: 760px; }
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px; letter-spacing: 0.04em; flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(620px, 1fr));
+  gap: 48px;
+  padding: 48px;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+.variation { display: flex; flex-direction: column; gap: 14px; }
+.variation-label {
+  display: flex; align-items: baseline; justify-content: space-between;
+}
+.variation-label .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; color: var(--page-mute);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+
+.stage {
+  background:
+    radial-gradient(ellipse 60% 50% at 70% 30%, rgba(100, 230, 255, 0.35), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 30% 70%, rgba(255, 110, 200, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+  padding: 36px;
+  border-radius: 14px;
+  box-shadow: 0 16px 40px -8px rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  min-height: 500px;
+}
+
+.card-desc {
+  font-size: 12.5px; color: var(--page-mute);
+  line-height: 1.55;
+}
+.card-desc strong { color: var(--page-fg); font-weight: 500; }
+
+/* ═══════════════════ Shared Liquid Glass ═══════════════════ */
+.glass {
+  position: relative;
+  background: rgba(20, 22, 30, 0.55);
+  backdrop-filter: blur(36px) saturate(200%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border: 0.5px solid rgba(255,255,255,0.13);
+  box-shadow:
+    0 16px 36px rgba(0,0,0,0.5),
+    inset 0 1px 0 rgba(255,255,255,0.16);
+}
+.glass::after {
+  content: ""; position: absolute; inset: 0;
+  border-radius: inherit; padding: 1px;
+  background: conic-gradient(from 120deg at 50% 50%,
+    rgba(255,255,255,0.45), rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.35) 50%, rgba(255,255,255,0.05) 75%, rgba(255,255,255,0.45));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; opacity: 0.5;
+}
+
+/* ═══════════════════ Settings window base ═══════════════════ */
+.settings-window {
+  width: 540px;
+  border-radius: 14px;
+  color: var(--page-fg);
+  overflow: hidden;
+  position: relative;
+}
+.titlebar {
+  height: 30px;
+  display: flex; align-items: center;
+  padding: 0 12px;
+  gap: 8px;
+  border-bottom: 0.5px solid rgba(255,255,255,0.07);
+  position: relative; z-index: 2;
+}
+.traffic { display: flex; gap: 6px; }
+.traffic span {
+  width: 11px; height: 11px;
+  border-radius: 50%;
+  display: block;
+}
+.traffic .close { background: #ff5f57; }
+.traffic .min { background: #febc2e; }
+.traffic .max { background: #28c840; }
+.titlebar .title {
+  font-size: 12.5px; font-weight: 500;
+  color: rgba(255,255,255,0.85);
+  margin-left: 6px;
+  letter-spacing: -0.005em;
+}
+
+/* Settings row primitives */
+.row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 16px;
+  font-size: 12.5px;
+  letter-spacing: -0.005em;
+  min-height: 38px;
+}
+.row + .row { border-top: 0.5px solid rgba(255,255,255,0.05); }
+.row-label {
+  display: flex; align-items: center; gap: 9px;
+  color: rgba(255,255,255,0.88);
+}
+.row-label svg { width: 13px; height: 13px; color: rgba(255,255,255,0.55); flex-shrink: 0; }
+.row-value {
+  display: flex; align-items: center; gap: 6px;
+  color: rgba(255,255,255,0.55);
+  font-size: 12px;
+}
+.row-value .chip {
+  background: rgba(255,255,255,0.07);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.85);
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.row-value .chip svg { width: 10px; height: 10px; opacity: 0.55; }
+.row-value .kbd {
+  font-family: 'IBM Plex Mono', monospace;
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.85);
+}
+.status-dot {
+  display: inline-block; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--ready);
+  box-shadow: 0 0 6px rgba(88, 224, 154, 0.6);
+}
+
+/* Section header (для variantов с подзаголовками) */
+.section-head {
+  padding: 14px 16px 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: rgba(255,255,255,0.45);
+  font-weight: 400;
+}
+.section-head:first-child { padding-top: 18px; }
+
+/* Toggle (pill) */
+.toggle {
+  width: 32px; height: 18px;
+  background: rgba(255,255,255,0.10);
+  border-radius: 10px;
+  position: relative;
+  cursor: pointer;
+  border: 0.5px solid rgba(255,255,255,0.12);
+  transition: background 0.15s;
+}
+.toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 12px; height: 12px;
+  background: linear-gradient(180deg, #fff, #d8d8da);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  transition: left 0.15s;
+}
+.toggle.on { background: rgba(88, 224, 154, 0.32); border-color: rgba(88, 224, 154, 0.55); }
+.toggle.on::after { left: 16px; }
+
+/* Slider (T2) */
+.slider {
+  -webkit-appearance: none; appearance: none;
+  width: 110px; height: 6px;
+  border-radius: 3px;
+  --val: 50%; --val-opacity: 0.55;
+  background: linear-gradient(to right,
+    rgba(255,255,255, var(--val-opacity)) 0%,
+    rgba(255,255,255, var(--val-opacity)) var(--val),
+    rgba(255,255,255, 0.10) var(--val),
+    rgba(255,255,255, 0.10) 100%);
+  outline: none; cursor: pointer;
+}
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 4px; height: 18px;
+  background: linear-gradient(180deg, #fff, #ddd);
+  border: none; border-radius: 2px;
+  cursor: grab;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+}
+
+/* Secret input (mock) */
+.secret-input {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  padding: 4px 8px;
+  border-radius: 6px;
+  width: 170px;
+}
+.secret-input .dots {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.7);
+  letter-spacing: 0.08em;
+  flex: 1; overflow: hidden; white-space: nowrap;
+}
+.secret-input .show {
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.5);
+  cursor: pointer;
+}
+
+/* Generic content area scroll */
+.content-scroll {
+  max-height: 440px;
+  overflow-y: auto;
+  position: relative; z-index: 2;
+}
+.content-scroll::-webkit-scrollbar { width: 6px; }
+.content-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+
+/* ═══════════════════ V1 · Sidebar + content ═══════════════════ */
+.v1 .body { display: flex; min-height: 440px; }
+.v1 .sidebar {
+  width: 160px;
+  border-right: 0.5px solid rgba(255,255,255,0.06);
+  padding: 14px 6px;
+  display: flex; flex-direction: column;
+  gap: 1px;
+  position: relative; z-index: 2;
+}
+.v1 .tab {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  color: rgba(255,255,255,0.75);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+  letter-spacing: -0.005em;
+}
+.v1 .tab svg { width: 13px; height: 13px; color: rgba(255,255,255,0.55); }
+.v1 .tab:hover { background: rgba(255,255,255,0.06); color: #fff; }
+.v1 .tab.active { background: rgba(255, 182, 224, 0.12); color: #fff; }
+.v1 .tab.active svg { color: var(--accent); }
+.v1 .content {
+  flex: 1;
+  padding: 6px 0;
+  position: relative; z-index: 2;
+}
+
+/* ═══════════════════ V2 · Single column scrollable ═══════════════════ */
+.v2 .content-scroll { padding: 4px 0; }
+
+/* ═══════════════════ V3 · Card grid ═══════════════════ */
+.v3 .body {
+  padding: 18px;
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  position: relative; z-index: 2;
+}
+.v3 .cat {
+  padding: 14px;
+  background: rgba(255,255,255,0.04);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.v3 .cat:hover { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.14); }
+.v3 .cat-head {
+  display: flex; align-items: center; gap: 9px;
+  margin-bottom: 5px;
+}
+.v3 .cat-head svg { width: 14px; height: 14px; color: var(--accent); opacity: 0.85; }
+.v3 .cat-title { font-size: 13px; font-weight: 500; color: #fff; }
+.v3 .cat-summary {
+  font-size: 11.5px; color: rgba(255,255,255,0.55);
+  letter-spacing: -0.005em;
+  line-height: 1.4;
+}
+
+/* ═══════════════════ V4 · Collapsible sections (Notion) ═══════════════════ */
+.v4 .content-scroll { padding: 4px 0; }
+.v4 .group {
+  border-top: 0.5px solid rgba(255,255,255,0.05);
+}
+.v4 .group:first-child { border-top: none; }
+.v4 .group-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px;
+  cursor: pointer;
+  font-size: 12.5px; font-weight: 500;
+  color: rgba(255,255,255,0.9);
+  user-select: none;
+}
+.v4 .group-head svg { width: 11px; height: 11px; color: rgba(255,255,255,0.5); transition: transform 0.2s; }
+.v4 .group.open .group-head svg { transform: rotate(90deg); }
+.v4 .group-head .count {
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: rgba(255,255,255,0.4);
+  letter-spacing: 0.06em;
+}
+.v4 .group-body { display: none; }
+.v4 .group.open .group-body { display: block; }
+
+/* ═══════════════════ V5 · Search-first ═══════════════════ */
+.v5 .search-bar {
+  padding: 14px 16px 10px;
+  position: relative; z-index: 2;
+  border-bottom: 0.5px solid rgba(255,255,255,0.06);
+}
+.v5 .search-input {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.10);
+}
+.v5 .search-input svg {
+  width: 13px; height: 13px;
+  color: rgba(255,255,255,0.5);
+}
+.v5 .search-input input {
+  background: none; border: none; outline: none;
+  font: inherit; font-size: 13px;
+  color: #fff;
+  flex: 1;
+  letter-spacing: -0.005em;
+}
+.v5 .search-input input::placeholder { color: rgba(255,255,255,0.4); }
+.v5 .content-scroll { padding-top: 4px; }
+.v5 .row-extra-hint {
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.35);
+  font-family: 'IBM Plex Mono', monospace;
+  margin-left: auto;
+  margin-right: 8px;
+  letter-spacing: 0.06em;
+}
+
+/* ═══════════════════ V6 · Mini all-in-one ═══════════════════ */
+.v6 .settings-window { width: 460px; }
+.v6 .body { padding: 18px 18px 20px; position: relative; z-index: 2; }
+.v6 .head-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 14px;
+}
+.v6 .head-row h2 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 18px;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+.v6 .head-row .ver {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.4);
+  letter-spacing: 0.06em;
+}
+.v6 .compact-group {
+  display: flex; flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 0.5px solid rgba(255,255,255,0.06);
+}
+.v6 .compact-group:first-of-type { border-top: none; padding-top: 4px; }
+.v6 .compact-group-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.4);
+  margin-bottom: 4px;
+}
+.v6 .mini-row {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12px;
+  letter-spacing: -0.005em;
+}
+.v6 .mini-row .label { color: rgba(255,255,255,0.82); display: flex; align-items: center; gap: 7px; }
+.v6 .mini-row .label svg { width: 12px; height: 12px; color: rgba(255,255,255,0.5); }
+.v6 .mini-row .val { color: rgba(255,255,255,0.55); font-size: 11.5px; }
+.v6 .mini-row .chip {
+  background: rgba(255,255,255,0.07);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.85);
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Settings · <span class="accent">R1</span></h1>
+<p>6 разных подходов к компоновке полного окна настроек. Содержание единое: audio devices (микрофон/динамик), языки по умолчанию, OpenAI key, hotkeys, BlackHole status, About. Цель — выбрать структурный паттерн.</p>
+<div class="nav">
+<a href="/popover-final/">Popover</a>
+<a href="/onboarding-final/">Onboarding</a>
+<a href="/transcript-final/">Transcript</a>
+<a class="current" href="/settings-round-1/">Settings R1</a>
+</div>
+</header>
+
+<main class="grid">
+
+<!-- V1 · Sidebar + content -->
+<div class="variation">
+<div class="variation-label"><span class="num">V1 · Sidebar + content</span></div>
+<div class="stage">
+<div class="glass settings-window v1">
+<div class="titlebar">
+<div class="traffic"><span class="close"></span><span class="min"></span><span class="max"></span></div>
+<span class="title">Unison · Настройки</span>
+</div>
+<div class="body">
+<aside class="sidebar">
+<div class="tab active"><svg><use href="#icon-speaker"/></svg> Аудио</div>
+<div class="tab"><svg><use href="#icon-lang"/></svg> Языки</div>
+<div class="tab"><svg><use href="#icon-key"/></svg> OpenAI</div>
+<div class="tab"><svg><use href="#icon-kbd"/></svg> Hotkeys</div>
+<div class="tab"><svg><use href="#icon-info"/></svg> О приложении</div>
+</aside>
+<div class="content">
+<div class="row">
+<span class="row-label"><svg><use href="#icon-mic"/></svg> Микрофон</span>
+<span class="row-value"><span class="chip">MacBook Pro Mic <svg><use href="#icon-chevron-down"/></svg></span></span>
+</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-speaker"/></svg> Динамик</span>
+<span class="row-value"><span class="chip">AirPods Pro <svg><use href="#icon-chevron-down"/></svg></span></span>
+</div>
+<div class="row">
+<span class="row-label">Громкость оригинала</span>
+<span class="row-value"><input type="range" class="slider" min="0" max="100" value="20" style="--val:20%; --val-opacity: 0.26"></span>
+</div>
+<div class="row">
+<span class="row-label">BlackHole 2ch</span>
+<span class="row-value"><span class="status-dot"></span> установлен</span>
+</div>
+<div class="row">
+<span class="row-label">BlackHole 16ch</span>
+<span class="row-value"><span class="status-dot"></span> установлен</span>
+</div>
+<div class="row">
+<span class="row-label">Запускать при логине</span>
+<span class="row-value"><div class="toggle on"></div></span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Sidebar + content.</strong> Классика macOS System Settings. Слева — категории, справа — содержимое выбранной. Чёткая иерархия, легко расширять. Минус: ширина окна обязана быть достаточной, контент одной категории может остаться короткой при ширине ~380px.</p>
+</div>
+
+<!-- V2 · Single column scrollable -->
+<div class="variation">
+<div class="variation-label"><span class="num">V2 · Single column scrollable</span></div>
+<div class="stage">
+<div class="glass settings-window v2">
+<div class="titlebar">
+<div class="traffic"><span class="close"></span><span class="min"></span><span class="max"></span></div>
+<span class="title">Unison · Настройки</span>
+</div>
+<div class="content-scroll">
+<div class="section-head">Аудио</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-mic"/></svg> Микрофон</span>
+<span class="row-value"><span class="chip">MacBook Pro Mic <svg><use href="#icon-chevron-down"/></svg></span></span>
+</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-speaker"/></svg> Динамик</span>
+<span class="row-value"><span class="chip">AirPods Pro <svg><use href="#icon-chevron-down"/></svg></span></span>
+</div>
+<div class="row">
+<span class="row-label">Громкость оригинала</span>
+<span class="row-value"><input type="range" class="slider" min="0" max="100" value="20" style="--val:20%; --val-opacity: 0.26"></span>
+</div>
+<div class="section-head">Языки</div>
+<div class="row">
+<span class="row-label">Я говорю</span>
+<span class="row-value"><span class="chip">Русский <svg><use href="#icon-chevron-down"/></svg></span></span>
+</div>
+<div class="row">
+<span class="row-label">Слушаю</span>
+<span class="row-value"><span class="chip">English <svg><use href="#icon-chevron-down"/></svg></span></span>
+</div>
+<div class="section-head">OpenAI</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-key"/></svg> API ключ</span>
+<span class="row-value"><div class="secret-input"><span class="dots">••••••••••••</span><span class="show">Показать</span></div></span>
+</div>
+<div class="section-head">Hotkeys</div>
+<div class="row">
+<span class="row-label">Старт / стоп</span>
+<span class="row-value"><span class="kbd">⌃⌥U</span></span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Single column scroll.</strong> Все настройки в одну колонку, разделены секциями с заголовками. Простой контракт: одна колонка → проще сделать responsive, проще найти настройку через Cmd+F. Минус: при большом количестве полей становится длинно.</p>
+</div>
+
+<!-- V3 · Card grid -->
+<div class="variation">
+<div class="variation-label"><span class="num">V3 · Card grid</span></div>
+<div class="stage">
+<div class="glass settings-window v3">
+<div class="titlebar">
+<div class="traffic"><span class="close"></span><span class="min"></span><span class="max"></span></div>
+<span class="title">Unison · Настройки</span>
+</div>
+<div class="body">
+<div class="cat">
+<div class="cat-head"><svg><use href="#icon-speaker"/></svg><span class="cat-title">Аудио</span></div>
+<div class="cat-summary">Микрофон, динамик, громкость оригинала</div>
+</div>
+<div class="cat">
+<div class="cat-head"><svg><use href="#icon-lang"/></svg><span class="cat-title">Языки</span></div>
+<div class="cat-summary">Я говорю русский · слушаю английский</div>
+</div>
+<div class="cat">
+<div class="cat-head"><svg><use href="#icon-key"/></svg><span class="cat-title">OpenAI</span></div>
+<div class="cat-summary">API ключ · модель gpt-realtime</div>
+</div>
+<div class="cat">
+<div class="cat-head"><svg><use href="#icon-kbd"/></svg><span class="cat-title">Hotkeys</span></div>
+<div class="cat-summary">⌃⌥U · ⌃⌥T</div>
+</div>
+<div class="cat">
+<div class="cat-head"><svg><use href="#icon-mic"/></svg><span class="cat-title">BlackHole</span></div>
+<div class="cat-summary">2ch · 16ch · установлены</div>
+</div>
+<div class="cat">
+<div class="cat-head"><svg><use href="#icon-info"/></svg><span class="cat-title">О приложении</span></div>
+<div class="cat-summary">Версия 1.0 · MIT licence</div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Card grid.</strong> Категории — 2×3 карточки. Клик открывает детальный вид (как iPad Settings или Slack). Эстетично, дружелюбно к новичкам. Минус: 2 шага для смены настройки (открыть карточку → изменить); неудобно для часто меняемых параметров.</p>
+</div>
+
+<!-- V4 · Collapsible sections -->
+<div class="variation">
+<div class="variation-label"><span class="num">V4 · Collapsible sections</span></div>
+<div class="stage">
+<div class="glass settings-window v4">
+<div class="titlebar">
+<div class="traffic"><span class="close"></span><span class="min"></span><span class="max"></span></div>
+<span class="title">Unison · Настройки</span>
+</div>
+<div class="content-scroll">
+<div class="group open">
+<div class="group-head"><svg><use href="#icon-chevron-right"/></svg> Аудио <span class="count">3</span></div>
+<div class="group-body">
+<div class="row">
+<span class="row-label"><svg><use href="#icon-mic"/></svg> Микрофон</span>
+<span class="row-value"><span class="chip">MacBook Pro Mic <svg><use href="#icon-chevron-down"/></svg></span></span>
+</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-speaker"/></svg> Динамик</span>
+<span class="row-value"><span class="chip">AirPods Pro <svg><use href="#icon-chevron-down"/></svg></span></span>
+</div>
+<div class="row">
+<span class="row-label">Громкость оригинала</span>
+<span class="row-value"><input type="range" class="slider" min="0" max="100" value="20" style="--val:20%; --val-opacity: 0.26"></span>
+</div>
+</div>
+</div>
+<div class="group">
+<div class="group-head"><svg><use href="#icon-chevron-right"/></svg> Языки <span class="count">2</span></div>
+</div>
+<div class="group">
+<div class="group-head"><svg><use href="#icon-chevron-right"/></svg> OpenAI <span class="count">1</span></div>
+</div>
+<div class="group">
+<div class="group-head"><svg><use href="#icon-chevron-right"/></svg> Hotkeys <span class="count">2</span></div>
+</div>
+<div class="group">
+<div class="group-head"><svg><use href="#icon-chevron-right"/></svg> BlackHole <span class="count">2</span></div>
+</div>
+<div class="group">
+<div class="group-head"><svg><use href="#icon-chevron-right"/></svg> О приложении</div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Collapsible (Notion-стиль).</strong> Все секции свёрнуты по умолчанию, кроме «Аудио». Click → expand. Сканируемо: видны все категории сразу + детали по запросу. Подходит для редко-используемых настроек. Минус: чуть больше кликов на открытие.</p>
+</div>
+
+<!-- V5 · Search-first -->
+<div class="variation">
+<div class="variation-label"><span class="num">V5 · Search-first</span></div>
+<div class="stage">
+<div class="glass settings-window v5">
+<div class="titlebar">
+<div class="traffic"><span class="close"></span><span class="min"></span><span class="max"></span></div>
+<span class="title">Unison · Настройки</span>
+</div>
+<div class="search-bar">
+<div class="search-input">
+<svg><use href="#icon-search"/></svg>
+<input type="text" placeholder="Найти настройку…">
+</div>
+</div>
+<div class="content-scroll">
+<div class="row">
+<span class="row-label"><svg><use href="#icon-mic"/></svg> Микрофон</span>
+<span class="row-extra-hint">audio</span>
+<span class="row-value"><span class="chip">MacBook Pro Mic <svg><use href="#icon-chevron-down"/></svg></span></span>
+</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-speaker"/></svg> Динамик</span>
+<span class="row-extra-hint">audio</span>
+<span class="row-value"><span class="chip">AirPods Pro <svg><use href="#icon-chevron-down"/></svg></span></span>
+</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-lang"/></svg> Я говорю</span>
+<span class="row-extra-hint">languages</span>
+<span class="row-value"><span class="chip">Русский</span></span>
+</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-lang"/></svg> Слушаю</span>
+<span class="row-extra-hint">languages</span>
+<span class="row-value"><span class="chip">English</span></span>
+</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-key"/></svg> OpenAI key</span>
+<span class="row-extra-hint">openai</span>
+<span class="row-value"><div class="secret-input"><span class="dots">••••••••</span><span class="show">Показать</span></div></span>
+</div>
+<div class="row">
+<span class="row-label"><svg><use href="#icon-kbd"/></svg> Старт / стоп</span>
+<span class="row-extra-hint">hotkey</span>
+<span class="row-value"><span class="kbd">⌃⌥U</span></span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Search-first.</strong> Поиск во главе угла — для power-users, кто знает «что» хочет настроить. Под ним плоский список ВСЕХ настроек с тегом-категорией справа. Минимум иерархии. Минус: новичку сложнее понять что в принципе можно настроить.</p>
+</div>
+
+<!-- V6 · Mini all-in-one -->
+<div class="variation">
+<div class="variation-label"><span class="num">V6 · Mini all-in-one</span></div>
+<div class="stage">
+<div class="glass settings-window v6">
+<div class="titlebar">
+<div class="traffic"><span class="close"></span><span class="min"></span><span class="max"></span></div>
+<span class="title">Unison</span>
+</div>
+<div class="body">
+<div class="head-row">
+<h2>Настройки</h2>
+<span class="ver">v1.0</span>
+</div>
+<div class="compact-group">
+<div class="compact-group-title">Аудио</div>
+<div class="mini-row"><span class="label"><svg><use href="#icon-mic"/></svg>Микрофон</span><span class="chip">MacBook Pro Mic</span></div>
+<div class="mini-row"><span class="label"><svg><use href="#icon-speaker"/></svg>Динамик</span><span class="chip">AirPods Pro</span></div>
+<div class="mini-row"><span class="label">Громкость оригинала</span><input type="range" class="slider" min="0" max="100" value="20" style="--val:20%; --val-opacity: 0.26; width: 100px"></div>
+</div>
+<div class="compact-group">
+<div class="compact-group-title">Языки</div>
+<div class="mini-row"><span class="label">Я говорю · Слушаю</span><span class="val">Русский · English</span></div>
+</div>
+<div class="compact-group">
+<div class="compact-group-title">Учётка</div>
+<div class="mini-row"><span class="label"><svg><use href="#icon-key"/></svg>OpenAI key</span><span class="val">sk-…7c2a</span></div>
+<div class="mini-row"><span class="label"><svg><use href="#icon-kbd"/></svg>Hotkey · старт</span><span class="kbd">⌃⌥U</span></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Mini all-in-one.</strong> Узкое окно (~460px) — все настройки на одном экране без скролла. Чистый минимализм. Detail-просмотры через popover/dropdown. Минус: нет места для подробных настроек (BlackHole reinstall, About с лицензиями) — придётся urезать.</p>
+</div>
+
+</main>
+
+<script>
+document.querySelectorAll('.toggle').forEach(t => t.addEventListener('click', () => t.classList.toggle('on')));
+document.querySelectorAll('.v4 .group-head').forEach(h => {
+  h.addEventListener('click', () => h.parentElement.classList.toggle('open'));
+});
+</script>
+
+</body>
+</html>

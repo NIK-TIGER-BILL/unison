@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Settings sliders · R1</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<symbol id="icon-minus-thin" viewBox="0 0 16 16"><line x1="4" y1="8" x2="12" y2="8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+<symbol id="icon-plus-thin" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><line x1="8" y1="4" x2="8" y2="12"/><line x1="4" y1="8" x2="12" y2="8"/></g></symbol>
+<symbol id="icon-speaker" viewBox="0 0 16 16">
+<g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+<path d="M2.5 6 L5.5 6 L9 3 L9 13 L5.5 10 L2.5 10 Z" fill="currentColor" stroke="none"/>
+</g>
+</symbol>
+<symbol id="icon-speaker-wave" viewBox="0 0 16 16">
+<g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+<path d="M2.5 6 L5.5 6 L9 3 L9 13 L5.5 10 L2.5 10 Z" fill="currentColor" stroke="none"/>
+<path d="M11 6.5 a3 3 0 0 1 0 3"/>
+<path d="M12.8 4.5 a5.5 5.5 0 0 1 0 7"/>
+</g>
+</symbol>
+</defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg); color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.03em; margin-bottom: 4px;
+}
+.page-header h1 .accent { color: var(--accent); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; max-width: 700px; }
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px; letter-spacing: 0.04em; flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 40px;
+  padding: 48px;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+.variation { display: flex; flex-direction: column; gap: 14px; }
+.variation-label {
+  display: flex; align-items: baseline; justify-content: space-between;
+}
+.variation-label .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; color: var(--page-mute);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+
+.stage {
+  background:
+    radial-gradient(ellipse 70% 50% at 70% 30%, rgba(100, 230, 255, 0.30), transparent 60%),
+    radial-gradient(ellipse 80% 60% at 30% 70%, rgba(255, 110, 200, 0.28), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+  padding: 30px;
+  border-radius: 14px;
+  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center;
+  min-height: 280px;
+}
+
+.settings-popover {
+  width: 280px;
+  padding: 16px;
+  background: rgba(20, 22, 30, 0.65);
+  backdrop-filter: blur(36px) saturate(200%);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border-radius: 14px;
+  border: 0.5px solid rgba(255,255,255,0.12);
+  box-shadow: 0 20px 48px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.14);
+  color: #f5f5f7;
+}
+.group + .group {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 0.5px solid rgba(255,255,255,0.08);
+}
+.group-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12.5px; font-weight: 500;
+  color: rgba(255,255,255,0.9);
+  letter-spacing: -0.005em;
+  margin-bottom: 10px;
+}
+.group-head .value {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.04em;
+}
+
+.card-desc {
+  font-size: 12.5px; color: var(--page-mute);
+  line-height: 1.55; max-width: 380px;
+}
+.card-desc strong { color: var(--page-fg); font-weight: 500; }
+.card-desc code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px;
+}
+
+/* ═══════════════════════ V1 · Apple-thin ═══════════════════════ */
+.v1 .slider-track {
+  position: relative;
+  height: 4px;
+  background: rgba(255,255,255,0.10);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.v1 .slider-track .fill {
+  position: absolute;
+  top: 0; left: 0; height: 100%;
+  background: linear-gradient(90deg, rgba(255, 182, 224, 0.7), rgba(255, 220, 240, 0.9));
+  border-radius: 2px;
+  pointer-events: none;
+  box-shadow: 0 0 8px rgba(255, 182, 224, 0.3);
+}
+.v1 .slider-track .thumb {
+  position: absolute;
+  top: 50%;
+  width: 12px; height: 12px;
+  background: #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  cursor: grab;
+}
+
+/* ═══════════════════════ V2 · Segmented pills ═══════════════════════ */
+.v2 .seg-group {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
+  padding: 3px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 10px;
+}
+.v2 .seg {
+  padding: 6px 0;
+  text-align: center;
+  font-size: 11.5px; font-weight: 500;
+  color: rgba(255,255,255,0.5);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 0.04em;
+}
+.v2 .seg:hover { color: rgba(255,255,255,0.85); }
+.v2 .seg.active {
+  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.07));
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), 0 1px 2px rgba(0,0,0,0.2);
+}
+
+/* ═══════════════════════ V3 · Tick-marks ═══════════════════════ */
+.v3 .slider-track {
+  position: relative;
+  height: 28px;
+  display: flex; align-items: center;
+  cursor: pointer;
+}
+.v3 .slider-track .bar {
+  position: absolute; left: 0; right: 0; top: 50%;
+  height: 4px;
+  background: rgba(255,255,255,0.10);
+  border-radius: 2px;
+  transform: translateY(-50%);
+}
+.v3 .slider-track .fill {
+  position: absolute; left: 0; top: 50%;
+  height: 4px;
+  background: rgba(255, 182, 224, 0.7);
+  border-radius: 2px;
+  transform: translateY(-50%);
+}
+.v3 .ticks {
+  position: absolute; left: 0; right: 0;
+  top: 50%; transform: translateY(-50%);
+  display: flex; justify-content: space-between;
+  padding: 0 1px;
+}
+.v3 .ticks .tick {
+  width: 1px; height: 8px;
+  background: rgba(255,255,255,0.25);
+  border-radius: 1px;
+}
+.v3 .ticks .tick.active {
+  height: 12px;
+  background: rgba(255, 182, 224, 0.8);
+}
+.v3 .slider-track .thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px; height: 14px;
+  background: #fff;
+  border: 0.5px solid rgba(0,0,0,0.3);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+  z-index: 1;
+}
+
+/* ═══════════════════════ V4 · Stepper ═══════════════════════ */
+.v4 .stepper {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(0,0,0,0.22);
+  padding: 4px;
+  border-radius: 10px;
+  border: 0.5px solid rgba(255,255,255,0.05);
+}
+.v4 .stepper button {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.08);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  color: rgba(255,255,255,0.85);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.08s;
+}
+.v4 .stepper button:hover { background: rgba(255,255,255,0.14); color: #fff; }
+.v4 .stepper button:active { transform: scale(0.94); }
+.v4 .stepper button svg { width: 11px; height: 11px; }
+.v4 .stepper .display {
+  flex: 1; text-align: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px; font-weight: 500;
+  color: #fff;
+  letter-spacing: 0.04em;
+}
+
+/* ═══════════════════════ V5 · Icon thumb ═══════════════════════ */
+.v5 .slider-track {
+  position: relative;
+  height: 32px;
+  display: flex; align-items: center;
+  cursor: pointer;
+}
+.v5 .slider-track .bar {
+  position: absolute; left: 0; right: 0; top: 50%;
+  height: 4px;
+  background: rgba(255,255,255,0.10);
+  border-radius: 2px;
+  transform: translateY(-50%);
+}
+.v5 .slider-track .fill {
+  position: absolute; left: 0; top: 50%;
+  height: 4px;
+  background: linear-gradient(90deg, rgba(255, 182, 224, 0.7), rgba(255, 220, 240, 0.9));
+  border-radius: 2px;
+  transform: translateY(-50%);
+  box-shadow: 0 0 6px rgba(255, 182, 224, 0.3);
+}
+.v5 .slider-track .thumb {
+  position: absolute;
+  top: 50%;
+  width: 22px; height: 22px;
+  background: linear-gradient(180deg, #fff, #e0e0e2);
+  border: 0.5px solid rgba(0,0,0,0.3);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 3px 8px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.5);
+  display: flex; align-items: center; justify-content: center;
+  color: #1a1a25;
+  font-weight: 700;
+  font-size: 12px;
+  z-index: 1;
+}
+.v5 .slider-track .thumb svg { width: 12px; height: 12px; }
+.v5 .end-icons {
+  display: flex; justify-content: space-between;
+  margin-top: 4px;
+  padding: 0 6px;
+  color: rgba(255,255,255,0.35);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+}
+.v5 .end-icons svg { width: 12px; height: 12px; }
+
+/* ═══════════════════════ V6 · Compact (Notion/Linear) ═══════════════════════ */
+.v6 .group-head { margin-bottom: 6px; }
+.v6 .slider-track {
+  position: relative;
+  height: 2px;
+  background: rgba(255,255,255,0.12);
+  border-radius: 1px;
+  cursor: pointer;
+  margin: 8px 0;
+}
+.v6 .slider-track .fill {
+  position: absolute;
+  top: 0; left: 0; height: 100%;
+  background: rgba(255,255,255,0.6);
+  border-radius: 1px;
+}
+.v6 .slider-track .thumb {
+  position: absolute;
+  top: 50%;
+  width: 10px; height: 10px;
+  background: #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.v6 .slider-track:hover .thumb { opacity: 1; }
+.v6 .v6-row {
+  display: flex; align-items: center; gap: 14px;
+}
+.v6 .v6-row .slider-track { flex: 1; }
+.v6 .v6-row .value-inline {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  letter-spacing: 0.04em;
+  min-width: 32px;
+  text-align: right;
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Settings sliders · <span class="accent">R1</span></h1>
+<p>Шесть подходов к ползункам в попапе настроек: <strong>Размер транскрипта</strong> (XS/S/M/L/XL) + <strong>Громкость оригинала</strong> (0–100%).</p>
+<div class="nav">
+<a href="/popover-final/">Popover</a>
+<a href="/onboarding-final/">Onboarding</a>
+<a href="/transcript-final/">Transcript</a>
+<a href="/transcript-round-8/">R8</a>
+<a class="current" href="/settings-sliders-round-1/">Sliders R1</a>
+</div>
+</header>
+
+<main class="grid">
+
+<!-- V1 Apple-thin -->
+<div class="variation">
+<div class="variation-label"><span class="num">V1 · Apple-thin filled</span></div>
+<div class="stage">
+<div class="settings-popover v1">
+<div class="group">
+<div class="group-head"><span>Размер транскрипта</span><span class="value">M</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 50%"></div>
+<div class="thumb" style="left: 50%"></div>
+</div>
+</div>
+<div class="group">
+<div class="group-head"><span>Громкость оригинала</span><span class="value">20%</span></div>
+<div class="slider-track">
+<div class="fill" style="width: 20%"></div>
+<div class="thumb" style="left: 20%"></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Apple-thin filled.</strong> Классический Apple HIG: тонкий 4px трек, accent-розовый fill слева, белый thumb 12px с тонкой тенью. Чистая интуитивная метафора, без лишних деталей. Универсально работает для discrete и continuous.</p>
+</div>
+
+<!-- V2 Segmented pills -->
+<div class="variation">
+<div class="variation-label"><span class="num">V2 · Segmented pills</span></div>
+<div class="stage">
+<div class="settings-popover v2">
+<div class="group">
+<div class="group-head"><span>Размер транскрипта</span></div>
+<div class="seg-group">
+<div class="seg">XS</div>
+<div class="seg">S</div>
+<div class="seg active">M</div>
+<div class="seg">L</div>
+<div class="seg">XL</div>
+</div>
+</div>
+<div class="group">
+<div class="group-head"><span>Громкость оригинала</span></div>
+<div class="seg-group">
+<div class="seg">0%</div>
+<div class="seg active">25</div>
+<div class="seg">50</div>
+<div class="seg">75</div>
+<div class="seg">100</div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Сегментированные pill-stepper.</strong> Discrete по 5 опций. Клик прямо на нужную опцию. Минус: всего 5 значений у громкости (но обычно больше и не нужно). Очень macOS-y, ясно и без drag-механики.</p>
+</div>
+
+<!-- V3 Tick marks -->
+<div class="variation">
+<div class="variation-label"><span class="num">V3 · Tick-marks</span></div>
+<div class="stage">
+<div class="settings-popover v3">
+<div class="group">
+<div class="group-head"><span>Размер транскрипта</span><span class="value">M</span></div>
+<div class="slider-track">
+<div class="bar"></div>
+<div class="fill" style="width: 50%"></div>
+<div class="ticks">
+<div class="tick active"></div>
+<div class="tick active"></div>
+<div class="tick active"></div>
+<div class="tick"></div>
+<div class="tick"></div>
+</div>
+<div class="thumb" style="left: 50%"></div>
+</div>
+</div>
+<div class="group">
+<div class="group-head"><span>Громкость оригинала</span><span class="value">20%</span></div>
+<div class="slider-track">
+<div class="bar"></div>
+<div class="fill" style="width: 20%"></div>
+<div class="ticks">
+<div class="tick active"></div>
+<div class="tick active"></div>
+<div class="tick active"></div>
+<div class="tick"></div>
+<div class="tick"></div>
+<div class="tick"></div>
+<div class="tick"></div>
+<div class="tick"></div>
+<div class="tick"></div>
+<div class="tick"></div>
+<div class="tick"></div>
+</div>
+<div class="thumb" style="left: 20%"></div>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Tick-marks slider.</strong> Slider + видимые насечки на каждом шаге. Шаги активные (за thumb'ом) розовеют. Хорошо для discrete-шкалы — видно сколько всего значений. Технический/инструментальный стиль.</p>
+</div>
+
+<!-- V4 Stepper -->
+<div class="variation">
+<div class="variation-label"><span class="num">V4 · Stepper +/−</span></div>
+<div class="stage">
+<div class="settings-popover v4">
+<div class="group">
+<div class="group-head"><span>Размер транскрипта</span></div>
+<div class="stepper">
+<button title="Меньше"><svg><use href="#icon-minus-thin"/></svg></button>
+<div class="display">M</div>
+<button title="Больше"><svg><use href="#icon-plus-thin"/></svg></button>
+</div>
+</div>
+<div class="group">
+<div class="group-head"><span>Громкость оригинала</span></div>
+<div class="stepper">
+<button title="Тише"><svg><use href="#icon-minus-thin"/></svg></button>
+<div class="display">20%</div>
+<button title="Громче"><svg><use href="#icon-plus-thin"/></svg></button>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Stepper.</strong> Без слайдера — только − value + кнопки. iOS Settings вайб. Очень предсказуемый и доступный (легко жмякать на trackpad). Минус: медленно если нужно сильно изменить значение. Лучше для редко-меняемых настроек.</p>
+</div>
+
+<!-- V5 Icon thumb -->
+<div class="variation">
+<div class="variation-label"><span class="num">V5 · Icon thumb</span></div>
+<div class="stage">
+<div class="settings-popover v5">
+<div class="group">
+<div class="group-head"><span>Размер транскрипта</span><span class="value">M</span></div>
+<div class="slider-track">
+<div class="bar"></div>
+<div class="fill" style="width: 50%"></div>
+<div class="thumb" style="left: 50%">A</div>
+</div>
+<div class="end-icons">
+<span style="font-size: 9px">A</span>
+<span style="font-size: 13px">A</span>
+</div>
+</div>
+<div class="group">
+<div class="group-head"><span>Громкость оригинала</span><span class="value">20%</span></div>
+<div class="slider-track">
+<div class="bar"></div>
+<div class="fill" style="width: 20%"></div>
+<div class="thumb" style="left: 20%"><svg><use href="#icon-speaker"/></svg></div>
+</div>
+<div class="end-icons">
+<svg><use href="#icon-speaker"/></svg>
+<svg><use href="#icon-speaker-wave"/></svg>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Icon thumb.</strong> Thumb крупный (22px) и сам показывает что регулирует: «A» для размера, динамик для громкости. По бокам трека — маленькая и большая иконки как label endpoints. Визуально-семантический подход — без слов понятно.</p>
+</div>
+
+<!-- V6 Compact -->
+<div class="variation">
+<div class="variation-label"><span class="num">V6 · Compact (Notion-style)</span></div>
+<div class="stage">
+<div class="settings-popover v6">
+<div class="group">
+<div class="group-head"><span>Размер транскрипта</span></div>
+<div class="v6-row">
+<div class="slider-track">
+<div class="fill" style="width: 50%"></div>
+<div class="thumb" style="left: 50%"></div>
+</div>
+<span class="value-inline">M</span>
+</div>
+</div>
+<div class="group">
+<div class="group-head"><span>Громкость оригинала</span></div>
+<div class="v6-row">
+<div class="slider-track">
+<div class="fill" style="width: 20%"></div>
+<div class="thumb" style="left: 20%"></div>
+</div>
+<span class="value-inline">20%</span>
+</div>
+</div>
+</div>
+</div>
+<p class="card-desc"><strong>Compact Notion-style.</strong> Тонюсенький 2px трек, thumb появляется только на hover. Значение справа от слайдера inline. Самый ненавязчивый — слайдер «исчезает» когда не нужен. Идеально для редко-используемых настроек.</p>
+</div>
+
+</main>
+
+</body>
+</html>

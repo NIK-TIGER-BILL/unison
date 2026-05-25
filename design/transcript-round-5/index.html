@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Transcript · R5</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<filter id="liquidGlass" x="-15%" y="-15%" width="130%" height="130%">
+<feTurbulence type="fractalNoise" baseFrequency="0.010 0.016" numOctaves="3" seed="11" result="noise"/>
+<feGaussianBlur in="noise" stdDeviation="3.5" result="blurredNoise"/>
+<feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="20" xChannelSelector="R" yChannelSelector="G"/>
+</filter>
+<filter id="liquidGlassSubtle" x="-10%" y="-10%" width="120%" height="120%">
+<feTurbulence type="fractalNoise" baseFrequency="0.014 0.02" numOctaves="2" seed="3" result="noise"/>
+<feGaussianBlur in="noise" stdDeviation="2.5" result="blurredNoise"/>
+<feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="12" xChannelSelector="R" yChannelSelector="G"/>
+</filter>
+
+<symbol id="icon-stop" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor"/></symbol>
+<symbol id="icon-minus" viewBox="0 0 16 16"><line x1="3.5" y1="8" x2="12.5" y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+<symbol id="icon-plus" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="8" y1="3.5" x2="8" y2="12.5"/><line x1="3.5" y1="8" x2="12.5" y2="8"/></g></symbol>
+<symbol id="icon-play" viewBox="0 0 16 16"><path fill="currentColor" d="M4 2.5c0-.5.5-.8.95-.55l8.5 5.05c.45.27.45.93 0 1.2l-8.5 5.05c-.45.26-.95-.05-.95-.55v-10.2z"/></symbol>
+<symbol id="icon-pause" viewBox="0 0 16 16"><g fill="currentColor"><rect x="4" y="3" width="3" height="10" rx="0.6"/><rect x="9" y="3" width="3" height="10" rx="0.6"/></g></symbol>
+<symbol id="icon-trash" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="4" x2="13" y2="4"/><path d="M5 4 L5.5 13 a 1 1 0 0 0 1 1 H 9.5 a 1 1 0 0 0 1 -1 L 11 4"/><path d="M6 4 V 2.5 a 0.5 0.5 0 0 1 0.5 -0.5 H 9.5 a 0.5 0.5 0 0 1 0.5 0.5 V 4"/></g></symbol>
+</defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --me-color: #b6e0ff;
+  --peer-color: #ffd6c0;
+  --ready: #58e09a;
+  --active: #5ac8fa;
+  --stop: #ff7a8c;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg); color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.03em; margin-bottom: 4px;
+}
+.page-header h1 .accent { color: var(--accent); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; }
+.page-header p code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11.5px;
+  background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;
+}
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px; letter-spacing: 0.04em; flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.layout {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 40px 48px 64px;
+  display: flex; flex-direction: column;
+  gap: 48px;
+}
+
+.section-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--page-mute);
+  margin-bottom: 18px;
+  display: flex; align-items: center; gap: 16px;
+}
+.section-title .rule {
+  flex: 1; height: 1px;
+  background: linear-gradient(to right, rgba(255,255,255,0.12), transparent);
+}
+
+/* Main demo frame (16:9) */
+.frame {
+  position: relative;
+  width: 100%; aspect-ratio: 16/9;
+  border-radius: 14px; overflow: hidden;
+  box-shadow: 0 32px 64px -16px rgba(0,0,0,0.7), 0 4px 16px rgba(0,0,0,0.5);
+}
+.menubar {
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 26px;
+  display: flex; align-items: center;
+  padding: 0 14px;
+  font-family: -apple-system, sans-serif; font-size: 12px;
+  color: rgba(255,255,255,0.95);
+  gap: 14px; z-index: 10;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
+.menubar .app-name { font-weight: 600; }
+.menubar .spacer { flex: 1; }
+.desktop {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 80% 30%, rgba(100, 230, 255, 0.45), transparent 60%),
+    radial-gradient(ellipse 70% 60% at 25% 70%, rgba(255, 110, 200, 0.40), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 60% 90%, rgba(150, 100, 255, 0.30), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+}
+.mock-window {
+  position: absolute; top: 56px; left: 60px; right: 60px; bottom: 60px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, #2a2a3a, #1a1a2a);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.mock-window .video-area {
+  width: 55%; height: 70%;
+  background: linear-gradient(135deg, #3a3a4a, #2a2a3a);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 48px; opacity: 0.4;
+}
+.transcript-zone {
+  position: absolute; left: 50%; bottom: 22px;
+  transform: translateX(-50%);
+  width: 60%; max-width: 720px; min-width: 520px;
+  z-index: 5;
+  display: flex; flex-direction: column; gap: 10px;
+  align-items: stretch;
+  pointer-events: none;
+}
+.transcript-zone > * { pointer-events: auto; }
+.bubbles-list {
+  display: flex; flex-direction: column;
+  gap: 8px; align-items: stretch;
+}
+
+/* ═══ MAIN DEMO BUBBLES (uses current B0 = R4 style) ═══ */
+.main-demo .bubble {
+  max-width: 70%;
+  padding: 12px 16px;
+  border-radius: 18px;
+  font-size: 13.5px; letter-spacing: -0.005em; line-height: 1.4;
+  position: relative;
+  backdrop-filter: blur(36px) saturate(200%) url(#liquidGlass);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  box-shadow:
+    0 18px 36px rgba(0,0,0,0.35),
+    0 4px 10px rgba(0,0,0,0.2),
+    inset 0 1.5px 0 rgba(255,255,255,0.28),
+    inset 0 -1.5px 0 rgba(0,0,0,0.22);
+  animation: bubbleIn 0.45s cubic-bezier(0.32, 0.94, 0.6, 1);
+  overflow: visible;
+}
+.main-demo .bubble::before {
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0; height: 65%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.14) 0%, transparent 50%),
+    radial-gradient(ellipse 90% 60% at 25% -10%, rgba(255,255,255,0.30), transparent 70%);
+  border-radius: 18px 18px 60% 60% / 18px 18px 35% 35%;
+  pointer-events: none; mix-blend-mode: screen; opacity: 0.85;
+}
+.main-demo .bubble::after {
+  content: ""; position: absolute; inset: 0;
+  border-radius: 18px; padding: 1px;
+  background: conic-gradient(from 120deg at 50% 50%,
+    rgba(255,255,255,0.55), rgba(255,255,255,0.08) 22%,
+    rgba(255,255,255,0.40) 50%, rgba(255,255,255,0.08) 78%, rgba(255,255,255,0.55));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; opacity: 0.55;
+}
+.main-demo .bubble .original {
+  font-weight: 500; color: rgba(255,255,255,1);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  position: relative; z-index: 1;
+}
+.main-demo .bubble .translated {
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.68);
+  font-style: italic;
+  margin-top: 5px; padding-top: 6px;
+  border-top: 0.5px solid rgba(255,255,255,0.14);
+  position: relative; z-index: 1;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+}
+.main-demo .bubble.me {
+  align-self: flex-start;
+  background: linear-gradient(180deg, rgba(160, 210, 255, 0.16), rgba(100, 160, 220, 0.08));
+  border: 0.5px solid rgba(180, 220, 255, 0.22);
+}
+.main-demo .bubble.peer {
+  align-self: flex-end;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03));
+  border: 0.5px solid rgba(255,255,255,0.13);
+}
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.92); filter: blur(6px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.bubble.fade-out { animation: bubbleOut 0.7s cubic-bezier(0.4, 0, 0.6, 1) forwards; }
+@keyframes bubbleOut {
+  0% { opacity: 1; transform: translateY(0) scale(1); max-height: 200px; }
+  60% { opacity: 0.15; transform: translateY(-6px) scale(0.96); }
+  100% { opacity: 0; transform: translateY(-12px) scale(0.92); max-height: 0; padding-top: 0; padding-bottom: 0; margin: 0; border-width: 0; }
+}
+
+/* Control pill */
+.control-pill {
+  align-self: center;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 8px 7px 14px;
+  background: rgba(20, 22, 30, 0.50);
+  backdrop-filter: blur(36px) saturate(200%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  border: 0.5px solid rgba(255,255,255,0.14);
+  border-radius: 999px;
+  font-size: 11.5px; color: rgba(255,255,255,0.85);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.18);
+  cursor: grab; user-select: none;
+  position: relative;
+}
+.control-pill::after {
+  content: ""; position: absolute; inset: 0;
+  border-radius: 999px; padding: 1px;
+  background: conic-gradient(from 120deg at 50% 50%,
+    rgba(255,255,255,0.45), rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.35) 50%, rgba(255,255,255,0.05) 75%, rgba(255,255,255,0.45));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; opacity: 0.5;
+}
+.control-pill .dot {
+  display: inline-block; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--active);
+  box-shadow: 0 0 6px rgba(90, 200, 250, 0.7);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.control-pill .timer {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px; letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.7);
+}
+.control-pill .sep {
+  width: 0.5px; height: 13px;
+  background: rgba(255,255,255,0.14); margin: 0 3px;
+}
+.control-pill .pill-btn {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.65);
+  border-radius: 50%;
+  cursor: pointer; background: none; border: none;
+  transition: background 0.15s, color 0.15s;
+}
+.control-pill .pill-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.control-pill .pill-btn.stop:hover { color: var(--stop); background: rgba(255, 122, 140, 0.16); }
+.control-pill .pill-btn svg { width: 12px; height: 12px; }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+.transcript-zone.collapsed .bubbles-list { display: none; }
+
+/* ═══ STOP CONFIRMATION MODAL ═══ */
+.modal-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.22s ease;
+}
+.modal-backdrop.shown { opacity: 1; pointer-events: auto; }
+.modal {
+  width: 340px;
+  padding: 22px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03));
+  backdrop-filter: blur(32px) saturate(180%) url(#liquidGlass);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border-radius: 18px;
+  color: #f5f5f7;
+  position: relative;
+  box-shadow:
+    0 32px 80px rgba(0,0,0,0.6),
+    inset 0 1.5px 0 rgba(255,255,255,0.22),
+    inset 0 -1.5px 0 rgba(0,0,0,0.25);
+  transform: scale(0.92) translateY(8px);
+  transition: transform 0.22s cubic-bezier(0.32, 0.94, 0.6, 1);
+}
+.modal-backdrop.shown .modal { transform: scale(1) translateY(0); }
+.modal::before {
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0; height: 60%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.14) 0%, transparent 45%),
+    radial-gradient(ellipse 90% 60% at 30% 0%, rgba(255,255,255,0.20), transparent 70%);
+  border-radius: 18px 18px 50% 50% / 18px 18px 30% 30%;
+  pointer-events: none; mix-blend-mode: screen; opacity: 0.85;
+}
+.modal::after {
+  content: ""; position: absolute; inset: 0;
+  border-radius: 18px; padding: 1px;
+  background: conic-gradient(from 120deg at 50% 50%,
+    rgba(255,255,255,0.45), rgba(255,255,255,0.05) 25%,
+    rgba(255,255,255,0.35) 50%, rgba(255,255,255,0.05) 75%, rgba(255,255,255,0.45));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none; opacity: 0.55;
+}
+.modal-content { position: relative; z-index: 1; }
+.modal-title {
+  font-size: 16px; font-weight: 500;
+  letter-spacing: -0.015em;
+  margin-bottom: 6px;
+}
+.modal-subtitle {
+  font-size: 13px;
+  color: rgba(255,255,255,0.65);
+  letter-spacing: -0.005em;
+  line-height: 1.45;
+  margin-bottom: 18px;
+}
+.modal-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+}
+.modal-btn {
+  padding: 8px 16px;
+  border-radius: 9px;
+  font-size: 13px; font-weight: 500;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.08s;
+}
+.modal-btn.cancel {
+  background: rgba(255,255,255,0.08);
+  border: 0.5px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.85);
+}
+.modal-btn.cancel:hover { background: rgba(255,255,255,0.14); }
+.modal-btn.cancel:active { transform: scale(0.97); }
+.modal-btn.destructive {
+  background: linear-gradient(180deg, rgba(255, 110, 130, 0.55), rgba(220, 60, 90, 0.40));
+  border: 0.5px solid rgba(255, 110, 130, 0.45);
+  color: #fff;
+  font-weight: 600;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+  box-shadow: 0 4px 12px rgba(220, 60, 90, 0.32), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.modal-btn.destructive:hover {
+  background: linear-gradient(180deg, rgba(255, 130, 150, 0.65), rgba(230, 75, 105, 0.50));
+}
+.modal-btn.destructive:active { transform: scale(0.97); }
+
+/* ═══ Demo controls ═══ */
+.demo-controls {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 16px;
+  background: rgba(255,255,255,0.03);
+  border: 0.5px solid rgba(255,255,255,0.08);
+  border-radius: 11px;
+  margin-top: 16px;
+}
+.demo-controls .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-demo {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,0.08);
+  border: 0.5px solid rgba(255,255,255,0.10);
+  color: #fff;
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-size: 12.5px; font-weight: 500; letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.08s;
+}
+.btn-demo:hover { background: rgba(255,255,255,0.14); }
+.btn-demo:active { transform: scale(0.97); }
+.btn-demo svg { width: 11px; height: 11px; }
+.btn-demo.me { color: var(--me-color); }
+.btn-demo.peer { color: var(--peer-color); }
+.btn-demo.auto { color: var(--ready); }
+.btn-demo.auto.active { background: rgba(88, 224, 154, 0.18); border-color: rgba(88, 224, 154, 0.4); }
+.btn-demo.clear { color: rgba(255, 130, 130, 0.85); }
+
+/* ═══ Bubble variations grid ═══ */
+.variations-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 32px;
+}
+.variation {
+  display: flex; flex-direction: column; gap: 12px;
+}
+.variation-label {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 2px;
+}
+.variation-label .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; color: var(--page-mute);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+
+/* Mini stage: simulates desktop, shows bubbles */
+.stage {
+  position: relative;
+  width: 100%;
+  height: 280px;
+  border-radius: 12px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 50% at 70% 30%, rgba(100, 230, 255, 0.35), transparent 60%),
+    radial-gradient(ellipse 80% 60% at 30% 70%, rgba(255, 110, 200, 0.32), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.5);
+}
+.stage-bubbles {
+  position: absolute; left: 50%; bottom: 16px;
+  transform: translateX(-50%);
+  width: 88%;
+  display: flex; flex-direction: column; gap: 8px;
+  align-items: stretch;
+}
+.variation .card-desc {
+  font-size: 12.5px;
+  color: var(--page-mute);
+  line-height: 1.55;
+  max-width: 380px;
+}
+.variation .card-desc strong { color: var(--page-fg); font-weight: 500; }
+.variation .card-desc code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px;
+}
+
+/* ─── B1 Minimal Tablet ─── */
+.b1 .b {
+  max-width: 80%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  position: relative;
+  overflow: hidden;
+  animation: bubbleIn 0.4s ease-out;
+}
+.b1 .b.me {
+  align-self: flex-start;
+  background: rgba(70, 130, 200, 0.85);
+  color: #fff;
+}
+.b1 .b.peer {
+  align-self: flex-end;
+  background: rgba(40, 42, 55, 0.92);
+  color: #fff;
+}
+.b1 .b .original { font-weight: 500; }
+.b1 .b .translated { font-size: 11px; color: rgba(255,255,255,0.6); margin-top: 3px; font-style: italic; }
+
+/* ─── B2 Speech Bubble with tail ─── */
+.b2 .b {
+  max-width: 78%;
+  padding: 11px 14px;
+  border-radius: 16px;
+  font-size: 13px;
+  position: relative;
+  backdrop-filter: blur(28px) saturate(180%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.18);
+  animation: bubbleIn 0.4s ease-out;
+}
+.b2 .b.me {
+  align-self: flex-start;
+  background: linear-gradient(180deg, rgba(160, 210, 255, 0.20), rgba(100, 160, 220, 0.10));
+  border: 0.5px solid rgba(180, 220, 255, 0.25);
+  border-bottom-left-radius: 5px;
+}
+.b2 .b.peer {
+  align-self: flex-end;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.03));
+  border: 0.5px solid rgba(255,255,255,0.13);
+  border-bottom-right-radius: 5px;
+}
+.b2 .b .original { font-weight: 500; color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,0.25); }
+.b2 .b .translated {
+  font-size: 11px; color: rgba(255,255,255,0.65);
+  margin-top: 4px; padding-top: 5px;
+  border-top: 0.5px solid rgba(255,255,255,0.12);
+  font-style: italic;
+}
+
+/* ─── B3 Inverted Hierarchy (translated primary) ─── */
+.b3 .b {
+  max-width: 76%;
+  padding: 11px 15px;
+  border-radius: 16px;
+  position: relative;
+  backdrop-filter: blur(30px) saturate(190%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(30px) saturate(190%);
+  box-shadow: 0 12px 28px rgba(0,0,0,0.32), inset 0 1.2px 0 rgba(255,255,255,0.22);
+  animation: bubbleIn 0.4s ease-out;
+}
+.b3 .b.me {
+  align-self: flex-start;
+  background: linear-gradient(180deg, rgba(160, 210, 255, 0.18), rgba(100, 160, 220, 0.08));
+  border: 0.5px solid rgba(180, 220, 255, 0.22);
+}
+.b3 .b.peer {
+  align-self: flex-end;
+  background: linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03));
+  border: 0.5px solid rgba(255,255,255,0.12);
+}
+.b3 .b .translated-primary {
+  font-size: 14.5px; font-weight: 500;
+  color: #fff;
+  letter-spacing: -0.01em;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+}
+.b3 .b .original-secondary {
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  margin-top: 4px;
+  font-style: italic;
+  letter-spacing: -0.005em;
+}
+
+/* ─── B4 Side-by-Side (two-column) ─── */
+.b4 .b {
+  max-width: 92%;
+  padding: 10px 0;
+  border-radius: 14px;
+  position: relative;
+  backdrop-filter: blur(30px) saturate(190%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(30px) saturate(190%);
+  box-shadow: 0 12px 28px rgba(0,0,0,0.32), inset 0 1.2px 0 rgba(255,255,255,0.22);
+  animation: bubbleIn 0.4s ease-out;
+  display: grid;
+  grid-template-columns: 1fr 0.5px 1fr;
+  align-items: center;
+}
+.b4 .b.me {
+  align-self: flex-start;
+  background: linear-gradient(180deg, rgba(160, 210, 255, 0.18), rgba(100, 160, 220, 0.08));
+  border: 0.5px solid rgba(180, 220, 255, 0.22);
+}
+.b4 .b.peer {
+  align-self: flex-end;
+  background: linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.03));
+  border: 0.5px solid rgba(255,255,255,0.12);
+}
+.b4 .b .col-original {
+  padding: 0 13px;
+  font-size: 13px; font-weight: 500;
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.2);
+}
+.b4 .b .divider { background: rgba(255,255,255,0.15); height: 80%; align-self: center; }
+.b4 .b .col-translated {
+  padding: 0 13px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.65);
+  font-style: italic;
+}
+
+/* ─── B5 Soft Pillow ─── */
+.b5 .b {
+  max-width: 78%;
+  padding: 14px 18px;
+  border-radius: 28px;
+  font-size: 13px;
+  position: relative;
+  backdrop-filter: blur(40px) saturate(200%);
+  -webkit-backdrop-filter: blur(40px) saturate(200%);
+  box-shadow:
+    0 24px 48px -4px rgba(0,0,0,0.45),
+    0 8px 16px rgba(0,0,0,0.2),
+    inset 0 2px 0 rgba(255,255,255,0.32),
+    inset 0 -2px 0 rgba(0,0,0,0.18);
+  animation: bubbleIn 0.4s ease-out;
+}
+.b5 .b::before {
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0; height: 70%;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.18) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 60% at 50% -10%, rgba(255,255,255,0.40), transparent 70%);
+  border-radius: 28px 28px 50% 50% / 28px 28px 30% 30%;
+  pointer-events: none; mix-blend-mode: screen;
+}
+.b5 .b.me {
+  align-self: flex-start;
+  background: linear-gradient(180deg, rgba(170, 215, 255, 0.18), rgba(100, 160, 220, 0.08));
+}
+.b5 .b.peer {
+  align-self: flex-end;
+  background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04));
+}
+.b5 .b .original { font-weight: 500; color: #fff; text-shadow: 0 1px 1px rgba(0,0,0,0.25); position: relative; z-index: 1; }
+.b5 .b .translated {
+  font-size: 11px;
+  color: rgba(255,255,255,0.65);
+  margin-top: 5px;
+  font-style: italic;
+  position: relative; z-index: 1;
+}
+
+/* ─── B6 Floating Subtitle (no bubble) ─── */
+.b6 .b {
+  max-width: 80%;
+  padding: 4px 0;
+  position: relative;
+  animation: bubbleIn 0.4s ease-out;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.b6 .b.me { align-self: flex-start; padding-left: 14px; border-left: 2px solid var(--me-color); }
+.b6 .b.peer { align-self: flex-end; padding-right: 14px; border-right: 2px solid var(--peer-color); text-align: right; }
+.b6 .b .original {
+  font-size: 15px;
+  font-weight: 500;
+  color: #fff;
+  letter-spacing: -0.005em;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.65), 0 0 12px rgba(0,0,0,0.5);
+}
+.b6 .b .translated {
+  font-size: 12px;
+  color: rgba(255,255,255,0.75);
+  font-style: italic;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Transcript · <span class="accent">R5</span></h1>
+<p>Stop-confirmation modal, замена иконки свернуть на минус (как macOS), 6 новых направлений для bubble.</p>
+<div class="nav">
+<a href="/popover-final/">Popover</a>
+<a href="/onboarding-final/">Onboarding</a>
+<a href="/transcript-round-1/">R1</a>
+<a href="/transcript-round-2/">R2</a>
+<a href="/transcript-round-3/">R3</a>
+<a href="/transcript-round-4/">R4</a>
+<a class="current" href="/transcript-round-5/">R5</a>
+</div>
+</header>
+
+<main class="layout">
+
+<!-- ═══ MAIN DEMO — with stop modal + minus icon ═══ -->
+<section>
+<div class="section-title"><span>Main demo · stop modal + новая иконка</span><span class="rule"></span></div>
+
+<div class="frame main-demo">
+<div class="menubar"><span class="app-name">Zoom</span><span>Meeting</span><span>View</span><span>Share</span><span class="spacer"></span><span>🔔</span><span style="font-variant-numeric:tabular-nums">14:38</span></div>
+<div class="desktop"></div>
+<div class="mock-window"><div class="video-area">📹</div></div>
+<div class="transcript-zone" id="transcript-zone">
+<div class="bubbles-list" id="bubbles-list"></div>
+<div class="control-pill" id="control-pill">
+<span class="dot"></span>
+<span class="timer" id="timer">02:14</span>
+<span class="sep"></span>
+<button class="pill-btn" id="toggle-btn" title="Свернуть"><svg id="toggle-icon"><use href="#icon-minus"/></svg></button>
+<button class="pill-btn stop" id="close-btn" title="Остановить"><svg><use href="#icon-stop"/></svg></button>
+</div>
+</div>
+
+<!-- Stop confirmation modal -->
+<div class="modal-backdrop" id="modal">
+<div class="modal">
+<div class="modal-content">
+<div class="modal-title">Остановить перевод?</div>
+<div class="modal-subtitle">Сессия будет закрыта и транскрипт исчезнет.</div>
+<div class="modal-actions">
+<button class="modal-btn cancel" id="modal-cancel">Отмена</button>
+<button class="modal-btn destructive" id="modal-confirm">Остановить</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+
+<div class="demo-controls">
+<div class="row">
+<button class="btn-demo me" id="btn-add-me"><svg><use href="#icon-plus"/></svg> Моя фраза</button>
+<button class="btn-demo peer" id="btn-add-peer"><svg><use href="#icon-plus"/></svg> Фраза собеседника</button>
+<button class="btn-demo auto" id="btn-auto"><svg><use href="#icon-play"/></svg> Авто-диалог</button>
+<button class="btn-demo clear" id="btn-clear"><svg><use href="#icon-trash"/></svg> Очистить</button>
+</div>
+</div>
+
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 24px;">
+<div>
+<h3 style="font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:var(--page-mute); margin-bottom:10px;">Иконка свернуть</h3>
+<p style="font-size:13px; line-height:1.55; color:rgba(245,245,247,0.85);"><strong>− (минус)</strong> вместо chevron — как кнопка минимизации в macOS-окнах. Понятная метафора «убрать на потом». Когда свёрнуто, иконка меняется на <strong>+</strong> для разворачивания.</p>
+</div>
+<div>
+<h3 style="font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:var(--page-mute); margin-bottom:10px;">Stop confirmation</h3>
+<p style="font-size:13px; line-height:1.55; color:rgba(245,245,247,0.85);">Нажми <strong>■ Stop</strong> в pill — появится модалка «Остановить перевод?» с кнопками <strong>Отмена</strong> (ghost) и <strong>Остановить</strong> (destructive красная). Backdrop blur 8px затемняет фон.</p>
+</div>
+</div>
+</section>
+
+<!-- ═══ BUBBLE VARIATIONS ═══ -->
+<section>
+<div class="section-title"><span>6 направлений для bubble</span><span class="rule"></span></div>
+
+<div class="variations-grid">
+
+<!-- B1 -->
+<div class="variation">
+<div class="variation-label"><span class="num">B1 · Minimal Tablet</span></div>
+<div class="stage">
+<div class="stage-bubbles b1">
+<div class="b me"><div class="original">Привет, как дела?</div><div class="translated">Hi, how are you?</div></div>
+<div class="b peer"><div class="original">I'm good, thanks!</div><div class="translated">Хорошо, спасибо!</div></div>
+<div class="b me"><div class="original">Давай в 10 утра.</div><div class="translated">Let's do 10 AM.</div></div>
+</div>
+</div>
+<p class="card-desc"><strong>Минималистичный.</strong> Без glass-эффектов, плоский цветной фон высокой непрозрачности (0.85–0.92). Самый читаемый, ближе к iMessage / Telegram. Меньше «вау», больше пользы.</p>
+</div>
+
+<!-- B2 -->
+<div class="variation">
+<div class="variation-label"><span class="num">B2 · Speech Bubble (с хвостиком)</span></div>
+<div class="stage">
+<div class="stage-bubbles b2">
+<div class="b me"><div class="original">Привет, как дела?</div><div class="translated">Hi, how are you?</div></div>
+<div class="b peer"><div class="original">I'm good, thanks!</div><div class="translated">Хорошо, спасибо!</div></div>
+<div class="b me"><div class="original">Давай в 10 утра.</div><div class="translated">Let's do 10 AM.</div></div>
+</div>
+</div>
+<p class="card-desc"><strong>Speech bubble.</strong> Один угол не закруглён (5px) — намёк на «хвост» классической bubble-формы. Лёгкий glass + меньше пышности чем R4. Привычная chat-метафора.</p>
+</div>
+
+<!-- B3 -->
+<div class="variation">
+<div class="variation-label"><span class="num">B3 · Перевод главный</span></div>
+<div class="stage">
+<div class="stage-bubbles b3">
+<div class="b me"><div class="translated-primary">Hi, how are you?</div><div class="original-secondary">Привет, как дела?</div></div>
+<div class="b peer"><div class="translated-primary">Хорошо, спасибо!</div><div class="original-secondary">I'm good, thanks!</div></div>
+<div class="b me"><div class="translated-primary">Let's do 10 AM.</div><div class="original-secondary">Давай в 10 утра.</div></div>
+</div>
+</div>
+<p class="card-desc"><strong>Перевод главный, оригинал — caption.</strong> Перевернутая иерархия: то что юзер должен читать (перевод) — большое (14.5px white), оригинал — мелкое italic-caption (11px muted). По задумке: ты переводишь и тебе нужен <em>результат</em>, не источник.</p>
+</div>
+
+<!-- B4 -->
+<div class="variation">
+<div class="variation-label"><span class="num">B4 · Side-by-Side</span></div>
+<div class="stage">
+<div class="stage-bubbles b4">
+<div class="b me"><div class="col-original">Привет, как дела?</div><div class="divider"></div><div class="col-translated">Hi, how are you?</div></div>
+<div class="b peer"><div class="col-original">I'm good, thanks!</div><div class="divider"></div><div class="col-translated">Хорошо, спасибо!</div></div>
+<div class="b me"><div class="col-original">Давай в 10 утра.</div><div class="divider"></div><div class="col-translated">Let's do 10 AM.</div></div>
+</div>
+</div>
+<p class="card-desc"><strong>Две колонки.</strong> Оригинал и перевод рядом, разделены hairline. Шире bubble (92% контейнера). Хорошо для сравнения и быстрого взгляда на обе версии. Однако теряется hierarchy и можно перепутать.</p>
+</div>
+
+<!-- B5 -->
+<div class="variation">
+<div class="variation-label"><span class="num">B5 · Soft Pillow</span></div>
+<div class="stage">
+<div class="stage-bubbles b5">
+<div class="b me"><div class="original">Привет, как дела?</div><div class="translated">Hi, how are you?</div></div>
+<div class="b peer"><div class="original">I'm good, thanks!</div><div class="translated">Хорошо, спасибо!</div></div>
+<div class="b me"><div class="original">Давай в 10 утра.</div><div class="translated">Let's do 10 AM.</div></div>
+</div>
+</div>
+<p class="card-desc"><strong>Soft pillow.</strong> Высокий border-radius (28px), большая тень, мощный specular highlight сверху. Без conic-rim — мягче. Эффект «тактильной подушечки». Подходит если приоритет — playful/inviting.</p>
+</div>
+
+<!-- B6 -->
+<div class="variation">
+<div class="variation-label"><span class="num">B6 · Floating Subtitle</span></div>
+<div class="stage">
+<div class="stage-bubbles b6">
+<div class="b me"><div class="original">Привет, как дела?</div><div class="translated">Hi, how are you?</div></div>
+<div class="b peer"><div class="original">I'm good, thanks!</div><div class="translated">Хорошо, спасибо!</div></div>
+<div class="b me"><div class="original">Давай в 10 утра.</div><div class="translated">Let's do 10 AM.</div></div>
+</div>
+</div>
+<p class="card-desc"><strong>Без bubble, как субтитры в кино.</strong> Только текст с тенью+glow. Слева цветная вертикальная полоска-индикатор (голубая для меня, персиковая для peer). Самый ненавязчивый — не перекрывает контент. Меньше всего видно сквозь.</p>
+</div>
+
+</div>
+</section>
+
+</main>
+
+<script>
+function escapeHtml(s) { return s.replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+
+const MY_PHRASES = [
+  { o: 'Привет, как дела?', t: 'Hi, how are you?' },
+  { o: 'Давай встретимся завтра?', t: 'Let\'s meet tomorrow?' },
+  { o: 'Я готов начинать.', t: 'I\'m ready to start.' },
+  { o: 'Что насчёт пятницы?', t: 'What about Friday?' },
+  { o: 'Понял, спасибо.', t: 'Got it, thanks.' },
+  { o: 'Согласен.', t: 'Agreed.' },
+  { o: 'Давай в 10 утра.', t: 'Let\'s do 10 AM.' },
+  { o: 'Хорошо, до встречи.', t: 'Okay, see you then.' },
+];
+const PEER_PHRASES = [
+  { o: 'I\'m good, thanks!', t: 'Хорошо, спасибо!' },
+  { o: 'Sounds good to me.', t: 'Звучит хорошо.' },
+  { o: 'Let me check my calendar.', t: 'Дай посмотрю календарь.' },
+  { o: 'Friday works for me.', t: 'Пятница подходит.' },
+  { o: 'See you then.', t: 'До встречи.' },
+  { o: 'What time exactly?', t: 'Во сколько именно?' },
+  { o: 'Perfect, sending it now.', t: 'Отлично, отправляю.' },
+];
+
+const VISIBLE_LIMIT = 3;
+let myIndex = 0, peerIndex = 0, autoInterval = null, autoLastSide = 'peer';
+let collapsed = false;
+
+const list = document.getElementById('bubbles-list');
+const zone = document.getElementById('transcript-zone');
+const btnAddMe = document.getElementById('btn-add-me');
+const btnAddPeer = document.getElementById('btn-add-peer');
+const btnAuto = document.getElementById('btn-auto');
+const btnClear = document.getElementById('btn-clear');
+const closeBtn = document.getElementById('close-btn');
+const toggleBtn = document.getElementById('toggle-btn');
+const toggleIcon = document.getElementById('toggle-icon');
+const modal = document.getElementById('modal');
+const modalCancel = document.getElementById('modal-cancel');
+const modalConfirm = document.getElementById('modal-confirm');
+
+function addBubble(side, phrase) {
+  if (collapsed) return;
+  const bubble = document.createElement('div');
+  bubble.className = `bubble ${side}`;
+  bubble.innerHTML = `
+    <div class="original">${escapeHtml(phrase.o)}</div>
+    <div class="translated">${escapeHtml(phrase.t)}</div>
+  `;
+  list.appendChild(bubble);
+  prune();
+}
+function prune() {
+  const live = list.querySelectorAll('.bubble:not(.fade-out)');
+  if (live.length > VISIBLE_LIMIT) {
+    const toFade = live.length - VISIBLE_LIMIT;
+    for (let i = 0; i < toFade; i++) {
+      live[i].classList.add('fade-out');
+      const t = live[i];
+      setTimeout(() => t.remove(), 720);
+    }
+  }
+}
+function clearAll() {
+  list.querySelectorAll('.bubble').forEach(b => {
+    if (!b.classList.contains('fade-out')) {
+      b.classList.add('fade-out');
+      setTimeout(() => b.remove(), 720);
+    }
+  });
+}
+
+btnAddMe.addEventListener('click', () => addBubble('me', MY_PHRASES[myIndex++ % MY_PHRASES.length]));
+btnAddPeer.addEventListener('click', () => addBubble('peer', PEER_PHRASES[peerIndex++ % PEER_PHRASES.length]));
+btnClear.addEventListener('click', clearAll);
+
+btnAuto.addEventListener('click', () => {
+  if (autoInterval) {
+    clearInterval(autoInterval); autoInterval = null;
+    btnAuto.classList.remove('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-play"/></svg> Авто-диалог';
+  } else {
+    btnAuto.classList.add('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-pause"/></svg> Стоп';
+    const tick = () => {
+      if (autoLastSide === 'me') {
+        addBubble('peer', PEER_PHRASES[peerIndex++ % PEER_PHRASES.length]);
+        autoLastSide = 'peer';
+      } else {
+        addBubble('me', MY_PHRASES[myIndex++ % MY_PHRASES.length]);
+        autoLastSide = 'me';
+      }
+    };
+    tick();
+    autoInterval = setInterval(tick, 2000);
+  }
+});
+
+toggleBtn.addEventListener('click', () => {
+  collapsed = !collapsed;
+  if (collapsed) {
+    list.querySelectorAll('.bubble').forEach(b => {
+      if (!b.classList.contains('fade-out')) {
+        b.classList.add('fade-out');
+        setTimeout(() => b.remove(), 720);
+      }
+    });
+    setTimeout(() => zone.classList.add('collapsed'), 720);
+    toggleIcon.innerHTML = '<use href="#icon-plus"/>';
+    toggleBtn.title = 'Развернуть';
+  } else {
+    zone.classList.remove('collapsed');
+    toggleIcon.innerHTML = '<use href="#icon-minus"/>';
+    toggleBtn.title = 'Свернуть';
+  }
+});
+
+// Stop button → show modal
+closeBtn.addEventListener('click', () => {
+  modal.classList.add('shown');
+});
+modalCancel.addEventListener('click', () => {
+  modal.classList.remove('shown');
+});
+modalConfirm.addEventListener('click', () => {
+  modal.classList.remove('shown');
+  if (autoInterval) {
+    clearInterval(autoInterval); autoInterval = null;
+    btnAuto.classList.remove('active');
+    btnAuto.innerHTML = '<svg><use href="#icon-play"/></svg> Авто-диалог';
+  }
+  clearAll();
+});
+modal.addEventListener('click', (e) => {
+  if (e.target === modal) modal.classList.remove('shown');
+});
+
+let seconds = 134;
+setInterval(() => {
+  seconds++;
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = (seconds % 60).toString().padStart(2, '0');
+  document.getElementById('timer').textContent = `${m}:${s}`;
+}, 1000);
+
+const pill = document.getElementById('control-pill');
+let dragging = false, dragStart = {};
+pill.addEventListener('mousedown', (e) => {
+  if (e.target.closest('.pill-btn')) return;
+  dragging = true;
+  const rect = zone.getBoundingClientRect();
+  const frame = zone.closest('.frame');
+  const fRect = frame.getBoundingClientRect();
+  dragStart = { x: e.clientX, y: e.clientY, rectLeft: rect.left - fRect.left, rectBottom: fRect.bottom - rect.bottom };
+  e.preventDefault();
+});
+window.addEventListener('mousemove', (e) => {
+  if (!dragging) return;
+  const frame = zone.closest('.frame');
+  const fRect = frame.getBoundingClientRect();
+  const dx = e.clientX - dragStart.x; const dy = e.clientY - dragStart.y;
+  const w = zone.offsetWidth;
+  let newLeft = dragStart.rectLeft + dx; let newBottom = dragStart.rectBottom - dy;
+  newLeft = Math.max(8, Math.min(newLeft, fRect.width - w - 8));
+  newBottom = Math.max(8, Math.min(newBottom, fRect.height - 80));
+  zone.style.left = newLeft + 'px'; zone.style.right = 'auto';
+  zone.style.bottom = newBottom + 'px'; zone.style.transform = 'none';
+});
+window.addEventListener('mouseup', () => { dragging = false; });
+
+setTimeout(() => addBubble('me', MY_PHRASES[myIndex++]), 200);
+setTimeout(() => addBubble('peer', PEER_PHRASES[peerIndex++]), 700);
+setTimeout(() => addBubble('me', MY_PHRASES[myIndex++]), 1200);
+</script>
+
+</body>
+</html>

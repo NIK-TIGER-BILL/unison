@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unison · Transcript · R6 · B3 + tail</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@300;400&display=swap" rel="stylesheet">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<filter id="liquidGlass" x="-15%" y="-15%" width="130%" height="130%">
+<feTurbulence type="fractalNoise" baseFrequency="0.010 0.016" numOctaves="3" seed="11" result="noise"/>
+<feGaussianBlur in="noise" stdDeviation="3.5" result="blurredNoise"/>
+<feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="20" xChannelSelector="R" yChannelSelector="G"/>
+</filter>
+<filter id="liquidGlassSubtle" x="-10%" y="-10%" width="120%" height="120%">
+<feTurbulence type="fractalNoise" baseFrequency="0.014 0.02" numOctaves="2" seed="3" result="noise"/>
+<feGaussianBlur in="noise" stdDeviation="2.5" result="blurredNoise"/>
+<feDisplacementMap in="SourceGraphic" in2="blurredNoise" scale="12" xChannelSelector="R" yChannelSelector="G"/>
+</filter>
+</defs>
+</svg>
+
+<style>
+:root {
+  --page-bg: #08080a;
+  --page-fg: #f5f5f7;
+  --page-mute: #8e8e93;
+  --accent: #ffb6e0;
+  --me-color: #b6e0ff;
+  --peer-color: #ffd6c0;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--page-bg); color: var(--page-fg);
+  font-family: 'DM Sans', sans-serif; -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+.page-header {
+  padding: 48px 48px 24px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: sticky; top: 0;
+  background: rgba(8,8,10,0.85);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  z-index: 100;
+}
+.page-header h1 {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300; font-size: 30px;
+  letter-spacing: -0.03em; margin-bottom: 4px;
+}
+.page-header h1 .accent { color: var(--accent); }
+.page-header p { color: var(--page-mute); font-size: 13.5px; line-height: 1.5; max-width: 760px; }
+.page-header p code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11.5px;
+  background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px;
+}
+.page-header .nav {
+  margin-top: 12px;
+  display: flex; gap: 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px; letter-spacing: 0.04em; flex-wrap: wrap;
+}
+.page-header .nav a {
+  color: var(--page-mute); text-decoration: none;
+  padding-bottom: 2px; border-bottom: 1px dotted transparent;
+}
+.page-header .nav a:hover { color: var(--page-fg); border-bottom-color: rgba(255,255,255,0.3); }
+.page-header .nav a.current { color: var(--page-fg); border-bottom-color: var(--accent); }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 40px;
+  padding: 48px 48px 64px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+.variation { display: flex; flex-direction: column; gap: 14px; }
+.variation-label {
+  display: flex; align-items: baseline; justify-content: space-between;
+}
+.variation-label .num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; color: var(--page-mute);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+
+/* Stage area */
+.stage {
+  position: relative;
+  width: 100%; height: 320px;
+  border-radius: 12px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 50% at 70% 30%, rgba(100, 230, 255, 0.35), transparent 60%),
+    radial-gradient(ellipse 80% 60% at 30% 70%, rgba(255, 110, 200, 0.32), transparent 60%),
+    linear-gradient(180deg, #0a0820 0%, #100c2e 50%, #1a1142 100%);
+  box-shadow: 0 12px 32px -8px rgba(0,0,0,0.5);
+}
+.bubbles {
+  position: absolute; left: 50%; bottom: 24px;
+  transform: translateX(-50%);
+  width: 92%;
+  display: flex; flex-direction: column;
+  gap: 14px; align-items: stretch;
+}
+
+.card-desc {
+  font-size: 12.5px;
+  color: var(--page-mute);
+  line-height: 1.55;
+  max-width: 380px;
+}
+.card-desc strong { color: var(--page-fg); font-weight: 500; }
+.card-desc code {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px;
+}
+
+/* ═══ Shared B3 base (translation primary) ═══ */
+.bubble {
+  max-width: 76%;
+  padding: 11px 15px;
+  position: relative;
+  backdrop-filter: blur(30px) saturate(190%) url(#liquidGlassSubtle);
+  -webkit-backdrop-filter: blur(30px) saturate(190%);
+  box-shadow:
+    0 14px 28px rgba(0,0,0,0.35),
+    inset 0 1.2px 0 rgba(255,255,255,0.24),
+    inset 0 -1px 0 rgba(0,0,0,0.2);
+  animation: bubbleIn 0.4s ease-out;
+}
+.bubble.me { align-self: flex-start; }
+.bubble.peer { align-self: flex-end; }
+.bubble .translated-primary {
+  font-size: 14.5px; font-weight: 500;
+  color: #fff;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+  position: relative; z-index: 1;
+}
+.bubble .original-secondary {
+  font-size: 11px;
+  color: rgba(255,255,255,0.52);
+  margin-top: 5px;
+  font-style: italic;
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+  position: relative; z-index: 1;
+}
+@keyframes bubbleIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.94); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ════════════ T1 · iMessage corner tail ════════════ */
+.t1 .bubble {
+  border-radius: 18px;
+}
+.t1 .bubble.me { border-bottom-left-radius: 5px; background: linear-gradient(180deg, rgba(160, 210, 255, 0.20), rgba(100, 160, 220, 0.09)); border: 0.5px solid rgba(180, 220, 255, 0.24); }
+.t1 .bubble.peer { border-bottom-right-radius: 5px; background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.035)); border: 0.5px solid rgba(255,255,255,0.13); }
+
+/* ════════════ T2 · Triangle pointer tail ════════════ */
+.t2 .bubble {
+  border-radius: 18px;
+}
+.t2 .bubble.me {
+  background: linear-gradient(180deg, rgba(160, 210, 255, 0.20), rgba(100, 160, 220, 0.09));
+  border: 0.5px solid rgba(180, 220, 255, 0.24);
+}
+.t2 .bubble.peer {
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.035));
+  border: 0.5px solid rgba(255,255,255,0.13);
+}
+.t2 .bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -6px;
+  width: 14px; height: 14px;
+  backdrop-filter: inherit;
+  -webkit-backdrop-filter: inherit;
+  transform: rotate(45deg);
+}
+.t2 .bubble.me::after {
+  left: 14px;
+  background: linear-gradient(135deg, rgba(160, 210, 255, 0.20), rgba(100, 160, 220, 0.12));
+  border-right: 0.5px solid rgba(180, 220, 255, 0.24);
+  border-bottom: 0.5px solid rgba(180, 220, 255, 0.24);
+}
+.t2 .bubble.peer::after {
+  right: 14px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.10), rgba(255,255,255,0.045));
+  border-right: 0.5px solid rgba(255,255,255,0.13);
+  border-bottom: 0.5px solid rgba(255,255,255,0.13);
+}
+
+/* ════════════ T3 · Detached dot ════════════ */
+.t3 .bubble {
+  border-radius: 18px;
+  margin-bottom: 6px;
+}
+.t3 .bubble.me {
+  background: linear-gradient(180deg, rgba(160, 210, 255, 0.20), rgba(100, 160, 220, 0.09));
+  border: 0.5px solid rgba(180, 220, 255, 0.24);
+}
+.t3 .bubble.peer {
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.035));
+  border: 0.5px solid rgba(255,255,255,0.13);
+}
+.t3 .bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -10px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  backdrop-filter: inherit;
+  -webkit-backdrop-filter: inherit;
+}
+.t3 .bubble.me::after {
+  left: 12px;
+  background: linear-gradient(180deg, rgba(160, 210, 255, 0.22), rgba(100, 160, 220, 0.12));
+  border: 0.5px solid rgba(180, 220, 255, 0.24);
+}
+.t3 .bubble.peer::after {
+  right: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.045));
+  border: 0.5px solid rgba(255,255,255,0.13);
+}
+
+/* ════════════ T4 · Drop shape (asymmetric radius) ════════════ */
+.t4 .bubble.me {
+  border-radius: 20px 20px 20px 3px;
+  background: linear-gradient(180deg, rgba(160, 210, 255, 0.20), rgba(100, 160, 220, 0.09));
+  border: 0.5px solid rgba(180, 220, 255, 0.24);
+}
+.t4 .bubble.peer {
+  border-radius: 20px 20px 3px 20px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.035));
+  border: 0.5px solid rgba(255,255,255,0.13);
+}
+
+/* ════════════ T5 · Speaker-colored heavy tint ════════════ */
+.t5 .bubble {
+  border-radius: 18px;
+}
+.t5 .bubble.me {
+  background: linear-gradient(180deg, rgba(110, 180, 255, 0.38), rgba(60, 120, 200, 0.25));
+  border: 0.5px solid rgba(180, 220, 255, 0.36);
+  border-bottom-left-radius: 5px;
+}
+.t5 .bubble.peer {
+  background: linear-gradient(180deg, rgba(255, 200, 160, 0.30), rgba(220, 140, 100, 0.18));
+  border: 0.5px solid rgba(255, 200, 160, 0.32);
+  border-bottom-right-radius: 5px;
+}
+.t5 .bubble .original-secondary { color: rgba(255,255,255,0.65); }
+
+/* ════════════ T6 · Audio wave indicator (no tail, wave) ════════════ */
+.t6 .bubble {
+  border-radius: 18px;
+}
+.t6 .bubble.me {
+  background: linear-gradient(180deg, rgba(160, 210, 255, 0.20), rgba(100, 160, 220, 0.09));
+  border: 0.5px solid rgba(180, 220, 255, 0.24);
+}
+.t6 .bubble.peer {
+  background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.035));
+  border: 0.5px solid rgba(255,255,255,0.13);
+}
+.t6 .bubble {
+  display: flex; align-items: center; gap: 11px;
+}
+.t6 .bubble .text-block { flex: 1; min-width: 0; }
+.t6 .bubble .wave {
+  display: flex; align-items: center; gap: 2px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.t6 .bubble .wave span {
+  display: inline-block;
+  width: 2px; border-radius: 1px;
+  background: rgba(255,255,255,0.7);
+  animation: waveAnim 1s ease-in-out infinite;
+}
+.t6 .bubble.me .wave { order: -1; }
+.t6 .bubble.me .wave span { background: var(--me-color); }
+.t6 .bubble.peer .wave span { background: var(--peer-color); }
+.t6 .bubble .wave span:nth-child(1) { height: 8px; animation-delay: 0s; }
+.t6 .bubble .wave span:nth-child(2) { height: 14px; animation-delay: 0.15s; }
+.t6 .bubble .wave span:nth-child(3) { height: 10px; animation-delay: 0.3s; }
+.t6 .bubble .wave span:nth-child(4) { height: 6px; animation-delay: 0.45s; }
+@keyframes waveAnim {
+  0%, 100% { transform: scaleY(0.5); }
+  50% { transform: scaleY(1); }
+}
+
+</style>
+</head>
+<body>
+
+<header class="page-header">
+<h1>Unison · Transcript · <span class="accent">R6 · B3 + tail</span></h1>
+<p>База: <strong>B3</strong> — перевод главный (14.5px white), оригинал маленький italic-caption (11px muted). Шесть направлений для «хвостика» / индикатора speaker'а.</p>
+<div class="nav">
+<a href="/popover-final/">Popover</a>
+<a href="/onboarding-final/">Onboarding</a>
+<a href="/transcript-round-1/">R1</a>
+<a href="/transcript-round-2/">R2</a>
+<a href="/transcript-round-3/">R3</a>
+<a href="/transcript-round-4/">R4</a>
+<a href="/transcript-round-5/">R5</a>
+<a class="current" href="/transcript-round-6/">R6</a>
+</div>
+</header>
+
+<main class="grid">
+
+<!-- T1 -->
+<div class="variation">
+<div class="variation-label"><span class="num">T1 · iMessage corner tail</span></div>
+<div class="stage">
+<div class="bubbles t1">
+<div class="bubble me"><div class="translated-primary">Hi, how are you?</div><div class="original-secondary">Привет, как дела?</div></div>
+<div class="bubble peer"><div class="translated-primary">Хорошо, спасибо!</div><div class="original-secondary">I'm good, thanks!</div></div>
+<div class="bubble me"><div class="translated-primary">Let's do 10 AM.</div><div class="original-secondary">Давай в 10 утра.</div></div>
+</div>
+</div>
+<p class="card-desc"><strong>iMessage corner.</strong> Один угол (bottom-left для me, bottom-right для peer) уменьшенным <code>border-radius: 5px</code>. Самый сдержанный, привычный по iMessage / WhatsApp. Subtle и универсально читаемо.</p>
+</div>
+
+<!-- T2 -->
+<div class="variation">
+<div class="variation-label"><span class="num">T2 · Triangle pointer</span></div>
+<div class="stage">
+<div class="bubbles t2">
+<div class="bubble me"><div class="translated-primary">Hi, how are you?</div><div class="original-secondary">Привет, как дела?</div></div>
+<div class="bubble peer"><div class="translated-primary">Хорошо, спасибо!</div><div class="original-secondary">I'm good, thanks!</div></div>
+<div class="bubble me"><div class="translated-primary">Let's do 10 AM.</div><div class="original-secondary">Давай в 10 утра.</div></div>
+</div>
+</div>
+<p class="card-desc"><strong>Triangle pointer.</strong> Маленький треугольник под bubble (14×14, повёрнутый квадрат с border'ом). Слева для me, справа для peer. Комикс-стиль. Самый явный «вот кто это сказал».</p>
+</div>
+
+<!-- T3 -->
+<div class="variation">
+<div class="variation-label"><span class="num">T3 · Detached dot</span></div>
+<div class="stage">
+<div class="bubbles t3">
+<div class="bubble me"><div class="translated-primary">Hi, how are you?</div><div class="original-secondary">Привет, как дела?</div></div>
+<div class="bubble peer"><div class="translated-primary">Хорошо, спасибо!</div><div class="original-secondary">I'm good, thanks!</div></div>
+<div class="bubble me"><div class="translated-primary">Let's do 10 AM.</div><div class="original-secondary">Давай в 10 утра.</div></div>
+</div>
+</div>
+<p class="card-desc"><strong>Detached dot.</strong> Маленький отдельный кружок (7×7) ниже bubble, ближе к углу. Как Apple Tapback или Telegram-style. Минимальный, не «загромождает» силуэт bubble.</p>
+</div>
+
+<!-- T4 -->
+<div class="variation">
+<div class="variation-label"><span class="num">T4 · Drop shape</span></div>
+<div class="stage">
+<div class="bubbles t4">
+<div class="bubble me"><div class="translated-primary">Hi, how are you?</div><div class="original-secondary">Привет, как дела?</div></div>
+<div class="bubble peer"><div class="translated-primary">Хорошо, спасибо!</div><div class="original-secondary">I'm good, thanks!</div></div>
+<div class="bubble me"><div class="translated-primary">Let's do 10 AM.</div><div class="original-secondary">Давай в 10 утра.</div></div>
+</div>
+</div>
+<p class="card-desc"><strong>Drop shape.</strong> Один угол сильно острый (<code>3px</code>), три других — <code>20px</code>. Получается асимметричная капля. Без отдельного «хвоста», но шейп сам указывает на сторону. Самый минималистичный.</p>
+</div>
+
+<!-- T5 -->
+<div class="variation">
+<div class="variation-label"><span class="num">T5 · Heavy speaker tint</span></div>
+<div class="stage">
+<div class="bubbles t5">
+<div class="bubble me"><div class="translated-primary">Hi, how are you?</div><div class="original-secondary">Привет, как дела?</div></div>
+<div class="bubble peer"><div class="translated-primary">Хорошо, спасибо!</div><div class="original-secondary">I'm good, thanks!</div></div>
+<div class="bubble me"><div class="translated-primary">Let's do 10 AM.</div><div class="original-secondary">Давай в 10 утра.</div></div>
+</div>
+</div>
+<p class="card-desc"><strong>Heavy tint + corner.</strong> Усиленный speaker-цвет (me — насыщенный синий, peer — тёплый персик). Угол bottom-corner 5px. Цвет делает основную работу по идентификации, хвост — поддержка.</p>
+</div>
+
+<!-- T6 -->
+<div class="variation">
+<div class="variation-label"><span class="num">T6 · Audio wave</span></div>
+<div class="stage">
+<div class="bubbles t6">
+<div class="bubble me"><div class="wave"><span></span><span></span><span></span><span></span></div><div class="text-block"><div class="translated-primary">Hi, how are you?</div><div class="original-secondary">Привет, как дела?</div></div></div>
+<div class="bubble peer"><div class="text-block"><div class="translated-primary">Хорошо, спасибо!</div><div class="original-secondary">I'm good, thanks!</div></div><div class="wave"><span></span><span></span><span></span><span></span></div></div>
+<div class="bubble me"><div class="wave"><span></span><span></span><span></span><span></span></div><div class="text-block"><div class="translated-primary">Let's do 10 AM.</div><div class="original-secondary">Давай в 10 утра.</div></div></div>
+</div>
+</div>
+<p class="card-desc"><strong>Audio wave.</strong> Вместо геометрического хвоста — маленькая анимированная аудио-волна (4 столбика, бегущая 1s). Слева у me, справа у peer. Дополнительная семантика: это <em>прозвучало</em>. Концептуальный, не «классический» chat.</p>
+</div>
+
+</main>
+
+</body>
+</html>
