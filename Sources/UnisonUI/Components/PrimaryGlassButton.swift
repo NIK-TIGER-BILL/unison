@@ -1,37 +1,10 @@
 import SwiftUI
 
-/// Full-width primary action button. Native Liquid Glass on macOS 26.
-///
-/// The visual is hand-built rather than `buttonStyle(.glassProminent)`
-/// because the latter, on a dark popover and without a `.tint`, renders
-/// as a near-opaque dark fill — flat, low-contrast, the opposite of the
-/// raised translucent-white surface the design specifies
-/// (`design/popover-final/index.html` §`.start-btn`):
-/// ```
-/// background: linear-gradient(180deg, rgba(255,255,255,0.22),
-///                                     rgba(255,255,255,0.08));
-/// border: 0.5px solid rgba(255,255,255,0.22);
-/// inset 0 1px 0 rgba(255,255,255,0.28)  /* top specular */
-/// 0 4px 12px rgba(0,0,0,0.28)            /* drop shadow */
-/// ```
-///
-/// We get that look by:
-/// 1. `.glassEffect(.regular.interactive(), in: …)` — system Liquid
-///    Glass surface, so the button still refracts/responds to hover and
-///    press the same way `.glassProminent` does.
-/// 2. A white linear-gradient overlay (0.22 → 0.08) that gives the
-///    button the actual visible colour. Without this the glass is
-///    nearly transparent against the dark popover and the button reads
-///    as flat black.
-/// 3. A hairline white stroke + inset specular highlight, both
-///    blendMode `.plusLighter` so they pop on dark backgrounds without
-///    over-saturating on light ones.
-/// 4. A subtle drop shadow for elevation.
-///
-/// Two variants:
-/// - `.standard` — neutral white-glass (Start translating, Done).
-/// - `.destructive` — coral-tinted (Stop translating); same recipe but
-///   the gradient and stroke shift to Liquid-Glass-Red.
+/// Full-width primary action button. Hand-built rather than
+/// `buttonStyle(.glassProminent)` because the latter renders as a
+/// near-opaque dark fill on a dark popover — flat, low-contrast.
+/// The recipe is glass + white linear-gradient tint + hairline rim
+/// + top specular + drop shadow, all stacked under one `clipShape`.
 public struct PrimaryGlassButton: View {
     public enum Variant: Equatable, Sendable {
         case standard
@@ -44,7 +17,6 @@ public struct PrimaryGlassButton: View {
     public let isLoading: Bool
     public let action: () -> Void
 
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @SwiftUI.State private var isHovered = false
 
@@ -65,13 +37,6 @@ public struct PrimaryGlassButton: View {
     public var body: some View {
         let shape = RoundedRectangle(cornerRadius: 13, style: .continuous)
 
-        // Hover affordance: native `.glassEffect(.regular.interactive())`
-        // already animates the glass surface itself on hover/press, but
-        // the tint gradient and specular highlight on top of it are
-        // static. To give the button an unmistakable hover signal we
-        // bump brightness by 4% and scale to 1.015 while the pointer
-        // is inside the shape. `ButtonStyleConfiguration.isPressed`
-        // (`PressableButtonStyle`) covers the press state.
         Button(action: action) {
             HStack(spacing: 8) {
                 if isLoading {
@@ -89,36 +54,22 @@ public struct PrimaryGlassButton: View {
             .padding(.vertical, 11)
             .background(
                 ZStack {
-                    // System Liquid Glass material so the button still
-                    // refracts the popover background and reacts to
-                    // hover/press the same way `.buttonStyle(.glass)` would.
                     shape
                         .fill(.clear)
-                        .glassEffect(
-                            reduceTransparency ? .identity : .regular.interactive(),
-                            in: shape
-                        )
-                    // Tint gradient — this is what actually gives the
-                    // button its visible colour. White for standard
-                    // (rgba 0.22→0.08), coral for destructive.
+                        .liquidGlass(shape: shape, interactive: true, highContrastHairline: false)
                     shape
                         .fill(tintGradient)
-                    // Hairline rim. `.plusLighter` keeps it visible on
-                    // the dark popover material without going neon on
-                    // light backgrounds.
                     shape
                         .strokeBorder(borderColor, lineWidth: 0.5)
                         .blendMode(.plusLighter)
-                    // Inset top specular — matches the CSS
-                    // `inset 0 1px 0 rgba(255,255,255,0.28)` highlight
-                    // that sells the raised glass look.
+                    // Inset top specular — sells the raised glass look.
                     shape
                         .inset(by: 0.5)
                         .stroke(
                             LinearGradient(
                                 colors: [
                                     Color.white.opacity(0.28),
-                                    Color.white.opacity(0.0),
+                                    Color.white.opacity(0.0)
                                 ],
                                 startPoint: .top,
                                 endPoint: .center
@@ -134,9 +85,6 @@ public struct PrimaryGlassButton: View {
         .buttonStyle(PressablePrimaryButtonStyle())
         .contentShape(shape)
         .disabled(isLoading)
-        // Subtle brightness bump on hover — a 4% lift on top of the
-        // already-bright tint gradient makes the cursor's presence
-        // visible without changing the button's colour identity.
         .brightness(isHovered ? 0.04 : 0)
         .scaleEffect(isHovered ? 1.015 : 1.0)
         .animation(
@@ -148,17 +96,13 @@ public struct PrimaryGlassButton: View {
         }
     }
 
-    /// Gradient that paints the button. Mirrors the CSS:
-    /// `linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08))`
-    /// for the neutral primary, and the coral
-    /// `rgba(255,110,130,0.42) → rgba(220,60,90,0.28)` for destructive.
     private var tintGradient: LinearGradient {
         switch variant {
         case .standard:
             LinearGradient(
                 colors: [
                     Color.white.opacity(0.22),
-                    Color.white.opacity(0.08),
+                    Color.white.opacity(0.08)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -167,7 +111,7 @@ public struct PrimaryGlassButton: View {
             LinearGradient(
                 colors: [
                     Color(red: 255 / 255, green: 110 / 255, blue: 130 / 255).opacity(0.42),
-                    Color(red: 220 / 255, green:  60 / 255, blue:  90 / 255).opacity(0.28),
+                    Color(red: 220 / 255, green: 60 / 255, blue: 90 / 255).opacity(0.28)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -175,9 +119,6 @@ public struct PrimaryGlassButton: View {
         }
     }
 
-    /// 0.5pt rim. White on standard, coral on destructive — matches the
-    /// CSS `border: 0.5px solid rgba(255,255,255,0.22)` (or the coral
-    /// equivalent inside `.popover.translating`).
     private var borderColor: Color {
         switch variant {
         case .standard:
@@ -187,9 +128,6 @@ public struct PrimaryGlassButton: View {
         }
     }
 
-    /// Drop shadow under the button. Neutral black for the standard
-    /// variant; warmer red shadow under the destructive variant per
-    /// the design (`0 4px 14px rgba(220,60,90,0.32)`).
     private var shadowColor: Color {
         switch variant {
         case .standard:
@@ -200,11 +138,8 @@ public struct PrimaryGlassButton: View {
     }
 }
 
-/// Local button style that exposes the press state visually. We can't
-/// use `.buttonStyle(.plain)` and reach `configuration.isPressed`, so
-/// this small wrapper scales the label down to 0.985 on press for a
-/// physical "click" feel that the system glass interactive material
-/// alone doesn't provide on the tint gradient layer.
+/// Exposes press state to scale the label on press — `.buttonStyle(.plain)`
+/// doesn't surface `configuration.isPressed`.
 private struct PressablePrimaryButtonStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 

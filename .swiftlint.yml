@@ -1,0 +1,66 @@
+# Project-wide SwiftLint config.
+# Run via `scripts/lint.sh` (downloads the binary into scripts/.bin/).
+
+excluded:
+  - .build
+  - build
+  - design
+  - docs
+  - scripts
+  # Tests are linted with looser rules — keep them out of the
+  # default pass until we triage the existing findings (force_try,
+  # trailing_comma, line_length on inline JSON fixtures, etc.).
+  - Tests
+
+opt_in_rules:
+  # `empty_count` is intentionally NOT in this list — `swiftlint --fix`
+  # rewrites `count > 0` to `!isEmpty` without verifying the variable's
+  # type, which broke compilation in `BundledBlackHoleInstaller.swift`
+  # where `count` is a plain `Int`. Re-enable only if the auto-fix
+  # gets type-aware.
+  - explicit_init
+  - first_where
+  - last_where
+  - prefer_zero_over_explicit_init
+  - redundant_nil_coalescing
+
+disabled_rules:
+  - todo                # TODO comments are fine
+  - identifier_name     # short names (w, g, d) are intentional in some places
+  # `Button(action: …) { label }` is the canonical SwiftUI pattern with
+  # two trailing closures — flagging it adds noise without helping.
+  - multiple_closures_with_trailing_closure
+  # Realtime / installer code intentionally returns 3-tuples and nests
+  # event payload types deeper than one level for grouping.
+  - large_tuple
+  - nesting
+  # `Data(_:)` and `String(decoding:as:)` would be nicer, but the
+  # current callsites mix valid and invalid bytes — the optional
+  # forms are the correct choice there.
+  - optional_data_string_conversion
+  - non_optional_string_data_conversion
+
+line_length:
+  # Permissive thresholds: long lines are common in the realtime
+  # codec / audio pipeline (multi-clause `os_log` strings, JSON
+  # event signatures). Tighten as those get refactored.
+  warning: 250
+  error: 320
+  ignores_comments: true
+  ignores_urls: true
+
+function_body_length:
+  warning: 120
+  error: 200
+
+type_body_length:
+  warning: 600
+  error: 900
+
+file_length:
+  warning: 900
+  error: 1400
+
+cyclomatic_complexity:
+  warning: 20
+  error: 30

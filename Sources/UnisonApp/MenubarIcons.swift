@@ -38,15 +38,15 @@ public enum MenubarState: Sendable, Equatable {
 /// The images are cached statically — building four 18×18 NSImages is
 /// cheap, but `setIconState(_:)` is called on every orchestrator state
 /// transition and these are pure functions of the state.
-public enum MenubarIcons {
+enum MenubarIcons {
     /// Canonical menubar icon side length. 18pt matches the menubar SF
     /// Symbol metrics on macOS 14+; the system trims to 22pt height with
     /// padding above/below, so 18×18 is the visual sweet spot.
-    public static let iconSize: CGFloat = 18
+    static let iconSize: CGFloat = 18
 
     /// Returns the menubar image for the given state. Cached after the
     /// first call per state.
-    public static func image(for state: MenubarState) -> NSImage {
+    static func image(for state: MenubarState) -> NSImage {
         switch state {
         case .idle:   return cachedIdle
         case .active: return cachedActive

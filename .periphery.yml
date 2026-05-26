@@ -1,0 +1,12 @@
+# Periphery — finds unused declarations via the Swift compiler index.
+# Run via `scripts/lint.sh`.
+#
+# `scripts/lint.sh` invokes Periphery with explicit
+# `--skip-build --index-store-path .build/debug/index/store` so it
+# reuses the SwiftPM index from a prior `swift build` instead of
+# trying to rebuild (the rebuild path fails on tests that need the
+# `Testing` module from a full Xcode toolchain).
+
+# AppKit selectors / KVO / IB hooks reach into the type system from
+# Objective-C; without this they'd look unreferenced.
+retain_objc_accessible: true

@@ -289,8 +289,7 @@ extension Composition {
             || force == .transcriptDemo
             || force == .popoverOpen
             || force == .startTranslation
-            || force == .startStopStart
-        {
+            || force == .startStopStart {
             print("[Unison] UNISON_FORCE_STATE=\(force.rawValue) — using pre-installed MockBlackHoleInstaller")
             return MockBlackHoleInstaller(preInstalled: true)
         }
@@ -324,8 +323,7 @@ extension Composition {
             || force == .transcriptDemo
             || force == .popoverOpen
             || force == .startTranslation
-            || force == .startStopStart
-        {
+            || force == .startStopStart {
             return ForcedGrantedPermissions()
         }
         return MacPermissions()
@@ -362,13 +360,13 @@ extension Composition {
     static func seedTranscriptDemo(store: TranscriptStore, viewModel: TranscriptViewModel) {
         store.currentLanguagePair = .default
         let samples: [(speaker: Speaker, original: String, translated: String)] = [
-            (.me,   "Привет, как дела?",            "Hi, how are you?"),
-            (.peer, "I'm good, thanks!",            "Хорошо, спасибо!"),
-            (.me,   "Давай встретимся завтра?",     "Let's meet tomorrow?"),
-            (.peer, "Sounds good to me.",           "Звучит хорошо."),
-            (.me,   "Что насчёт пятницы?",          "What about Friday?"),
+            (.me, "Привет, как дела?", "Hi, how are you?"),
+            (.peer, "I'm good, thanks!", "Хорошо, спасибо!"),
+            (.me, "Давай встретимся завтра?", "Let's meet tomorrow?"),
+            (.peer, "Sounds good to me.", "Звучит хорошо."),
+            (.me, "Что насчёт пятницы?", "What about Friday?"),
             (.peer, "Friday works for me. See you then.",
-                                                   "Пятница подходит. До встречи."),
+                                                   "Пятница подходит. До встречи.")
         ]
         for sample in samples {
             let id = UUID()

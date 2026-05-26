@@ -11,10 +11,10 @@ import UnisonDomain
 ///   `isFirstInGroup`, the last gets `isLastInGroup`.
 /// - `liveEntryId`, when non-nil and matching the very last entry, marks
 ///   the last bubble of the last group as `isLive` (renders typing dots).
-public enum TranscriptGrouping {
-    public static let defaultSplitThreshold = 240
+enum TranscriptGrouping {
+    static let defaultSplitThreshold = 240
 
-    public static func group(
+    static func group(
         entries: [TranscriptEntry],
         splitThreshold: Int = defaultSplitThreshold,
         liveEntryId: UUID? = nil

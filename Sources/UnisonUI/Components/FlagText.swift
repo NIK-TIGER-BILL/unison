@@ -34,4 +34,3 @@ public struct FlagText: View {
             .accessibilityHidden(accessibilityName == nil)
     }
 }
-

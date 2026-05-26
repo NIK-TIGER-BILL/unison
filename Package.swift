@@ -13,7 +13,7 @@ let package = Package(
         .library(name: "UnisonAudio", targets: ["UnisonAudio"]),
         .library(name: "UnisonSystem", targets: ["UnisonSystem"]),
         .library(name: "UnisonUI", targets: ["UnisonUI"]),
-        .executable(name: "Unison", targets: ["UnisonApp"]),
+        .executable(name: "Unison", targets: ["UnisonApp"])
     ],
     // Note: swift-snapshot-testing requires XCTest, which is not
     // available on Command Line Tools-only setups. We ship our own
@@ -27,7 +27,7 @@ let package = Package(
         .target(name: "UnisonUI", dependencies: ["UnisonDomain"]),
         .executableTarget(name: "UnisonApp", dependencies: [
             "UnisonDomain", "UnisonTranslation", "UnisonAudio",
-            "UnisonSystem", "UnisonUI",
+            "UnisonSystem", "UnisonUI"
         ]),
         .testTarget(name: "UnisonDomainTests", dependencies: ["UnisonDomain", "UnisonUI"]),
         .testTarget(name: "UnisonTranslationTests", dependencies: ["UnisonTranslation"]),
@@ -38,7 +38,7 @@ let package = Package(
             name: "UnisonUITests",
             dependencies: [
                 "UnisonUI",
-                "UnisonDomain",
+                "UnisonDomain"
             ],
             // swift-snapshot-testing writes/reads `__Snapshots__/*.png`
             // through `#file`-based disk paths at runtime — never via
@@ -47,6 +47,6 @@ let package = Package(
             // "unhandled file" warning per snapshot. Explicit exclude
             // mutes the warning and keeps the test binary small.
             exclude: ["__Snapshots__"]
-        ),
+        )
     ]
 )

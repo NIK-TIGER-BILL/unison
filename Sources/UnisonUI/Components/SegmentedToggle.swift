@@ -35,7 +35,7 @@ public struct SegmentedToggle: View {
         self._selection = selection
         self.segments = [
             Segment(id: "call", title: "Звонок", icon: Image(systemName: "phone.fill"), mode: .call),
-            Segment(id: "listen", title: "Слушать", icon: Image(systemName: "ear.fill"), mode: .listen),
+            Segment(id: "listen", title: "Слушать", icon: Image(systemName: "ear.fill"), mode: .listen)
         ]
     }
 

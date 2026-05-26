@@ -64,4 +64,3 @@ public struct StatusDot: View {
         }
     }
 }
-

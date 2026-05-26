@@ -26,8 +26,8 @@ public struct Hotkey: Equatable, Hashable, Codable, Sendable {
     public var display: String {
         var s = ""
         if modifiers.contains(.control) { s += "⌃" }
-        if modifiers.contains(.option)  { s += "⌥" }
-        if modifiers.contains(.shift)   { s += "⇧" }
+        if modifiers.contains(.option) { s += "⌥" }
+        if modifiers.contains(.shift) { s += "⇧" }
         if modifiers.contains(.command) { s += "⌘" }
         s += glyph ?? keyChar.uppercased()
         return s

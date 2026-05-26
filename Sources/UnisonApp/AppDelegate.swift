@@ -15,6 +15,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public var transcriptWindow: TranscriptWindowController!
     public var onboardingWindow: OnboardingWindowController!
     public var settingsWindow: SettingsWindowController!
+    public var helpWindow: HelpWindowController!
     public var diagnosticWindow: DiagnosticWindowController!
     public var hotkeyService: HotkeyService!
 
@@ -61,6 +62,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
 
+        // Help window — same chromeless-glass design as Settings.
+        helpWindow = HelpWindowController()
+
         // Diagnostic window — built before StatusItemController so the
         // context-menu callback can capture it. The collector pulls
         // OSLog entries + device state at the moment `show()` is called,
@@ -73,6 +77,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             popoverVM: composition.popoverVM,
             onOpenSettings: { [weak self] in
                 self?.settingsWindow.show()
+            },
+            onShowHelp: { [weak self] in
+                self?.helpWindow.show()
             },
             onStartStop: { [weak self] in
                 self?.toggleSession()
@@ -143,12 +150,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // Activate the app first so the popover renders above
             // anything the harness left in front (e.g. a Terminal
             // window from the SSH session host). Defer the actual
-            // `show()` to the next run-loop tick: at this point in
-            // `applicationDidFinishLaunching` the status-item button
-            // hasn't had its frame laid out yet, and `NSPopover.show`
-            // anchors against `button.bounds` — calling it immediately
-            // places the popover at (0,0) on some hosts. One async
-            // hop is enough to let AppKit position the button.
+            // `showPopover()` to the next run-loop tick: at this
+            // point in `applicationDidFinishLaunching` the status-item
+            // button hasn't had its frame laid out yet, and
+            // `StatusItemController.showPopover` anchors the panel
+            // below `button.bounds` — calling it immediately places
+            // the panel at (0,0) on some hosts. One async hop is
+            // enough to let AppKit position the button.
             NSApp.activate(ignoringOtherApps: true)
             let item = statusItem!
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {

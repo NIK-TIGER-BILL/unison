@@ -2,31 +2,26 @@ import SwiftUI
 import UnisonDomain
 
 /// Menubar popover — the primary control surface of Unison.
-///
-/// Strictly mirrors `design/popover-final/index.html`:
-/// - 340pt wide, 16pt padding, `.liquidGlass(cornerRadius: 24)` background.
-/// - Top row: `StatusDot` + brand text + gear `IconButton`.
-/// - `SegmentedToggle` for Call/Listen, bound to `vm.settings.sessionMode`.
-/// - Two native `Picker`s with `.pickerStyle(.menu)` for "Я говорю" and
-///   "Слушаю". The opened menu is an `NSMenu` rendered above the
-///   popover by AppKit, so it can never be clipped by the popover
-///   bounds — the previous custom overlay-based dropdown had exactly
-///   that bug.
-/// - `WarnRow` when the same language is selected on both sides.
-/// - `PrimaryGlassButton` toggling start/stop; coral while translating.
-/// - `mm:ss` timer (mono) below the button while translating.
+/// 340pt wide rounded glass card. Top row holds the TEST button +
+/// gear; below: Call/Listen toggle, language pickers, start/stop
+/// primary button + `mm:ss` timer.
 public struct PopoverView: View {
     @Bindable var vm: PopoverViewModel
     let onOpenSettings: () -> Void
+    let onShowHelp: () -> Void
     let onShowDiagnostic: () -> Void
+
+    @SwiftUI.State private var isTestHovered = false
 
     public init(
         vm: PopoverViewModel,
         onOpenSettings: @escaping () -> Void = {},
+        onShowHelp: @escaping () -> Void = {},
         onShowDiagnostic: @escaping () -> Void = {}
     ) {
         self.vm = vm
         self.onOpenSettings = onOpenSettings
+        self.onShowHelp = onShowHelp
         self.onShowDiagnostic = onShowDiagnostic
     }
 
@@ -51,17 +46,11 @@ public struct PopoverView: View {
             if vm.state.isActive {
                 timer
             }
-            // When a stream flaps the orchestrator oscillates between
-            // `.translating` and `.reconnecting`. We deliberately keep
-            // the timer + Stop button visible across both so the UI
-            // stays stable, and only swap in a thin hint below to let
-            // the user know reconnection is in progress.
+            // Timer + Stop stay visible across `.translating`/`.reconnecting`
+            // flapping so the UI doesn't bounce; only this thin hint swaps in.
             if vm.isReconnecting {
                 reconnectingHint
             }
-            // Surface session-startup failures inline. Without this the
-            // popover would look identical to its idle state after a
-            // failed `start()` — exactly the silent-failure bug.
             if let reason = vm.state.errorValue {
                 ErrorRow(
                     title: "Не удалось запустить",
@@ -70,14 +59,6 @@ public struct PopoverView: View {
                         Task { await vm.start() }
                     }
                 )
-                // Secondary "Подробности…" link — opens the diagnostic
-                // dialog so the user can copy logs into a bug report.
-                // Kept understated (caption + soft white tint) so it
-                // doesn't compete with the primary retry button above,
-                // but stays readable on the glass surface (`.secondary`
-                // / `.tertiary` foreground styles disappear against the
-                // popover backdrop in snapshots and on Reduce
-                // Transparency surfaces).
                 HStack {
                     Spacer()
                     Button("Подробности…", action: onShowDiagnostic)
@@ -95,30 +76,42 @@ public struct PopoverView: View {
     private var topRow: some View {
         HStack(spacing: 8) {
             StatusDot(state: vm.statusKind.dotState)
-            // HIG Materials: use vibrant `.primary` foreground so the
-            // system handles contrast across light/dark and Increase
-            // Contrast / Reduce Transparency on the glass background.
             Text("Unison")
                 .font(.system(size: 13, weight: .semibold))
                 .tracking(-0.26)
                 .foregroundStyle(.primary)
-            Spacer()
-            // Self-test button. Lives outside the Call/Listen picker
-            // because test is a *workflow* — verify your translation
-            // works before a real call — not a third routing mode the
-            // user picks for daily use. Clicking it overrides whichever
-            // mode is currently selected and runs the
-            // mic→translate→speakers loop locally. Disabled while a
-            // session is already active so the user can't accidentally
-            // stomp on a live call.
-            IconButton(label: "Проверка перевода", action: {
+            // Self-test runs `mic → translate → speakers` locally.
+            // Disabled while a real session is active so the user
+            // can't stomp on a live call.
+            Button(action: {
                 Task { @MainActor in await vm.startTest() }
             }) {
-                Image(systemName: "waveform")
-                    .font(.system(size: 12, weight: .regular))
+                Text("TEST")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .strokeBorder(
+                                UnisonColors.whiteAlpha(isTestHovered ? 0.40 : 0.22),
+                                lineWidth: 0.5
+                            )
+                    )
             }
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
             .disabled(vm.state.isActive)
             .opacity(vm.state.isActive ? 0.4 : 1.0)
+            .help("Проверка перевода")
+            .accessibilityLabel("Проверка перевода")
+            .onHover { hovering in isTestHovered = hovering }
+            Spacer()
+            IconButton(label: "Как пользоваться", action: onShowHelp) {
+                Image(systemName: "questionmark")
+                    .font(.system(size: 12, weight: .regular))
+            }
             IconButton(label: "Настройки", action: onOpenSettings) {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 12, weight: .regular))
@@ -141,23 +134,15 @@ public struct PopoverView: View {
                     title: "Listen",
                     icon: Image(systemName: "headphones"),
                     mode: .listen
-                ),
+                )
             ]
         )
     }
 
-    /// "Я говорю / Слушаю" — two native menu pickers separated by the
-    /// directional swap arrow. Each `Picker(.menu)` renders as a
-    /// macOS pop-up button; the opened menu is a system `NSMenu`
-    /// drawn over the popover, so it never gets clipped (which is the
-    /// whole point of replacing the previous overlay-based dropdown).
-    ///
-    /// Disabled while a session is active: `updateLanguagePair` only
-    /// rewrites `settings.languagePair` — it doesn't touch the
-    /// running orchestrator, so changing the pair mid-session was a
-    /// silent no-op that misled the user (UI shows en→ru but audio
-    /// still flows ru→en). Disabling the picker until the user
-    /// stops makes the contract explicit.
+    /// Two `Picker(.menu)` columns with a swap arrow between them.
+    /// Disabled while a session is active — `updateLanguagePair`
+    /// doesn't touch the running orchestrator, so changing the pair
+    /// mid-session would silently lie about the audio direction.
     private var languageBar: some View {
         let locked = vm.state.isActive
         return HStack(alignment: .center, spacing: 0) {
@@ -173,6 +158,13 @@ public struct PopoverView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
+                .accessibilityHidden(true)
+                // Drop the arrow by half of (caption height + spacing)
+                // so it lines up with the picker box centre instead of
+                // the whole column's midpoint.
+                .alignmentGuide(VerticalAlignment.center) { d in
+                    d[VerticalAlignment.center] - 9
+                }
             languagePicker(
                 caption: "Слушаю",
                 alignment: .trailing,
@@ -202,12 +194,6 @@ public struct PopoverView: View {
         .animation(UnisonAnimations.state, value: locked)
     }
 
-    /// One side of the language bar — a small caption ("Я говорю" /
-    /// "Слушаю") above a native `Picker(.menu)`. Per HIG, section
-    /// captions use Title Case (not ALL CAPS), matching the rest of
-    /// the app (`Аудио`, `Языки по умолчанию`, etc.). The picker is
-    /// `labelsHidden()` so SwiftUI uses our caption as the only label,
-    /// and `.tint(.primary)` keeps it neutral on the glass background.
     private func languagePicker(
         caption: String,
         alignment: HorizontalAlignment,
@@ -218,11 +204,9 @@ public struct PopoverView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             Picker("", selection: selection) {
-                // Restrict to the 13 supported output targets — both
-                // sides of `LanguagePair` are used as `session.audio.
-                // output.language` (peer-incoming uses `.mine`,
-                // me-outgoing uses `.peer`), so neither slot may carry
-                // a non-target language.
+                // Both sides of `LanguagePair` end up as
+                // `session.audio.output.language`, so they're
+                // restricted to OpenAI's supported output targets.
                 ForEach(Language.supportedTargets, id: \.self) { lang in
                     Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
                 }
@@ -252,8 +236,7 @@ public struct PopoverView: View {
     }
 
     private var timer: some View {
-        // Drive the ticking purely from the view via TimelineView so the
-        // ViewModel stays free of timers (per plan §3.1).
+        // TimelineView ticks the label so the VM stays free of timers.
         TimelineView(.periodic(from: .now, by: 0.25)) { _ in
             Text(vm.elapsedSecondsString)
                 .font(UnisonFonts.mono(11.5))
@@ -264,11 +247,6 @@ public struct PopoverView: View {
         }
     }
 
-    /// Tiny inline status shown below the timer when the orchestrator is
-    /// in `.reconnecting`. Crucially the timer + Stop button above stay
-    /// rendered so the popover doesn't flicker when a flapping stream
-    /// oscillates between `.translating` and `.reconnecting`. Per
-    /// MEMORY.md UX-copy convention: short, single Russian phrase.
     private var reconnectingHint: some View {
         HStack(spacing: 6) {
             ProgressView()
@@ -306,7 +284,6 @@ public struct PopoverView: View {
 // MARK: - Layout constants
 
 private enum PopoverLayout {
-    /// DESIGN §4.3: total popover width is exactly 340pt.
     static let width: CGFloat = 340
 }
 

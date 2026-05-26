@@ -1,26 +1,18 @@
 import SwiftUI
 
-/// Transcript-window control pill: status dot + timer + settings gear +
-/// Скрыть/Показать text button + stop icon. Draggable via a
-/// `WindowDragHandle` installed as the pill's background — buttons sit
-/// on top and intercept clicks normally, the chrome behind them moves
-/// the host panel. DESIGN.md §5.18.
+/// Transcript-window control pill. Status dot + timer + gear +
+/// Скрыть/Показать + stop, sitting on a single Liquid Glass capsule.
+/// Doubles as the drag handle for the host panel (see CLAUDE.md).
 ///
-/// Single Liquid Glass capsule — all internal controls sit on top
-/// of one glass surface (no nested glass). Uses Apple's native
-/// `.glassEffect(.regular.interactive(), in: Capsule())` per the
-/// official Liquid Glass guidance ("Applying Liquid Glass to custom
-/// views"):
-///   "Add `Glass.interactive(_:)` to custom components to make them
-///    react to touch and pointer interactions. This applies the same
-///    responsive and fluid reactions that the `glass` button style
-///    provides."
+/// `interactive: false` on the glass is deliberate — `Glass.interactive()`
+/// installs a hit-testable surface that intercepts mouse-down before
+/// it reaches the `WindowDragHandle` background and kills drag.
 public struct ControlPill: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     public let isActive: Bool
     public let elapsedLabel: String
     public let isHidden: Bool
     public let isSettingsOpen: Bool
+    public let isTestMode: Bool
     public let onToggleSettings: () -> Void
     public let onToggleHidden: () -> Void
     public let onStop: () -> Void
@@ -30,6 +22,7 @@ public struct ControlPill: View {
         elapsedLabel: String,
         isHidden: Bool,
         isSettingsOpen: Bool,
+        isTestMode: Bool = false,
         onToggleSettings: @escaping () -> Void,
         onToggleHidden: @escaping () -> Void,
         onStop: @escaping () -> Void
@@ -38,6 +31,7 @@ public struct ControlPill: View {
         self.elapsedLabel = elapsedLabel
         self.isHidden = isHidden
         self.isSettingsOpen = isSettingsOpen
+        self.isTestMode = isTestMode
         self.onToggleSettings = onToggleSettings
         self.onToggleHidden = onToggleHidden
         self.onStop = onStop
@@ -46,17 +40,21 @@ public struct ControlPill: View {
     public var body: some View {
         let hideShowLabel = isHidden ? "Показать транскрипт" : "Скрыть транскрипт"
         return HStack(spacing: 6) {
-            StatusDot(state: isActive ? .active : .ready, size: 6)
-                .padding(.leading, 8)
-            // HIG Materials: vibrant `.secondary` for the mono timer
-            // and other muted controls on the glass capsule; the active
-            // gear icon flips to `.primary` to signal selection.
-            Text(elapsedLabel)
-                .font(UnisonFonts.mono(10.5))
-                .tracking(0.4)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Прошло: \(elapsedLabel)")
-            sep
+            // Hit-test transparent so the WindowDragHandle below
+            // receives clicks on the dot / timer / separator.
+            // `.allowsHitTesting(false)` only suppresses pointer
+            // hit-tests; VoiceOver still picks up the labels.
+            Group {
+                StatusDot(state: dotState, size: 6)
+                    .padding(.leading, 8)
+                Text(elapsedLabel)
+                    .font(UnisonFonts.mono(10.5))
+                    .tracking(0.4)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Прошло: \(elapsedLabel)")
+                sep
+            }
+            .allowsHitTesting(false)
             Button(action: onToggleSettings) {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 12))
@@ -102,10 +100,12 @@ public struct ControlPill: View {
         }
         .padding(.vertical, 6)
         .background(WindowDragHandle())
-        .glassEffect(
-            reduceTransparency ? .identity : .regular.interactive(),
-            in: Capsule()
-        )
+        .liquidGlass(shape: Capsule())
+    }
+
+    private var dotState: StatusDot.State {
+        if !isActive { return .ready }
+        return isTestMode ? .warn : .active
     }
 
     private var sep: some View {
@@ -115,4 +115,3 @@ public struct ControlPill: View {
             .padding(.horizontal, 3)
     }
 }
-

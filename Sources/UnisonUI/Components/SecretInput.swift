@@ -144,7 +144,7 @@ private struct AppKitSecretField: NSViewRepresentable {
             string: placeholder,
             attributes: [
                 .foregroundColor: NSColor.white.withAlphaComponent(0.32),
-                .font: font,
+                .font: font
             ]
         )
 

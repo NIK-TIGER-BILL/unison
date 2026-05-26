@@ -79,7 +79,7 @@ public struct DiagnosticInfo: Sendable, Equatable {
             "Аудио-выход: \(speakerDevice ?? "по умолчанию")",
             "BlackHole 2ch: \(blackHole2ch)",
             "BlackHole 16ch: \(blackHole16ch)",
-            "OpenAI ключ: \(openAIKeyStatus)",
+            "OpenAI ключ: \(openAIKeyStatus)"
         ]
     }
 
@@ -88,7 +88,7 @@ public struct DiagnosticInfo: Sendable, Equatable {
         [
             "Версия: \(appVersion)",
             "macOS: \(macOSVersion)",
-            "Устройство: \(device)",
+            "Устройство: \(device)"
         ]
     }
 

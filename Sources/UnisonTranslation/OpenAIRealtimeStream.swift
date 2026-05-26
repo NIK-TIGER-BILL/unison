@@ -36,6 +36,17 @@ public actor OpenAIRealtimeStream: TranslationStream {
     /// the same id forever, so every fragment of every sentence got
     /// appended to a single ever-growing bubble.
     private var currentEntryId = UUID()
+    /// Set to `true` on each `output_transcript.delta` and cleared
+    /// whenever we rotate `currentEntryId`. When the next
+    /// `input_transcript.delta` arrives with this flag still set, it
+    /// means a fresh turn is starting — rotate the entry id so each
+    /// utterance lands in its own bubble even when the server omits
+    /// `output_transcript.done`. (The GA `gpt-realtime-translate` flow
+    /// emits `output_transcript.done` between turns most of the time,
+    /// but in practice it can be skipped on long mid-stream
+    /// continuations, which previously caused every subsequent
+    /// translation fragment to glue onto the very first bubble.)
+    private var sawOutputDeltaInTurn = false
     /// Signal raised when `session.closed` arrives from the server.
     /// `close()` awaits this (with a short timeout) so any audio the
     /// server flushes between our `session.close` and the actual close
@@ -128,7 +139,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
         // without us shipping PII — the value is a SHA-256 hash of the
         // bundle ID + host UUID and is stable across launches.
         var headers: [String: String] = [
-            "Authorization": "Bearer \(apiKey)",
+            "Authorization": "Bearer \(apiKey)"
         ]
         if let safetyId = Self.safetyIdentifier() {
             headers["OpenAI-Safety-Identifier"] = safetyId
@@ -356,6 +367,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
             }
             outputContinuation.yield(frame)
         case .outputTranscriptDelta(let p):
+            sawOutputDeltaInTurn = true
             let delta = TranscriptDelta(
                 entryId: currentEntryId, speaker: speaker,
                 kind: .translated, text: p.delta, isFinal: false
@@ -372,6 +384,19 @@ public actor OpenAIRealtimeStream: TranslationStream {
             // as `.original` so `TranscriptStore.apply` writes it into
             // `entry.originalText` — that's the bubble's primary text
             // for `.me` (and the secondary text for `.peer`).
+            //
+            // Fallback turn-boundary detection: if the previous chunk
+            // we saw on this stream was an output (translated) delta,
+            // this input delta starts a fresh utterance. Rotate the
+            // entry id so the new bubble carries both original and
+            // translation instead of appending forever to the first
+            // bubble. Done via this side-channel because the server
+            // doesn't always emit `output_transcript.done` between
+            // turns on the GA translate flow.
+            if sawOutputDeltaInTurn {
+                currentEntryId = UUID()
+                sawOutputDeltaInTurn = false
+            }
             let delta = TranscriptDelta(
                 entryId: currentEntryId, speaker: speaker,
                 kind: .original, text: p.delta, isFinal: false
@@ -398,6 +423,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
             // originalText), so the user saw two duplicate bubbles
             // per utterance with split translations.
             currentEntryId = UUID()
+            sawOutputDeltaInTurn = false
         case .inputTranscriptDone:
             // Informational only — marks the end of the source
             // transcription phase, but the turn continues with the

@@ -111,4 +111,3 @@ private struct ErrorActionButton: View {
         }
     }
 }
-

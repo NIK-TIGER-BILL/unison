@@ -2,16 +2,16 @@ import SwiftUI
 
 /// Amber warning row used in the popover ("Выбран одинаковый язык").
 /// Animates in/out via opacity + slight Y-offset. DESIGN.md §5.11.
-public struct WarnRow: View {
-    public let message: String
-    public let isVisible: Bool
+struct WarnRow: View {
+    let message: String
+    let isVisible: Bool
 
-    public init(message: String, isVisible: Bool = true) {
+    init(message: String, isVisible: Bool = true) {
         self.message = message
         self.isVisible = isVisible
     }
 
-    public var body: some View {
+    var body: some View {
         Group {
             if isVisible {
                 HStack(spacing: 6) {
@@ -37,4 +37,3 @@ public struct WarnRow: View {
         .animation(UnisonAnimations.state, value: isVisible)
     }
 }
-

@@ -82,4 +82,3 @@ public struct HotkeyRecorder: View {
         return hotkey?.display ?? "—"
     }
 }
-

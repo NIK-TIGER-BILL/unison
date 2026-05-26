@@ -19,20 +19,20 @@ import SwiftUI
 /// at the call site to preserve square proportions. Set
 /// `showVoiceStreams = false` for the `paused` menubar state (the four
 /// side bars vanish, only the U remains).
-public struct UnisonLogoShape: Shape {
+struct UnisonLogoShape: Shape {
     /// Side ear-bars are drawn when `true`. Disable for the `paused`
     /// variant where "the voice streams have fallen silent".
-    public var showVoiceStreams: Bool
+    var showVoiceStreams: Bool
 
-    public init() {
+    init() {
         self.init(showVoiceStreams: true)
     }
 
-    public init(showVoiceStreams: Bool) {
+    init(showVoiceStreams: Bool) {
         self.showVoiceStreams = showVoiceStreams
     }
 
-    public func path(in rect: CGRect) -> Path {
+    func path(in rect: CGRect) -> Path {
         let designSize: CGFloat = 256
 
         // Aspect-fit the 256×256 design space into `rect`, centred.

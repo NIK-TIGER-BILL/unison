@@ -35,13 +35,13 @@ public enum HotkeyParser {
         let lower = raw.lowercased()
         switch lower {
         case " ", "space":   return ("space", "␣")
-        case "left":         return ("left",  "←")
+        case "left":         return ("left", "←")
         case "right":        return ("right", "→")
-        case "up":           return ("up",    "↑")
-        case "down":         return ("down",  "↓")
+        case "up":           return ("up", "↑")
+        case "down":         return ("down", "↓")
         case "return", "enter", "\r", "\n":
             return ("return", "↵")
-        case "tab", "\t":    return ("tab",   "⇥")
+        case "tab", "\t":    return ("tab", "⇥")
         case "delete", "\u{7F}", "\u{08}":
             return ("delete", "⌫")
         default:

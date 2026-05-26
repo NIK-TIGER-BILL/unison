@@ -51,7 +51,7 @@ public final class SettingsViewModel {
     /// Which hotkey row the user is currently recording into. `nil`
     /// when no recording is active. The view sets this; the host
     /// observes and installs a key monitor.
-    public var recordingHotkey: HotkeyKind? = nil
+    public var recordingHotkey: HotkeyKind?
 
     /// User-facing behaviour toggles. Persisted via `togglesStore`.
     public var autostart: Bool = false
@@ -80,12 +80,12 @@ public final class SettingsViewModel {
     /// Sentinel used to drive `SaveIndicator` — bumps on every mutation
     /// that auto-saves. Views observe `lastSavedAt` and flash the
     /// indicator when it changes.
-    public var lastSavedAt: Date? = nil
+    public var lastSavedAt: Date?
 
     /// Convenience callback fired *in addition* to `onChange`. Used by
     /// the host wiring to re-register hotkeys when they change.
     @ObservationIgnored
-    public var onHotkeysChanged: ((Hotkey?, Hotkey?) -> Void)? = nil
+    public var onHotkeysChanged: ((Hotkey?, Hotkey?) -> Void)?
 
     public init(
         initial: Settings,
@@ -153,11 +153,6 @@ public final class SettingsViewModel {
 
     public func setLanguagePair(_ pair: LanguagePair) {
         settings.languagePair = pair
-        emitChange()
-    }
-
-    public func setSessionMode(_ mode: SessionMode) {
-        settings.sessionMode = mode
         emitChange()
     }
 

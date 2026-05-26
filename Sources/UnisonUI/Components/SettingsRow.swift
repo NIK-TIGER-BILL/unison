@@ -63,4 +63,3 @@ public struct SettingsRow<Trailing: View>: View {
         }
     }
 }
-

@@ -1,5 +1,4 @@
 import SwiftUI
-import UnisonDomain
 
 /// Liquid-glass onboarding window — the first thing the user sees when
 /// they launch Unison without all three prerequisites in place.
@@ -426,4 +425,3 @@ public enum OnboardingLayout {
     /// controller can wrap NSVisualEffectView at the same radius.
     public static let windowCornerRadius: CGFloat = 22
 }
-

@@ -34,7 +34,6 @@ public enum OnboardingStepStatus: Equatable, Sendable {
 public struct OnboardingStep: Identifiable, Sendable {
     public let id = UUID()
     public let kind: OnboardingStepKind
-    public let title: String
     public let isDone: Bool
 }
 
@@ -106,9 +105,9 @@ public final class OnboardingViewModel {
         let micDone = permissions.currentStatus(.microphone) == .granted
         let keyDone = keychain.loadAPIKey()?.isEmpty == false
         steps = [
-            OnboardingStep(kind: .blackHole, title: "BlackHole", isDone: bhDone),
-            OnboardingStep(kind: .microphone, title: "Микрофон", isDone: micDone),
-            OnboardingStep(kind: .apiKey, title: "OpenAI ключ", isDone: keyDone),
+            OnboardingStep(kind: .blackHole, isDone: bhDone),
+            OnboardingStep(kind: .microphone, isDone: micDone),
+            OnboardingStep(kind: .apiKey, isDone: keyDone)
         ]
 
         // Carry over `.inProgress` (an in-flight task) but otherwise

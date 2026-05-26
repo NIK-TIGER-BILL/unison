@@ -1,38 +1,54 @@
 import AppKit
 import SwiftUI
 
-/// A transparent SwiftUI background that lets the user drag the host
-/// window by clicking on it. Use as `.background(WindowDragHandle())`
-/// on the pill or any region that should function as a drag surface.
+/// Transparent SwiftUI background that drags the host window when
+/// clicked. Use as `.background(WindowDragHandle())`.
 ///
-/// **Why this instead of `isMovableByWindowBackground = true`?**
-/// `NSWindow.isMovableByWindowBackground` moves the window from *any*
-/// region that the AppKit hit-test thinks is non-interactive. On the
-/// transcript panel this competes with SwiftUI sliders inside the
-/// settings popover — depending on hit-test ordering, drags on the
-/// slider thumb can fall through to the window and move it instead of
-/// the slider value.
-///
-/// This view inserts a dedicated `NSView` whose
-/// `mouseDownCanMoveWindow` is `true`, scoped strictly to its frame.
-/// AppKit handles the drag at the view layer, and nothing else
-/// (sliders, buttons, content) inherits drag behaviour.
-public struct WindowDragHandle: NSViewRepresentable {
-    public init() {}
-
-    public func makeNSView(context: Context) -> NSView {
+/// Drags via manual `mouseDown`/`mouseDragged` rather than
+/// `mouseDownCanMoveWindow` because the latter silently no-ops on
+/// borderless `nonactivatingPanel`s — exactly the transcript panel's
+/// style mask. Driving the drag ourselves keeps the behaviour
+/// consistent across NSWindow subclasses.
+struct WindowDragHandle: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
         DragView()
     }
 
-    public func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {}
 
     private final class DragView: NSView {
-        override var mouseDownCanMoveWindow: Bool { true }
-        // Transparent — we only exist to provide the drag-handle hit
-        // region. The visual surface lives in the parent SwiftUI view.
-        override func hitTest(_ point: NSPoint) -> NSView? {
-            // Standard hit-test so the drag region is its full bounds.
-            super.hitTest(point)
+        private var dragStartMouseScreenLocation: NSPoint?
+        /// Captured once at mouseDown — we re-apply `start + delta`
+        /// every drag tick so motion stays 1:1 with the cursor even
+        /// if the OS coalesces events.
+        private var dragStartWindowOrigin: NSPoint?
+
+        override func mouseDown(with event: NSEvent) {
+            guard let win = window else {
+                super.mouseDown(with: event)
+                return
+            }
+            dragStartMouseScreenLocation = NSEvent.mouseLocation
+            dragStartWindowOrigin = win.frame.origin
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let win = window,
+                  let startMouse = dragStartMouseScreenLocation,
+                  let startOrigin = dragStartWindowOrigin else {
+                super.mouseDragged(with: event)
+                return
+            }
+            let current = NSEvent.mouseLocation
+            let dx = current.x - startMouse.x
+            let dy = current.y - startMouse.y
+            win.setFrameOrigin(NSPoint(x: startOrigin.x + dx, y: startOrigin.y + dy))
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            dragStartMouseScreenLocation = nil
+            dragStartWindowOrigin = nil
+            super.mouseUp(with: event)
         }
     }
 }

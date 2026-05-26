@@ -7,12 +7,14 @@ import UnisonDomain
 public struct BubbleGroupView: View {
     public let groups: [BubbleGroup]
     public let scale: Double
+    public let isTestMode: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    public init(groups: [BubbleGroup], scale: Double = 1.0) {
+    public init(groups: [BubbleGroup], scale: Double = 1.0, isTestMode: Bool = false) {
         self.groups = groups
         self.scale = scale
+        self.isTestMode = isTestMode
     }
 
     public var body: some View {
@@ -27,7 +29,8 @@ public struct BubbleGroupView: View {
                     isContinued: !item.bubble.isFirstInGroup,
                     isLastInGroup: item.bubble.isLastInGroup,
                     isLive: item.bubble.isLive,
-                    scale: scale
+                    scale: scale,
+                    isTestMode: isTestMode
                 )
                 .padding(.top, offset == 0
                     ? 0
@@ -68,4 +71,3 @@ public struct BubbleGroupView: View {
         return out
     }
 }
-

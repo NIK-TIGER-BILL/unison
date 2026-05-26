@@ -1,9 +1,9 @@
 import SwiftUI
 import UnisonDomain
 
-/// Single transcript bubble. T1 corner-tail + B3 inverted hierarchy:
-/// primary text is large, secondary translated text is smaller italic.
-/// DESIGN.md §5.14.
+/// Single transcript bubble. Speaker-coloured Liquid Glass with an
+/// `UnevenRoundedRectangle` corner tail. Switches to a yellow palette
+/// in `.test` mode (see CLAUDE.md).
 public struct Bubble: View {
     public let speaker: Speaker
     public let primary: String
@@ -11,8 +11,9 @@ public struct Bubble: View {
     public let isContinued: Bool
     public let isLastInGroup: Bool
     public let isLive: Bool
-    /// Scale multiplier driven by the transcript size slider (0.75 … 1.30).
+    /// Multiplier driven by the transcript size slider (0.75 … 1.30).
     public let scale: Double
+    public let isTestMode: Bool
 
     @Environment(\.colorSchemeContrast) private var contrast
 
@@ -23,7 +24,8 @@ public struct Bubble: View {
         isContinued: Bool,
         isLastInGroup: Bool,
         isLive: Bool,
-        scale: Double = 1.0
+        scale: Double = 1.0,
+        isTestMode: Bool = false
     ) {
         self.speaker = speaker
         self.primary = primary
@@ -32,22 +34,10 @@ public struct Bubble: View {
         self.isLastInGroup = isLastInGroup
         self.isLive = isLive
         self.scale = scale
+        self.isTestMode = isTestMode
     }
 
     public var body: some View {
-        // Bubbles use Apple's native Liquid Glass material (the
-        // macOS 26 `.glassEffect(.regular.tint(_:), in:)` API). The
-        // system handles every glass affordance — specular highlight,
-        // conic rim, displacement, depth — automatically and
-        // consistently with the rest of macOS Tahoe. The previous
-        // implementation hand-rolled `.regularMaterial` underneath a
-        // LinearGradient + clipShape + manual shadow, which on
-        // macOS 26 looked like a flat blue-tinted blur rather than
-        // actual liquid glass.
-        //
-        // Tint is the speaker affordance (blue for `me`, near-white
-        // for `peer`). Text foreground stays explicit `.white` so it
-        // reads with consistent contrast against the tinted glass.
         VStack(alignment: .leading, spacing: 5 * scale) {
             HStack(spacing: 6 * scale) {
                 Text(primary)
@@ -69,7 +59,7 @@ public struct Bubble: View {
         }
         .padding(.vertical, 11 * scale)
         .padding(.horizontal, 15 * scale)
-        .glassEffect(glassStyle, in: shape)
+        .liquidGlass(shape: shape, tint: tintColor, highContrastHairline: false)
         .overlay(
             shape
                 .strokeBorder(border, lineWidth: borderWidth)
@@ -79,23 +69,21 @@ public struct Bubble: View {
         .accessibilityLabel(accessibilityLabelText)
     }
 
-    /// Speaker-tinted Liquid Glass: blue for `me`, slightly desaturated
-    /// for `peer`. Tint passes through the system's glass rendering
-    /// so the specular highlight + rim still picks up the underlying
-    /// wallpaper / window backdrop — i.e. it actually looks like
-    /// tinted glass, not a flat colour panel.
-    private var glassStyle: Glass {
+    /// Opacities stay ≤ 0.25 so the system's specular / refraction
+    /// still picks up the wallpaper. Higher opacities flatten the
+    /// glass to a solid colour panel.
+    private var tintColor: Color {
+        if isTestMode {
+            switch speaker {
+            case .me:   return UnisonColors.warn.opacity(0.25)
+            case .peer: return UnisonColors.warn.opacity(0.10)
+            }
+        }
         switch speaker {
         case .me:
-            // Blue tint pulled from the design's `me` gradient stops.
-            return .regular.tint(
-                Color(red: 110 / 255, green: 180 / 255, blue: 245 / 255).opacity(0.55)
-            )
+            return Color(red: 110 / 255, green: 180 / 255, blue: 245 / 255).opacity(0.25)
         case .peer:
-            // Near-clear: white tint at low alpha lets the glass read
-            // as "the other person", visually distinct from `me`
-            // without competing.
-            return .regular.tint(UnisonColors.whiteAlpha(0.10))
+            return UnisonColors.whiteAlpha(0.10)
         }
     }
 
@@ -110,8 +98,8 @@ public struct Bubble: View {
         contrast == .increased ? 1.0 : 0.5
     }
 
+    /// `me`: bottom-leading is the speaker tail corner. `peer`: bottom-trailing.
     private var shape: UnevenRoundedRectangle {
-        // me: bottom-left is the speaker corner; peer: bottom-right.
         let base = 18 * scale
         let tail = 5 * scale
         let top = isContinued ? 8 * scale : base
@@ -135,14 +123,21 @@ public struct Bubble: View {
         }
     }
 
-
     private var border: Color {
+        if isTestMode {
+            switch speaker {
+            case .me:
+                return UnisonColors.warn.opacity(contrast == .increased ? 0.70 : 0.45)
+            case .peer:
+                return UnisonColors.warn.opacity(contrast == .increased ? 0.38 : 0.20)
+            }
+        }
         switch speaker {
         case .me:
-            Color(red: 180 / 255, green: 220 / 255, blue: 1.0)
+            return Color(red: 180 / 255, green: 220 / 255, blue: 1.0)
                 .opacity(contrast == .increased ? 0.70 : 0.45)
         case .peer:
-            UnisonColors.whiteAlpha(contrast == .increased ? 0.38 : 0.20)
+            return UnisonColors.whiteAlpha(contrast == .increased ? 0.38 : 0.20)
         }
     }
 }
@@ -163,10 +158,7 @@ public struct TypingDots: View {
         HStack(spacing: 3 * scale) {
             ForEach(0..<3) { i in
                 Circle()
-                    // When Reduce Motion is on, all three dots stay
-                    // visible at half opacity (no animated phase pop)
-                    // so the user still sees the typing affordance.
-                    .fill(UnisonColors.whiteAlpha(reduceMotion ? 0.6 : 0.6))
+                    .fill(UnisonColors.whiteAlpha(0.6))
                     .frame(width: 4 * scale, height: 4 * scale)
                     .offset(y: (!reduceMotion && phase == i) ? -2 * scale : 0)
                     .opacity(reduceMotion ? 0.55 : (phase == i ? 1.0 : 0.25))
@@ -191,4 +183,3 @@ public struct TypingDots: View {
         }
     }
 }
-

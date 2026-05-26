@@ -23,7 +23,7 @@ public final class TranscriptStore {
             case .original:
                 entries[idx].originalText = (entries[idx].originalText ?? "") + delta.text
             case .translated:
-                entries[idx].translatedText = entries[idx].translatedText + delta.text
+                entries[idx].translatedText += delta.text
             }
         } else {
             let targetLang: Language = {

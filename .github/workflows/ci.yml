@@ -16,3 +16,18 @@ jobs:
         run: swift build
       - name: swift test
         run: swift test --parallel
+
+  lint:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.0.app
+      # `scripts/lint.sh` downloads SwiftLint + Periphery into
+      # `scripts/.bin/` on first run, so no Homebrew install step
+      # is needed. SwiftLint runs `--strict` and fails the job on
+      # any finding; Periphery is informational.
+      - name: Build (Periphery needs an index)
+        run: swift build
+      - name: Lint
+        run: scripts/lint.sh

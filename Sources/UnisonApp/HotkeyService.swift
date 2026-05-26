@@ -190,8 +190,8 @@ public final class HotkeyService {
     private static func modifierSet(from flags: NSEvent.ModifierFlags) -> Set<HotkeyModifier> {
         var s = Set<HotkeyModifier>()
         if flags.contains(.control) { s.insert(.control) }
-        if flags.contains(.option)  { s.insert(.option) }
-        if flags.contains(.shift)   { s.insert(.shift) }
+        if flags.contains(.option) { s.insert(.option) }
+        if flags.contains(.shift) { s.insert(.shift) }
         if flags.contains(.command) { s.insert(.command) }
         return s
     }
@@ -227,7 +227,7 @@ public final class HotkeyService {
     private static func functionKeyName(for keyCode: UInt16) -> String? {
         let map: [UInt16: Int] = [
             122: 1, 120: 2, 99: 3, 118: 4, 96: 5, 97: 6,
-            98: 7, 100: 8, 101: 9, 109: 10, 103: 11, 111: 12,
+            98: 7, 100: 8, 101: 9, 109: 10, 103: 11, 111: 12
         ]
         guard let n = map[keyCode] else { return nil }
         return "f\(n)"

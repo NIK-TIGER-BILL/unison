@@ -31,9 +31,6 @@ import Foundation
 /// - `sectionHead()` — title-case section label, 13pt semibold (per
 ///   Apple's Liquid Glass title-style capitalization guidance).
 ///
-/// **`UnisonSpacing`** (`Design/Spacing.swift`) — 4-base grid.
-/// - `xs=4`, `s=8`, `m=12`, `l=16`, `xl=24`.
-///
 /// **`UnisonAnimations`** (`Design/AnimationTokens.swift`)
 /// - `glassAppear`, `bubbleIn`, `pulseAnimation`, `state`, `hover`, `press`, `dropdown`.
 ///
@@ -42,14 +39,6 @@ import Foundation
 /// - **`LiquidGlassPanel`** + `View.liquidGlass(cornerRadius:)` — thin
 ///   wrapper around Apple's native `glassEffect(.regular, in:)` (macOS 26+).
 ///   Respects `\.accessibilityReduceTransparency`.
-/// - **`AuroraBackground`** + `View.auroraBackground()` — three-layer aurora
-///   gradient. **Test/preview-only**: snapshot tests render in a headless
-///   ImageRenderer where Liquid Glass has no real desktop to refract, so
-///   tests stack views on top of `Color.black` (or this aurora) for a
-///   pleasing backdrop. Do NOT use in production view trees — the real
-///   NSWindow is transparent and Apple's Liquid Glass pulls in the
-///   actual desktop wallpaper; any opaque fill underneath blocks that
-///   and produces a "window in window" artefact.
 /// - **`UnisonLogoShape`** — `Shape` rendering the parametric Unison logo.
 ///
 /// ## Components
@@ -198,7 +187,6 @@ import Foundation
 /// - Use the design tokens above instead of magic numbers.
 /// - For panels with the canonical glass material, use `.liquidGlass(cornerRadius:)`.
 ///   Use 22–26 for main panels, 12–14 for inner blocks.
-/// - Aurora gradients live in `auroraBackground()` — do not re-implement.
 /// - For settings/forms, prefer native `Form` + `.formStyle(.grouped)`
 ///   with `Section("Title")` headers. Use `LabeledContent` for rows.
 /// - For interactive custom glass surfaces (draggable pills, etc.),
@@ -216,4 +204,3 @@ import Foundation
 /// - Section headers use title-case capitalization (per Apple's
 ///   official Liquid Glass guidance), not UPPERCASE.
 /// - The kit must never import `AppKit`; host integrations belong in `UnisonApp`.
-public enum UnisonUIKit {}

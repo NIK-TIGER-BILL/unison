@@ -41,11 +41,6 @@ public final class TranscriptViewModel {
         Self.bubbleScale(forSizeIndex: sizeIndex)
     }
 
-    /// Discrete size label shown in the settings popover.
-    public var sizeLabel: String {
-        Self.sizeLabel(forSizeIndex: sizeIndex)
-    }
-
     /// Original-track volume `0 ... 100`. The orchestrator's mixer expects
     /// `0.0 ... 1.0` — `updateOriginalVolume(_:)` performs the conversion.
     public var originalVolume: Int = 20
@@ -93,8 +88,6 @@ public final class TranscriptViewModel {
 
     // MARK: - Derived data
 
-    public var entries: [TranscriptEntry] { store.entries }
-
     /// Grouped bubbles for the view layer. Mirrors the JS algorithm:
     /// continuous-speaker runs collapse, long entries split on sentence
     /// boundaries, and the very last bubble carries the live flag when the
@@ -105,8 +98,6 @@ public final class TranscriptViewModel {
             liveEntryId: activeLiveEntryId
         )
     }
-
-    public func exportAsText() -> String { store.exportAsText() }
 
     /// Seconds since the orchestrator transitioned to `.translating`. Zero
     /// while idle / connecting / errored. In snapshot/preview mode the VM
@@ -131,6 +122,15 @@ public final class TranscriptViewModel {
     /// the VM owning a timer.
     public var elapsedSecondsString: String {
         Self.formatElapsed(elapsedSeconds)
+    }
+
+    /// True when the orchestrator is running a `.test` self-test session
+    /// (started via `PopoverViewModel.startTest()`). The transcript view
+    /// uses this to switch the status dot and bubble tint to a yellow
+    /// palette so the user can visually tell a calibration test apart
+    /// from a real translation session.
+    public var isTestMode: Bool {
+        orchestrator?.state.activeMode == .test
     }
 
     // MARK: - Mutations
