@@ -1,5 +1,3 @@
-import Foundation
-
 public struct PeakDetector {
     public let threshold: Float
     public let refractorySamples: Int

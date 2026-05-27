@@ -27,10 +27,10 @@ import Testing
     #expect(det.detectPeaks(in: buf) == [200, 600])
 }
 
-@Test func twoClosePeaks_withinRefractory_returnsHighest() {
-    // First peak at 100 (0.5), second at 130 (0.9). Refractory=50.
-    // After detecting at 100, skip the next 50 → second peak at 130 is INSIDE
-    // refractory of first detection. Expect only the first peak.
+@Test func twoClosePeaks_withinRefractory_returnsFirst() {
+    // First peak at 100 (0.5), second at 130 (0.9), refractory=50.
+    // We detect the onset (first sample over threshold), not the loudest
+    // sample — click latency is measured at the leading edge.
     let det = PeakDetector(threshold: 0.3, refractorySamples: 50)
     var buf = Array(repeating: Float(0.0), count: 1000)
     buf[100] = 0.5
