@@ -1,5 +1,4 @@
 import Foundation
-import UnisonDomain
 
 /// Fixed-capacity FIFO of `AudioFrame`s with drop-oldest overflow.
 ///

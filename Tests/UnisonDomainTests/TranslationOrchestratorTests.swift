@@ -668,3 +668,66 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
         Issue.record("Expected .translating after network restored, got \(o.state)")
     }
 }
+
+// MARK: - AudioRingBuffer flush on stream reconnect
+
+@Test @MainActor func orchestrator_streamReconnect_flushesAudioBuffer() async throws {
+    // FakeClock keeps the reconnect retry loop's `clock.sleep` from
+    // throwing on cancellation: `withCheckedThrowingContinuation` is
+    // not a cancellation point, so the suspended retry survives the
+    // observer task's self-cancellation in `handleStreamFailure`.
+    // After advancing the clock past the backoff delay the retry
+    // proceeds, instantiates a fresh me-stream, and (per the buffer
+    // wiring) drains the ring buffer onto it BEFORE wiring live mic.
+    let fakeClock = FakeClock(now: epochDate(0))
+    let mic = MockMicrophoneCapture()
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(mic: mic, factory: factory, clock: fakeClock)
+    await o.start(mode: .test, languages: .default)
+    try? await Task.sleep(nanoseconds: 100_000_000)
+
+    let initialStream = factory.streams[.me]!
+    // Send a few frames — they go to the live stream AND into the
+    // ring buffer.
+    for _ in 0..<5 {
+        mic.emit(AudioFrame(pcm: Data(repeating: 0x40, count: 4 * 4_800), sampleRate: 48_000, channels: 1, format: .float32))
+        try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+    let preReconnectCount = initialStream.sentFrames.count
+    #expect(preReconnectCount >= 5)
+
+    // Simulate a mid-session drop (`receivedAnyData: true` so we
+    // exercise the reconnect path instead of the empty-close terminal
+    // escalation). The factory hands out a fresh stream on the next
+    // `make(...)` call, and the orchestrator must drain the ring
+    // buffer into that new stream BEFORE wiring live mic.
+    initialStream.emitConnectionState(.failed(.networkLost, receivedAnyData: true))
+
+    // Wait for the orchestrator to enter `.reconnecting`. The retry
+    // loop then suspends inside `fakeClock.sleep(for: 1)`.
+    for _ in 0..<50 {
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        if case .reconnecting = o.state { break }
+    }
+    guard case .reconnecting = o.state else {
+        Issue.record("Expected .reconnecting after stream failure, got \(o.state)")
+        return
+    }
+    // Advance past the first backoff delay so the retry actually
+    // attempts to reconnect.
+    fakeClock.advance(by: 1.5)
+
+    var newStream: MockTranslationStream = initialStream
+    for _ in 0..<200 {
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        if let candidate = factory.streams[.me], candidate !== initialStream {
+            newStream = candidate
+            if newStream.sentFrames.count >= 5 { break }
+        }
+    }
+    #expect(newStream !== initialStream, "After reconnect, factory.streams[.me] should point to a new stream (state=\(o.state))")
+    // The flush should have moved buffered frames (5 we just sent)
+    // into the new stream's sentFrames before any new mic frame
+    // arrives.
+    #expect(newStream.sentFrames.count >= 5)
+}

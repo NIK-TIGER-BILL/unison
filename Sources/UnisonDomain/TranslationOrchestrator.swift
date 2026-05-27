@@ -95,6 +95,18 @@ public final class TranslationOrchestrator {
     // Pipeline tasks bucketed per speaker so a reconnect cancels exactly the
     // tasks bound to the failed stream and leaves the healthy side untouched.
     private var pipelineTasksBySpeaker: [Speaker: [Task<Void, Never>]] = [:]
+    /// Per-speaker short-window ring buffer of wire-format outbound
+    /// audio. The mic-frame consumer appends each frame after
+    /// `transformer.toWire(...)`; on reconnect the orchestrator drains
+    /// the buffer onto the fresh stream BEFORE wiring live mic so a
+    /// brief flap doesn't drop the in-flight phrase. Cleared on
+    /// `.paused` (audio captured during a long outage is stale; see
+    /// `docs/superpowers/specs/2026-05-27-network-aware-session-design.md`)
+    /// and removed in `stopAllStreams`.
+    private var audioBufferBySpeaker: [Speaker: AudioRingBuffer] = [:]
+    /// 3 s at ~100 ms frames = 30 frames. Matches the design's
+    /// brief-blip recovery window.
+    private static let audioBufferFrames: Int = 30
     // Tasks not bound to a single stream (device observer, etc).
     private var globalTasks: [Task<Void, Never>] = []
     private var currentLanguages: LanguagePair = .default
@@ -268,6 +280,9 @@ public final class TranslationOrchestrator {
         //   .call: me-stream output → BlackHole 2ch (peer hears in their Zoom)
         //   .test: me-stream output → speakers (user hears their own translation)
         if mode == .call || mode == .test {
+            // Allocate the outbound audio ring buffer alongside the
+            // me-stream — see `audioBufferBySpeaker` for rationale.
+            audioBufferBySpeaker[.me] = AudioRingBuffer(maxFrames: Self.audioBufferFrames)
             Self.log.info("start() — connecting me stream (target=\(languages.peer.rawValue))")
             let me = translationFactory.make(speaker: .me)
             meStream = me
@@ -627,6 +642,11 @@ public final class TranslationOrchestrator {
             for t in tasks { t.cancel() }
         }
         pipelineTasksBySpeaker.removeAll()
+        // Audio captured during a long outage is stale — by the time
+        // the network returns, replaying old frames would land after
+        // the live conversation moved on. The buffer is allocated
+        // again when resume re-opens the me-stream.
+        audioBufferBySpeaker.values.forEach { $0.clear() }
         micCapture.stop()
         peerCapture.stop()
         Task { @MainActor [weak self] in
@@ -667,6 +687,9 @@ public final class TranslationOrchestrator {
             }
         }
         if mode == .call || mode == .test {
+            // Re-arm the outbound ring buffer so post-resume reconnect
+            // flaps continue to enjoy the brief-blip recovery path.
+            audioBufferBySpeaker[.me] = AudioRingBuffer(maxFrames: Self.audioBufferFrames)
             let me = translationFactory.make(speaker: .me)
             do {
                 try await me.connect(target: languages.peer)
@@ -910,6 +933,23 @@ public final class TranslationOrchestrator {
                     wireIncomingPipeline(stream: newStream)
                 case .me:
                     meStream = newStream
+                    // Drain the outbound audio ring buffer onto the
+                    // fresh stream BEFORE `wireOutgoingPipeline` starts
+                    // the new mic-frame consumer. This replays the
+                    // last ~3 s of in-flight audio so a brief WS flap
+                    // doesn't drop the user's mid-phrase. The send
+                    // happens off-actor in an unstructured Task because
+                    // each `await newStream.send` may yield, and we
+                    // don't want to block this @MainActor function.
+                    if let buf = audioBufferBySpeaker[.me] {
+                        let buffered = buf.drain()
+                        if !buffered.isEmpty {
+                            Self.log.info("flushing \(buffered.count) buffered audio frames to fresh me-stream")
+                            Task { [newStream] in
+                                for f in buffered { await newStream.send(f) }
+                            }
+                        }
+                    }
                     // Re-derive the destination from the active mode
                     // so a test-mode session that flapped doesn't
                     // accidentally route to BlackHole 2ch after the
@@ -968,6 +1008,11 @@ public final class TranslationOrchestrator {
         }
         globalTasks.removeAll()
         pipelineTasksBySpeaker.removeAll()
+        // Drop the per-speaker ring buffers entirely on stop — a fresh
+        // start() re-allocates them. Keeping the instance around past
+        // session boundaries would leak stale audio into a later
+        // reconnect from an unrelated session.
+        audioBufferBySpeaker.removeAll()
         micCapture.stop()
         peerCapture.stop()
         outputMixer.stop()
@@ -1059,6 +1104,17 @@ public final class TranslationOrchestrator {
                     self?.logMicLevel(rms: rms, frameIndex: idx)
                 }
                 let wire = transformer.toWire(frame)
+                // Mirror the wire-format frame into the per-speaker
+                // ring buffer BEFORE sending it. On reconnect the
+                // orchestrator drains the buffer onto the fresh stream
+                // so a brief WS flap doesn't drop the user's in-flight
+                // phrase. `AudioRingBuffer.append` is lock-guarded
+                // and safe to call off the main actor; we still hop
+                // to MainActor.run for symmetry with the other
+                // orchestrator mutations in this task.
+                await MainActor.run { [weak self] in
+                    self?.audioBufferBySpeaker[.me]?.append(wire)
+                }
                 await stream.send(wire)
                 frameIndex += 1
             }

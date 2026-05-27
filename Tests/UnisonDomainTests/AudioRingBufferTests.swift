@@ -1,6 +1,5 @@
 import Foundation
 import Testing
-@testable import UnisonAudio
 @testable import UnisonDomain
 
 private func frame(_ id: UInt8) -> AudioFrame {
