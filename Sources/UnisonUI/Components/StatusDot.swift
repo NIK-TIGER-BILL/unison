@@ -8,6 +8,8 @@ public struct StatusDot: View {
         case active
         case warn
         case error
+        case paused
+        case recovering
     }
 
     public let state: State
@@ -15,15 +17,15 @@ public struct StatusDot: View {
     public let pulse: Bool
 
     /// - Parameters:
-    ///   - state: which color to paint. `.active` triggers an opacity pulse
+    ///   - state: which color to paint. `.active` and `.recovering` trigger an opacity pulse
     ///     unless `pulse` is explicitly set to `false`.
     ///   - size: dot diameter in points. 6–7 is the design's typical value.
     ///   - pulse: forces the pulse on/off. `nil` means "follow `state`"
-    ///     (only `.active` pulses).
+    ///     (only `.active` and `.recovering` pulse).
     public init(state: State, size: CGFloat = 7, pulse: Bool? = nil) {
         self.state = state
         self.size = size
-        self.pulse = pulse ?? (state == .active)
+        self.pulse = pulse ?? (state == .active || state == .recovering)
     }
 
     @SwiftUI.State private var pulsing = false
@@ -52,6 +54,8 @@ public struct StatusDot: View {
         case .active: UnisonColors.active
         case .warn:  UnisonColors.warn
         case .error: UnisonColors.error
+        case .paused: UnisonColors.whiteAlpha(0.30)
+        case .recovering: UnisonColors.active
         }
     }
 
@@ -61,6 +65,8 @@ public struct StatusDot: View {
         case .active: "Идёт перевод"
         case .warn:   "Предупреждение"
         case .error:  "Ошибка"
+        case .paused: "Приостановлено"
+        case .recovering: "Восстановление"
         }
     }
 }
