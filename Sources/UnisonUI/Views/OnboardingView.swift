@@ -143,43 +143,128 @@ public struct OnboardingView: View {
         }
     }
 
-    // MARK: Card · BlackHole
+    // MARK: Card · BlackHole (Audio setup — two sub-rows)
 
     private var blackHoleCard: some View {
         StepCard(
-            title: "BlackHole",
+            title: "Аудио",
             icon: Image(systemName: "speaker.wave.2.fill"),
             status: cardStatus(for: .blackHole)
         ) {
-            cardAction(
-                hint: "Нужен пароль системы.",
-                primaryTitle: "Установить",
-                primaryAction: { Task { await vm.installBlackHole() } },
-                isLoading: vm.status[.blackHole]?.isInProgress == true,
-                loadingTitle: "Установка…"
-            )
+            VStack(alignment: .leading, spacing: 0) {
+                DashedDivider()
+                    .padding(.top, 2)
 
-            // Escape hatch: if the automated install fails for any
-            // reason (network, perm denial, CoreAudio quirk), the user
-            // can install BlackHole manually from existential.audio.
-            // Mirrors the `Получить ключ ↗` muted link under the OpenAI
-            // card — same visual weight, same affordance.
-            MutedLink("Установить вручную") {
-                onOpenURL(OnboardingViewModel.blackHoleManualInstallURL)
-            }
-            .accessibilityLabel("Установить BlackHole вручную")
-            .padding(.top, 4)
-
-            if let message = vm.status[.blackHole]?.errorMessage {
-                ErrorRow(
-                    title: "Не удалось установить",
-                    detail: message,
-                    action: .retry(label: "Повторить") {
-                        Task { await vm.installBlackHole() }
-                    }
+                // Sub-row 1: BlackHole 2ch install
+                audioSubRow(
+                    label: "Виртуальный микрофон (BlackHole 2ch)",
+                    subStatus: vm.blackHoleInstallStatus,
+                    buttonTitle: "Установить",
+                    loadingTitle: "Установка…",
+                    action: { Task { await vm.installBlackHole() } }
                 )
-                .padding(.top, 12)
+                .padding(.top, 10)
+
+                // Escape hatch: manual install link below the install row.
+                MutedLink("Установить вручную") {
+                    onOpenURL(OnboardingViewModel.blackHoleManualInstallURL)
+                }
+                .accessibilityLabel("Установить BlackHole вручную")
+                .padding(.top, 2)
+                .padding(.leading, 22)
+
+                if let message = vm.blackHoleInstallStatus.errorMessage {
+                    ErrorRow(
+                        title: "Не удалось установить",
+                        detail: message,
+                        action: .retry(label: "Повторить") {
+                            Task { await vm.installBlackHole() }
+                        }
+                    )
+                    .padding(.top, 8)
+                }
+
+                DashedDivider()
+                    .padding(.top, 12)
+
+                // Sub-row 2: Audio capture (Process Tap TCC grant)
+                audioSubRow(
+                    label: "Захват системного звука",
+                    subStatus: vm.audioCaptureStatus,
+                    buttonTitle: "Разрешить",
+                    loadingTitle: nil,
+                    action: { Task { await vm.requestAudioCapturePermission() } }
+                )
+                .padding(.top, 10)
+
+                if let message = vm.audioCaptureStatus.errorMessage {
+                    ErrorRow(
+                        title: "Не удалось получить доступ",
+                        detail: message,
+                        action: nil
+                    )
+                    .padding(.top, 8)
+                }
             }
+        }
+    }
+
+    /// A single sub-row inside the Audio card: status icon on the left,
+    /// label in the middle, action button on the right. The button is
+    /// hidden once the sub-task is done and disabled while it is in
+    /// progress. Mirrors the visual weight of the Microphone card's
+    /// `cardAction` hint+button row.
+    @ViewBuilder
+    private func audioSubRow(
+        label: String,
+        subStatus: OnboardingStepStatus,
+        buttonTitle: String,
+        loadingTitle: String?,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 8) {
+            subStatusIcon(subStatus)
+            Text(label)
+                .font(.system(size: 12.5))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            if !subStatus.isDone {
+                compactPrimaryButton(
+                    title: subStatus.isInProgress ? (loadingTitle ?? buttonTitle) : buttonTitle,
+                    action: action,
+                    isLoading: subStatus.isInProgress,
+                    isDisabled: subStatus.isInProgress
+                )
+                .layoutPriority(1)
+            }
+        }
+    }
+
+    /// Small status icon for an individual sub-task: checkmark when done,
+    /// spinner when in progress, empty circle otherwise (and on error).
+    @ViewBuilder
+    private func subStatusIcon(_ status: OnboardingStepStatus) -> some View {
+        switch status {
+        case .done:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(UnisonColors.ready)
+                .accessibilityLabel("Готово")
+        case .inProgress:
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 14, height: 14)
+        case .error:
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(UnisonColors.error)
+                .accessibilityLabel("Ошибка")
+        case .pending:
+            Image(systemName: "circle")
+                .font(.system(size: 14))
+                .foregroundStyle(.tertiary)
+                .accessibilityLabel("Ожидание")
         }
     }
 
