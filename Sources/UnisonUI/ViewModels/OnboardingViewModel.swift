@@ -289,8 +289,8 @@ public final class OnboardingViewModel {
             NSApp.activate(ignoringOtherApps: true)
         }
         try? await Task.sleep(nanoseconds: 100_000_000)
-        let status = AudioCapturePermission.triggerPrompt()
-        Self.log.info("AudioCapturePermission.triggerPrompt() returned OSStatus=\(status)")
+        AudioCapturePermission.triggerPrompt()
+        Self.log.info("AudioCapturePermission.triggerPrompt() returned")
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         audioCaptureStatus = .done
         refresh()
