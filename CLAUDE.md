@@ -75,8 +75,8 @@ panel is hit-test transparent
 
 `UNISON_FORCE_STATE` (parsed once at launch by `Composition`):
 
-- `onboarding-done` / `transcript-demo` — preinstalled BlackHole,
-  preseeded keychain, mocked permissions
+- `onboarding-done` / `transcript-demo` — Process Tap audio capture
+  preseeded, keychain preseeded, mocked permissions
 - `popover-open` — opens the popover at launch and disables
   auto-dismiss; used by the Tart screenshot harness
 - `start-translation` / `start-stop-start` — drives integration tests

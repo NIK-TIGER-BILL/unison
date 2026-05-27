@@ -87,11 +87,12 @@ Implementation lives in `Sources/UnisonApp/Composition.swift` (factories
 + `seedTranscriptDemo`) and `Sources/UnisonApp/AppDelegate.swift`
 (`applyForceStateOverrides`).
 
-## Tap vs BlackHole benchmark
+## Process Tap latency benchmark
 
 `scripts/vm-tap-benchmark.sh` runs the `tap-benchmark` CLI inside the same
-`unison-test` VM to compare Process Tap and BlackHole 16ch capture
-latency. Output: a JSON file in `vm-tap-benchmark/`.
+`unison-test` VM to measure Process Tap audio capture latency. The script
+can optionally include BlackHole 16ch for comparative baseline testing.
+Output: a JSON file in `vm-tap-benchmark/`.
 
 ```bash
 # Default — both phases, with BlackHole present in the VM.
@@ -112,7 +113,7 @@ The script:
 1. Boots the VM (or attaches to a running one)
 2. Builds `build/TapBenchmark.app` on the host via `bundle_app.sh --target tap-benchmark`
 3. Pushes the bundle into the VM
-4. Installs / removes BlackHole 16ch per `--scenario`
+4. Installs or removes BlackHole 16ch per `--scenario` (for comparative testing only)
 5. Pre-grants TCC audio capture for `com.unison.tapbench`
 6. Runs the benchmark over SSH (`--silent` so the click train isn't audible)
 7. Pulls the JSON report back to `vm-tap-benchmark/results-<unix-ts>.json`
