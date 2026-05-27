@@ -17,7 +17,7 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.2</string>
+    <string>26.0</string>
     <key>NSAudioCaptureUsageDescription</key>
     <string>Latency benchmark for Process Tap vs BlackHole 16ch capture paths.</string>
     <key>NSMicrophoneUsageDescription</key>
