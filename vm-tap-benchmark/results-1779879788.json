@@ -1,0 +1,28 @@
+{
+  "blackHolePresent" : true,
+  "blackhole" : {
+    "metrics" : {
+      "dropRate" : 1,
+      "jitterStdDevMs" : 0,
+      "meanCpuPct" : 1.5802061264510006,
+      "medianLatencyMs" : 0,
+      "p95LatencyMs" : 0
+    },
+    "name" : "BlackHole 16ch"
+  },
+  "clickCount" : 150,
+  "durationSeconds" : 30,
+  "isVM" : true,
+  "setupFriendly" : "SKIPPED",
+  "tap" : {
+    "metrics" : {
+      "dropRate" : 1,
+      "jitterStdDevMs" : 0,
+      "meanCpuPct" : 4.422060959760909,
+      "medianLatencyMs" : 0,
+      "p95LatencyMs" : 0
+    },
+    "name" : "Process Tap"
+  },
+  "timestampISO" : "2026-05-27T11:04:14Z"
+}

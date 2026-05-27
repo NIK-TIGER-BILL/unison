@@ -8,7 +8,7 @@ import UnisonDomain
 /// set of processes by bundle ID (macOS 14.2+). Emits Float32 `AudioFrame`s
 /// at the tap's native sample rate over an `AsyncStream`, mirroring
 /// `BlackHoleSinkCapture`'s API.
-public final class ProcessTapCapture: @unchecked Sendable {
+public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     public let excludedBundleIDs: [String]
     private var processObjectIDs: [AudioObjectID] = []  // resolved at start()
     private var tapObjectID: AudioObjectID = 0

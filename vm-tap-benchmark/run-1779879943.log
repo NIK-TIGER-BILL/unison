@@ -1,0 +1,30 @@
+[1;36m[vm-tap-bench][0m Starting VM "unison-test" in background…
+[1;36m[vm-tap-bench][0m Waiting for VM IP and SSH (up to 90s)…
+[1;36m[vm-tap-bench][0m VM reachable at 192.168.64.2
+[1;36m[vm-tap-bench][0m Copying TapBenchmark.app into VM…
+[1;36m[vm-tap-bench][0m Ensuring BlackHole 16ch is installed in the VM…
+[1;36m[vm-tap-bench][0m Pre-granting TCC audio capture…
+Successfully reset Microphone approval status for com.unison.tapbench
+Successfully reset AudioCapture approval status for com.unison.tapbench
+[1;36m[vm-tap-bench][0m Running benchmark inside VM (scenario=with-blackhole duration=30s)…
+Running BlackHole phase (30s)...
+Running Process Tap phase (30s)...
+
+Tap vs BlackHole capture benchmark
+duration: 30s  •  clicks: 150  •  signal: 2ms burst @ 200ms
+
+                 BlackHole 16ch   Process Tap
+──────────────────────────────────────────────────
+median latency   0.0 ms           0.0 ms
+p95 latency      0.0 ms           0.0 ms
+jitter (stddev)  0.0 ms           0.0 ms
+drop rate        100.0 %          100.0 %
+mean CPU         1.4 %            3.6 %
+──────────────────────────────────────────────────
+verdict: Process Tap is 0.0 ms faster (median), 2.2% more CPU
+
+Setup-friendly check: SKIPPED
+
+JSON written to /Users/admin/results-1779879961.json
+[1;36m[vm-tap-bench][0m Results saved to /Users/nvzamuldinov/projects/unison/.claude/worktrees/beautiful-wescoff-9eb71e/vm-tap-benchmark/results-1779879961.json
+[1;36m[vm-tap-bench][0m Stopping VM...

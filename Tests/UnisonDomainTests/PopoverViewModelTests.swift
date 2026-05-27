@@ -194,7 +194,6 @@ func popoverVM_userMessage_mapsEveryTranslationError() {
     let cases: [TranslationError] = [
         .permissionDenied(.microphone),
         .blackHole2chMissing,
-        .blackHole16chMissing,
         .apiKeyInvalid,
         .rateLimited(retryAfter: 1),
         .insufficientCredits,

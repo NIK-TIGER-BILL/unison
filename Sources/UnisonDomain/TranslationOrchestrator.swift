@@ -161,13 +161,6 @@ public final class TranslationOrchestrator {
                 return
             }
         }
-        if mode == .call || mode == .listen {
-            guard deviceRegistry.findBlackHole16ch() != nil else {
-                Self.log.error("start() guard failed: BlackHole 16ch not found → .error(.blackHole16chMissing)")
-                state = .error(.blackHole16chMissing)
-                return
-            }
-        }
 
         Self.log.info("start() — starting output mixer (outputDeviceUID=\(settings.outputDeviceUID ?? "default"))")
         do {
@@ -327,15 +320,6 @@ public final class TranslationOrchestrator {
     private func handleDeviceChange() {
         guard case .translating(let mode, _) = state else { return }
 
-        // BlackHole 16ch is required in both modes — losing it is fatal.
-        if deviceRegistry.findBlackHole16ch() == nil {
-            Self.log.error("handleDeviceChange — BlackHole 16ch disappeared mid-session → stop + .error(.blackHole16chMissing)")
-            Task { @MainActor in
-                await self.stop()
-                self.state = .error(.blackHole16chMissing)
-            }
-            return
-        }
         // BlackHole 2ch is required only in Call mode — losing it is fatal there.
         if mode == .call, deviceRegistry.findBlackHole2ch() == nil {
             Self.log.error("handleDeviceChange — BlackHole 2ch disappeared mid-call → stop + .error(.blackHole2chMissing)")

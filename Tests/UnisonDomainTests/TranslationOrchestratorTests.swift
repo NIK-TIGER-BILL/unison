@@ -70,15 +70,6 @@ private func makeOrchestrator(
     #expect(o.state.errorValue == .blackHole2chMissing)
 }
 
-@Test @MainActor func orchestrator_startCall_failsWithoutBlackHole16ch() async {
-    let registry = MockAudioDeviceRegistry()
-    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = nil
-    let o = makeOrchestrator(registry: registry)
-    await o.start(mode: .call, languages: .default)
-    #expect(o.state.errorValue == .blackHole16chMissing)
-}
-
 @Test @MainActor func orchestrator_startListen_skipsMicAndBH2ch() async throws {
     let mic = MockMicrophoneCapture()
     let perms = MockPermissionsService()
@@ -320,29 +311,6 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
     }
 
     #expect(o.state.errorValue == .apiKeyInvalid)
-}
-
-@Test @MainActor func orchestrator_blackHole16chDisappears_transitionsToError() async throws {
-    let registry = MockAudioDeviceRegistry()
-    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
-    let o = makeOrchestrator(registry: registry)
-    await o.start(mode: .call, languages: .default)
-
-    // Simulate BlackHole 16ch disappearance
-    registry.bh16ch = nil
-    registry.notifyDeviceChange()
-
-    for _ in 0..<20 {
-        try await Task.sleep(nanoseconds: 10_000_000)
-        if case .error = o.state { break }
-    }
-
-    if case .error(let e) = o.state {
-        #expect(e == .blackHole16chMissing)
-    } else {
-        Issue.record("Expected .error(.blackHole16chMissing), got \(o.state)")
-    }
 }
 
 @Test @MainActor func orchestrator_blackHole2chDisappearsInCallMode_transitionsToError() async throws {
