@@ -33,6 +33,12 @@ public final class BlackHoleSinkCapture: PeerAudioCapture, @unchecked Sendable {
     /// is NOT happening on this run). Subsequent callbacks stay
     /// log-free.
     private var loggedFirstFrame = false
+    /// Watchdog task that fires `log.error` if the first tap callback
+    /// hasn't arrived within 5 s of `engine.start()`. Critical
+    /// diagnostic for the "BlackHole sees zero frames" failure mode —
+    /// without this, the only signal is the absence of a log line,
+    /// which is invisible to users grep-ing for errors.
+    private var tapWatchdog: Task<Void, Never>?
 
     public init(registry: CoreAudioDeviceRegistry) {
         self.registry = registry
@@ -79,6 +85,8 @@ public final class BlackHoleSinkCapture: PeerAudioCapture, @unchecked Sendable {
     }
 
     public func stop() {
+        tapWatchdog?.cancel()
+        tapWatchdog = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         continuation?.finish()
@@ -93,6 +101,18 @@ public final class BlackHoleSinkCapture: PeerAudioCapture, @unchecked Sendable {
             throw NSError(domain: "BlackHoleSinkCapture", code: -1,
                           userInfo: [NSLocalizedDescriptionKey: "Could not resolve AudioDeviceID for BlackHole 16ch (uid=\(uid))"])
         }
+        // Log the device's *native* format BEFORE binding. AVAudioEngine's
+        // inputNode.outputFormat(forBus: 0) reports the engine's internal
+        // negotiated format, which can silently differ from the actual
+        // device's stream format on macOS 26 — e.g. BlackHole 16ch's
+        // physical format may be 48 kHz × 16ch but the engine reports
+        // 16 kHz × 1ch because AUHAL fell back. Logging both lets us
+        // diagnose the mismatch.
+        if let native = Self.queryDeviceNativeFormat(deviceID: deviceID, scope: kAudioObjectPropertyScopeInput) {
+            Self.log.info("bindInput — BlackHole 16ch native input format: \(native.sampleRate)Hz × \(native.channels)ch (\(native.format))")
+        } else {
+            Self.log.error("bindInput — could not query native input format for BlackHole 16ch (id=\(deviceID))")
+        }
         var id = deviceID
         let status = AudioUnitSetProperty(
             engine.inputNode.audioUnit!,
@@ -106,6 +126,44 @@ public final class BlackHoleSinkCapture: PeerAudioCapture, @unchecked Sendable {
                           userInfo: [NSLocalizedDescriptionKey: "AudioUnitSetProperty(CurrentDevice) failed: status=\(status)"])
         }
         Self.log.info("bindInput — input device bound to BlackHole 16ch (id=\(deviceID))")
+    }
+
+    /// Query CoreAudio for a device's native (physical) stream format,
+    /// bypassing whatever AVAudioEngine negotiated. Returns nil on
+    /// failure. Logging both this *and* `inputNode.outputFormat(forBus:0)`
+    /// surfaces silent format-fallback failures.
+    private static func queryDeviceNativeFormat(deviceID: AudioDeviceID, scope: AudioObjectPropertyScope) -> (sampleRate: Double, channels: UInt32, format: String)? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioStreamPropertyPhysicalFormat,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        // PhysicalFormat lives on the device's streams. Find first stream.
+        var streamsAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreams,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var streamsSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(deviceID, &streamsAddr, 0, nil, &streamsSize) == noErr,
+              streamsSize > 0 else { return nil }
+        let streamCount = Int(streamsSize) / MemoryLayout<AudioStreamID>.size
+        var streams = [AudioStreamID](repeating: 0, count: streamCount)
+        guard AudioObjectGetPropertyData(deviceID, &streamsAddr, 0, nil, &streamsSize, &streams) == noErr,
+              let firstStream = streams.first else { return nil }
+
+        var asbd = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        guard AudioObjectGetPropertyData(firstStream, &address, 0, nil, &size, &asbd) == noErr else {
+            return nil
+        }
+        let formatName: String
+        if asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0 {
+            formatName = "float\(asbd.mBitsPerChannel)"
+        } else {
+            formatName = "int\(asbd.mBitsPerChannel)"
+        }
+        return (asbd.mSampleRate, asbd.mChannelsPerFrame, formatName)
     }
 
     private func startTap() throws {
@@ -177,6 +235,22 @@ public final class BlackHoleSinkCapture: PeerAudioCapture, @unchecked Sendable {
         Self.log.info("startTap — calling engine.start()")
         try engine.start()
         Self.log.info("startTap — engine.start() returned; isRunning=\(engine.isRunning)")
+        armTapWatchdog()
+    }
+
+    /// Watchdog that fires `log.error` if no tap callback has arrived
+    /// within 5 s of `engine.start()`. The 5 s budget is generous —
+    /// in a healthy run the first callback usually arrives within
+    /// 50–200 ms.
+    private func armTapWatchdog() {
+        tapWatchdog?.cancel()
+        tapWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard let self else { return }
+            if !self.loggedFirstFrame {
+                Self.log.error("tap watchdog — NO tap callback received in 5 seconds despite engine.isRunning=\(self.engine.isRunning). BlackHole 16ch is not delivering audio. Most common causes: (1) call app (Zoom/Meet) isn't actually routing audio to BlackHole 16ch even if it claims to in settings, (2) macOS Audio MIDI Setup has BlackHole 16ch configured with an unusable stream format, (3) another process is holding exclusive access to the device.")
+            }
+        }
     }
 
     /// First-frame diagnostic. Computes RMS over the first 1024 samples
