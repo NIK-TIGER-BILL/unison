@@ -669,6 +669,30 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
     }
 }
 
+@Test @MainActor func orchestrator_pauseRecoveryWatchdog_firesAfter60s() async throws {
+    let netMon = MockNetworkPathMonitor(initial: .satisfied)
+    let clock = ManualClock()
+    let o = makeOrchestrator(networkMonitor: netMon, clock: clock)
+    await o.start(mode: .test, languages: .default)
+    try? await Task.sleep(nanoseconds: 50_000_000)
+    netMon.simulate(.unsatisfied)
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    if case .paused = o.state {} else {
+        Issue.record("Expected .paused, got \(o.state)")
+        return
+    }
+
+    // Advance virtual time past 60 s without the network returning.
+    clock.advance(by: 65)
+    try? await Task.sleep(nanoseconds: 200_000_000)
+
+    if case .error(.networkLost) = o.state {
+        // ok
+    } else {
+        Issue.record("Expected terminal .error(.networkLost) after 60s, got \(o.state)")
+    }
+}
+
 // MARK: - AudioRingBuffer flush on stream reconnect
 
 @Test @MainActor func orchestrator_streamReconnect_flushesAudioBuffer() async throws {
