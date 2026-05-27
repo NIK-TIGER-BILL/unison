@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import UnisonDomain
 @testable import UnisonUI
@@ -116,6 +117,7 @@ func popoverVM_elapsedSecondsString_isZeroWhenIdle() {
     let vm = makeReadyVM()
     #expect(vm.elapsedSecondsString == "00:00")
 }
+
 
 @MainActor
 @Test

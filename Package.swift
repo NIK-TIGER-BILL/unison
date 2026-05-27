@@ -1,6 +1,33 @@
 // swift-tools-version:6.2
 import PackageDescription
 
+// Swift language mode pinned to v5 globally.
+//
+// **Why not Swift 6 mode?** The Swift 6.3 toolchain that ships with Xcode 26
+// has a runtime regression in `swift_task_isMainExecutorImpl`: any closure
+// dispatched through Apple's frameworks (NSEvent monitors, SwiftUI
+// TimelineView/Combine subscribers, AppKit event handlers, etc.) triggers
+// an executor-identity check that dereferences a stale/invalid
+// SerialExecutorRef and traps. Production crash reports captured the same
+// `swift_getObjectType → swift_task_isMainExecutorImpl +36 →
+// SerialExecutorRef::isMainExecutor` stack reached from **unrelated** call
+// paths: TimelineView render, Combine.Timer.publish subscriber, and the
+// HotkeyService NSEvent global monitor. The dereferenced pointer was
+// bit-identical across crashes, which is the signature of a runtime-side
+// table corruption — not a user-code race.
+//
+// Swift 5 language mode skips the strict concurrency runtime checks that
+// invoke `swift_task_isCurrentExecutor`, sidestepping the bug entirely
+// without sacrificing any actual language features the codebase uses
+// (we don't write `nonisolated(unsafe)`, `sending`, etc.). Swift 6 syntax
+// — `@MainActor`, `nonisolated`, `Sendable`, structured concurrency
+// (`async`/`await`/`Task`) — all continue to work, the compiler just
+// stops *enforcing* them at runtime.
+//
+// Revisit once Swift 6.3.x ships a fix (track upstream
+// apple/swift issues around `swift_task_isMainExecutorImpl`).
+private let langModeV5: [SwiftSetting] = [.swiftLanguageMode(.v5)]
+
 let package = Package(
     name: "Unison",
     // macOS 26 (Tahoe) baseline — native Liquid Glass APIs
@@ -20,20 +47,20 @@ let package = Package(
     // tiny image-snapshot helper (`Tests/UnisonUITests/SnapshotConfig.swift`)
     // that uses CGImage diffs and Swift Testing — no external deps.
     targets: [
-        .target(name: "UnisonDomain"),
-        .target(name: "UnisonTranslation", dependencies: ["UnisonDomain"]),
-        .target(name: "UnisonAudio", dependencies: ["UnisonDomain"]),
-        .target(name: "UnisonSystem", dependencies: ["UnisonDomain"]),
-        .target(name: "UnisonUI", dependencies: ["UnisonDomain"]),
+        .target(name: "UnisonDomain", swiftSettings: langModeV5),
+        .target(name: "UnisonTranslation", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
+        .target(name: "UnisonAudio", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
+        .target(name: "UnisonSystem", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
+        .target(name: "UnisonUI", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
         .executableTarget(name: "UnisonApp", dependencies: [
             "UnisonDomain", "UnisonTranslation", "UnisonAudio",
             "UnisonSystem", "UnisonUI"
-        ]),
-        .testTarget(name: "UnisonDomainTests", dependencies: ["UnisonDomain", "UnisonUI"]),
-        .testTarget(name: "UnisonTranslationTests", dependencies: ["UnisonTranslation"]),
+        ], swiftSettings: langModeV5),
+        .testTarget(name: "UnisonDomainTests", dependencies: ["UnisonDomain", "UnisonUI"], swiftSettings: langModeV5),
+        .testTarget(name: "UnisonTranslationTests", dependencies: ["UnisonTranslation"], swiftSettings: langModeV5),
         .testTarget(name: "UnisonAudioTests", dependencies: ["UnisonAudio"],
-                    resources: [.copy("Fixtures")]),
-        .testTarget(name: "UnisonSystemTests", dependencies: ["UnisonSystem", "UnisonDomain"]),
+                    resources: [.copy("Fixtures")], swiftSettings: langModeV5),
+        .testTarget(name: "UnisonSystemTests", dependencies: ["UnisonSystem", "UnisonDomain"], swiftSettings: langModeV5),
         .testTarget(
             name: "UnisonUITests",
             dependencies: [
@@ -46,7 +73,8 @@ let package = Package(
             // (inflates the test binary) AND SwiftPM emits an
             // "unhandled file" warning per snapshot. Explicit exclude
             // mutes the warning and keeps the test binary small.
-            exclude: ["__Snapshots__"]
+            exclude: ["__Snapshots__"],
+            swiftSettings: langModeV5
         )
     ]
 )

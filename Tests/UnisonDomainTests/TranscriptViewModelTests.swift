@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import UnisonDomain
 @testable import UnisonUI
@@ -275,3 +276,4 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     #expect(vm.elapsedSeconds == 0)
     #expect(vm.elapsedSecondsString == "00:00")
 }
+
