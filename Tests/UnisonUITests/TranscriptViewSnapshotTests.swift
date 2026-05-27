@@ -66,4 +66,19 @@ struct TranscriptViewSnapshotTests {
         vm.setLive(entryId: id)
         snap(panel(TranscriptView(vm: vm), size: SnapSize.transcript), size: SnapSize.transcript)
     }
+
+    /// An entry that was mid-flight when the orchestrator entered
+    /// `.paused` / `.reconnecting` gets stamped with `translationAtRisk`.
+    /// The bubble renders an italic placeholder + exclamation icon
+    /// instead of the missing translated text — visual proof that the
+    /// user notices the gap.
+    @Test func transcript_bubbleWithLostTranslation() throws {
+        let vm = makeVM(elapsed: 14)
+        let store = vm.store
+        store.currentLanguagePair = LanguagePair(mine: .ru, peer: .en)
+        let id = UUID()
+        store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .original, text: "Привет, как дела?", isFinal: false))
+        store.markActiveEntriesAtRisk()
+        snap(panel(TranscriptView(vm: vm), size: SnapSize.transcript), size: SnapSize.transcript)
+    }
 }
