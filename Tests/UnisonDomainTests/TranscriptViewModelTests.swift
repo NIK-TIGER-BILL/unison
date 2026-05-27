@@ -88,11 +88,11 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     let vm = TranscriptViewModel(store: TranscriptStore())
     vm.updateSizeIndex(2.8)
     #expect(vm.sizeIndex == 2.8)
-    #expect(vm.sizeLabel == "L") // round(2.8) → 3 → "L"
+    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: vm.sizeIndex) == "L") // round(2.8) → 3 → "L"
     // Out-of-range
     vm.updateSizeIndex(10)
     #expect(vm.sizeIndex == 4)
-    #expect(vm.sizeLabel == "XL")
+    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: vm.sizeIndex) == "XL")
     vm.updateSizeIndex(-5)
     #expect(vm.sizeIndex == 0)
     #expect(vm.bubbleScale == 0.75)
