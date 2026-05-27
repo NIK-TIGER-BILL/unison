@@ -1,17 +1,52 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+TARGET="unison"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --target)
+      TARGET="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown arg: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
 CONFIG="${CONFIG:-release}"
-APP_NAME="Unison"
+
+case "$TARGET" in
+  unison)
+    APP_NAME="Unison"
+    PRODUCT="Unison"
+    EXEC_NAME="Unison"
+    INFO_PLIST="Resources/Info.plist"
+    ENTITLEMENTS="Resources/Unison.entitlements"
+    ;;
+  tap-benchmark)
+    APP_NAME="TapBenchmark"
+    PRODUCT="tap-benchmark"
+    EXEC_NAME="tap-benchmark"
+    INFO_PLIST="Sources/Tools/TapBenchmark/Info.plist"
+    ENTITLEMENTS="Sources/Tools/TapBenchmark/tap-benchmark.entitlements"
+    ;;
+  *)
+    echo "Unknown --target: $TARGET (expected: unison | tap-benchmark)" >&2
+    exit 1
+    ;;
+esac
+
 BUNDLE_DIR="build/${APP_NAME}.app"
 CONTENTS="${BUNDLE_DIR}/Contents"
 MACOS="${CONTENTS}/MacOS"
 RESOURCES="${CONTENTS}/Resources"
 
-echo "Building executable ($CONFIG)..."
-swift build --configuration "$CONFIG" --product Unison
+echo "Building $PRODUCT ($CONFIG)..."
+swift build --configuration "$CONFIG" --product "$PRODUCT"
 
-EXEC_PATH=".build/${CONFIG}/Unison"
+EXEC_PATH=".build/${CONFIG}/${PRODUCT}"
 if [ ! -f "$EXEC_PATH" ]; then
   echo "error: executable not found at $EXEC_PATH"
   exit 1
@@ -21,25 +56,20 @@ echo "Constructing $BUNDLE_DIR..."
 rm -rf "$BUNDLE_DIR"
 mkdir -p "$MACOS" "$RESOURCES"
 
-cp "$EXEC_PATH" "$MACOS/Unison"
-cp Resources/Info.plist "$CONTENTS/Info.plist"
+cp "$EXEC_PATH" "$MACOS/$EXEC_NAME"
+cp "$INFO_PLIST" "$CONTENTS/Info.plist"
 
-# BlackHole installers are no longer bundled — the app downloads the
-# latest release from GitHub at runtime when the user clicks
-# "Установить" in onboarding. See BundledBlackHoleInstaller.swift.
-
-# Optional signing
-if [ "${DEVELOPER_ID:-}" != "" ]; then
+# Optional Developer ID signing for unison; tap-benchmark always ad-hoc.
+if [ "$TARGET" = "unison" ] && [ "${DEVELOPER_ID:-}" != "" ]; then
   echo "Signing with $DEVELOPER_ID..."
   codesign --force \
     --sign "$DEVELOPER_ID" \
     --options runtime \
-    --entitlements Resources/Unison.entitlements \
+    --entitlements "$ENTITLEMENTS" \
     "$BUNDLE_DIR"
 else
-  echo "(Skipping signing — set DEVELOPER_ID env var to sign)"
-  # Ad-hoc sign so the binary at least loads on local machines
-  codesign --force --sign - --entitlements Resources/Unison.entitlements "$BUNDLE_DIR" 2>/dev/null || true
+  echo "(Ad-hoc signing)"
+  codesign --force --sign - --entitlements "$ENTITLEMENTS" "$BUNDLE_DIR" 2>/dev/null || true
 fi
 
 echo "Bundle ready: $BUNDLE_DIR"
