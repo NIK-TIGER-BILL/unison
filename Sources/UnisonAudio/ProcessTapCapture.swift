@@ -4,12 +4,13 @@ import Darwin
 import Foundation
 import UnisonDomain
 
-/// Captures audio output of a specific process via CoreAudio Process Tap
-/// (macOS 14.2+). Emits Float32 `AudioFrame`s at the tap's native sample
-/// rate over an `AsyncStream`, mirroring `BlackHoleSinkCapture`'s API.
+/// Captures system-wide audio output via CoreAudio Process Tap, excluding a
+/// set of processes by bundle ID (macOS 14.2+). Emits Float32 `AudioFrame`s
+/// at the tap's native sample rate over an `AsyncStream`, mirroring
+/// `BlackHoleSinkCapture`'s API.
 public final class ProcessTapCapture: @unchecked Sendable {
-    public let targetPID: pid_t
-    private var processObjectID: AudioObjectID = 0
+    public let excludedBundleIDs: [String]
+    private var processObjectIDs: [AudioObjectID] = []  // resolved at start()
     private var tapObjectID: AudioObjectID = 0
     private var aggregateDeviceID: AudioObjectID = 0
     private var ioProcID: AudioDeviceIOProcID?
@@ -17,8 +18,8 @@ public final class ProcessTapCapture: @unchecked Sendable {
     private var nativeSampleRate: Double = 48000
     private var started = false
 
-    public init(targetPID: pid_t) {
-        self.targetPID = targetPID
+    public init(excludedBundleIDs: [String] = []) {
+        self.excludedBundleIDs = excludedBundleIDs
     }
 
     public func start() -> AsyncStream<AudioFrame> {
@@ -27,7 +28,7 @@ public final class ProcessTapCapture: @unchecked Sendable {
             guard let self else { c.finish(); return }
             self.continuation = c
             do {
-                try self.resolveProcessObject()
+                self.resolveExcludedProcessObjects()
                 try self.createTap()
                 try self.createAggregateDevice()
                 try self.queryNativeSampleRate()
@@ -62,37 +63,29 @@ public final class ProcessTapCapture: @unchecked Sendable {
 
     // MARK: - Setup steps
 
-    private func resolveProcessObject() throws {
-        var pid = targetPID
-        var addr = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var outID: AudioObjectID = 0
-        var size: UInt32 = UInt32(MemoryLayout<AudioObjectID>.size)
-        // PID is passed as qualifier, the AudioObjectID of the process is returned as data.
-        let status = withUnsafeMutablePointer(to: &pid) { pidPtr -> OSStatus in
-            AudioObjectGetPropertyData(
-                AudioObjectID(kAudioObjectSystemObject),
-                &addr,
-                UInt32(MemoryLayout<pid_t>.size),
-                pidPtr,
-                &size,
-                &outID
-            )
+    private func resolveExcludedProcessObjects() {
+        var ids: [AudioObjectID] = []
+        // Always exclude ourselves to avoid feedback.
+        if let own = AudioProcessRegistry.processObjectID(forPID: getpid()) {
+            ids.append(own)
         }
-        try check(status, "TranslatePIDToProcessObject")
-        guard outID != kAudioObjectUnknown else {
-            throw ProcessTapError.processNotFound(pid: targetPID)
+        // Resolve each excluded bundle ID. Apps that aren't running OR
+        // haven't produced audio yet won't have an Audio Process Object —
+        // silently skip them; they can't appear in the system tap anyway.
+        for bundleID in excludedBundleIDs {
+            if let obj = AudioProcessRegistry.processObjectID(forBundleID: bundleID) {
+                ids.append(obj)
+            }
         }
-        processObjectID = outID
+        processObjectIDs = ids
     }
 
     private func createTap() throws {
-        let desc = CATapDescription(monoMixdownOfProcesses: [processObjectID])
+        let desc = CATapDescription(
+            monoGlobalTapButExcludeProcesses: processObjectIDs
+        )
         desc.isPrivate = true
-        desc.muteBehavior = .unmuted
+        desc.muteBehavior = .mutedWhenTapped
         let status = AudioHardwareCreateProcessTap(desc, &tapObjectID)
         try check(status, "AudioHardwareCreateProcessTap")
         guard tapObjectID != kAudioObjectUnknown else {
@@ -226,7 +219,7 @@ public final class ProcessTapCapture: @unchecked Sendable {
             AudioHardwareDestroyProcessTap(tapObjectID)
             tapObjectID = 0
         }
-        processObjectID = 0
+        processObjectIDs.removeAll()
     }
 
     // MARK: - Error helpers
@@ -240,7 +233,6 @@ public final class ProcessTapCapture: @unchecked Sendable {
 }
 
 public enum ProcessTapError: Error, CustomStringConvertible {
-    case processNotFound(pid: pid_t)
     case tapCreationFailed
     case aggregateCreationFailed
     case ioProcMissing
@@ -248,8 +240,6 @@ public enum ProcessTapError: Error, CustomStringConvertible {
 
     public var description: String {
         switch self {
-        case .processNotFound(let pid):
-            return "ProcessTap: no audio process for PID \(pid)"
         case .tapCreationFailed:       return "ProcessTap: tap creation returned no object"
         case .aggregateCreationFailed: return "ProcessTap: aggregate creation returned no object"
         case .ioProcMissing:           return "ProcessTap: IOProc not installed"

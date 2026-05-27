@@ -115,7 +115,7 @@ public final class BenchmarkRun {
     private func startCaptureTap() -> Task<[(UInt64, [Float], Int)], Error> {
         let toFloats = BenchmarkRun.framePCMtoFloats(_:)
         return Task { @Sendable in
-            let capture = ProcessTapCapture(targetPID: getpid())
+            let capture = ProcessTapCapture()  // empty excludedBundleIDs → tap system-wide except self
             var chunks: [(UInt64, [Float], Int)] = []
             for await frame in capture.start() {
                 let host = HostTimeClock.now()
