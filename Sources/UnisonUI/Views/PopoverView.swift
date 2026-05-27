@@ -48,8 +48,11 @@ public struct PopoverView: View {
             }
             // Timer + Stop stay visible across `.translating`/`.reconnecting`
             // flapping so the UI doesn't bounce; only this thin hint swaps in.
-            if vm.isReconnecting {
-                reconnectingHint
+            // Covers reconnect, .paused (network lost / awaiting), and the
+            // .translating × {slow, recovering} sub-states. Empty string
+            // collapses the row entirely so we don't reserve vertical space.
+            if !vm.statusText.isEmpty {
+                statusHint
             }
             if let reason = vm.state.errorValue {
                 ErrorRow(
@@ -247,12 +250,12 @@ public struct PopoverView: View {
         }
     }
 
-    private var reconnectingHint: some View {
+    private var statusHint: some View {
         HStack(spacing: 6) {
             ProgressView()
                 .controlSize(.small)
                 .scaleEffect(0.7)
-            Text("Переподключение…")
+            Text(vm.statusText)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }

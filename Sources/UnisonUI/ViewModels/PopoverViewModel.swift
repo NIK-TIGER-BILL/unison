@@ -37,6 +37,14 @@ public final class PopoverViewModel {
     /// touches this — `orchestrator.state` always wins when it exists.
     public var previewState: SessionState = .idle
 
+    /// Test-only override for the aggregate `ConnectivityHealth`. Read
+    /// by `connectivityHealth` only when no orchestrator is wired (i.e.
+    /// the VM was built via `previewing(...)`). `internal` (not
+    /// `private`) so snapshot tests reaching in via
+    /// `@testable import UnisonUI` can prime a state without driving the
+    /// real orchestrator.
+    var previewConnectivityHealth: ConnectivityHealth = .healthy
+
     /// Monotonic tick bumped whenever the *environment* changes —
     /// device list, BlackHole install, mic permission grant. The
     /// `startBlockedReason` computation reads it (via `_ = envTick`)
@@ -93,17 +101,29 @@ public final class PopoverViewModel {
         settings: Settings = .default,
         state: SessionState = .idle,
         permissions: any PermissionsService,
-        deviceRegistry: any AudioDeviceRegistry
+        deviceRegistry: any AudioDeviceRegistry,
+        connectivityHealth: ConnectivityHealth = .healthy
     ) -> PopoverViewModel {
-        PopoverViewModel(
+        let vm = PopoverViewModel(
             permissions: permissions,
             deviceRegistry: deviceRegistry,
             settings: settings,
             previewState: state
         )
+        vm.previewConnectivityHealth = connectivityHealth
+        return vm
     }
 
     public var state: SessionState { orchestrator?.state ?? previewState }
+
+    /// Aggregate connectivity health, read from the orchestrator when
+    /// available, falls back to the preview override otherwise. The UI
+    /// only surfaces this when `state == .translating` (the other states
+    /// already speak for themselves); the view-model still keeps the
+    /// fallback so the property is well-defined in every state.
+    public var connectivityHealth: ConnectivityHealth {
+        orchestrator?.connectivityHealth ?? previewConnectivityHealth
+    }
 
     public var languagePairDisplay: String {
         let mine = settings.languagePair.mine
@@ -177,6 +197,53 @@ public final class PopoverViewModel {
         case active
         case warn
         case error
+    }
+
+    /// Human-readable status line shown below the timer / primary
+    /// button. Empty string means "no secondary line at all" — the row
+    /// collapses entirely in that case so we don't reserve vertical
+    /// space for an unused hint.
+    ///
+    /// Exhaustively covers every `SessionState`; `.translating`
+    /// additionally branches on `connectivityHealth` for the slow /
+    /// recovery surface.
+    public var statusText: String {
+        switch state {
+        case .idle, .connecting, .error:
+            return ""
+        case .reconnecting:
+            return "Переподключение…"
+        case .paused(_, _, _, .networkLost):
+            return "Нет интернета. Ждём…"
+        case .paused(_, _, _, .awaitingNetwork):
+            return "Возобновляем…"
+        case .translating:
+            switch connectivityHealth {
+            case .slow: return "Медленная сеть"
+            case .recovering: return "Связь восстановлена"
+            case .healthy: return ""
+            }
+        }
+    }
+
+    /// `StatusDot.State` derived from `state × connectivityHealth`.
+    /// Decoupled from `statusKind` so the view can drive the secondary
+    /// dot (in the future control pill / banner) without re-deriving
+    /// state on its own.
+    public var statusDotState: StatusDot.State {
+        switch state {
+        case .idle: return .ready
+        case .connecting: return .active
+        case .reconnecting: return .warn
+        case .paused: return .paused
+        case .error: return .warn
+        case .translating:
+            switch connectivityHealth {
+            case .slow: return .warn
+            case .recovering: return .recovering
+            case .healthy: return .active
+            }
+        }
     }
 
     /// Title for the primary action button.

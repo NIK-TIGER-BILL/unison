@@ -285,3 +285,61 @@ func popoverVM_isReconnecting_trueOnlyDuringReconnecting() {
     let errored = PopoverViewModel.previewing(state: .error(.networkLost), permissions: perms, deviceRegistry: registry)
     #expect(errored.isReconnecting == false)
 }
+
+// MARK: - statusText / statusDotState (T11)
+
+@MainActor
+@Test func popoverVM_pausedNetworkLost_statusText() {
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
+    let started = nowDate()
+    let preview = PopoverViewModel.previewing(
+        settings: .default,
+        state: .paused(mode: .call, since: nowDate(), startedAt: started, reason: .networkLost),
+        permissions: perms,
+        deviceRegistry: registry
+    )
+    #expect(preview.statusText == "Нет интернета. Ждём…")
+    #expect(preview.statusDotState == .paused)
+}
+
+@MainActor
+@Test func popoverVM_translatingSlow_statusText() {
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
+    let started = nowDate()
+    let preview = PopoverViewModel.previewing(
+        settings: .default,
+        state: .translating(mode: .call, startedAt: started),
+        permissions: perms,
+        deviceRegistry: registry,
+        connectivityHealth: .slow
+    )
+    #expect(preview.statusText == "Медленная сеть")
+    #expect(preview.statusDotState == .warn)
+}
+
+@MainActor
+@Test func popoverVM_translatingHealthy_statusText_empty() {
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
+    let started = nowDate()
+    let preview = PopoverViewModel.previewing(
+        settings: .default,
+        state: .translating(mode: .call, startedAt: started),
+        permissions: perms,
+        deviceRegistry: registry,
+        connectivityHealth: .healthy
+    )
+    #expect(preview.statusText == "")
+    #expect(preview.statusDotState == .active)
+}
