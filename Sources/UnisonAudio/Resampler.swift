@@ -42,6 +42,15 @@ public enum Resampler {
             fatalError("resampleFloat32 expects .float32 input")
         }
         if frame.sampleRate == targetSampleRate { return frame }
+        // Empty frames slip through from AVAudioEngine on cold start of the mic
+        // capture (the engine emits a 0-length buffer before the first real
+        // chunk). AVAudioPCMBuffer(frameCapacity: 0) returns nil, so the
+        // force-unwrap below crashed with SIGTRAP. Pass empties through with a
+        // re-tagged sample rate so the wire-format step doesn't see a stale rate.
+        if frame.sampleCount == 0 {
+            return AudioFrame(pcm: Data(), sampleRate: targetSampleRate,
+                              channels: frame.channels, format: .float32)
+        }
 
         let srcFmt = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                    sampleRate: Double(frame.sampleRate),
