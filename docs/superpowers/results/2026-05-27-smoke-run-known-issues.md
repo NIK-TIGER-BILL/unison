@@ -11,125 +11,129 @@ and the infrastructure works end-to-end:
   (launched via `launchctl asuser`)
 - Both phases (BlackHole, Tap) execute and emit a report and JSON
 
-What does **not** work yet — signal acquisition. Across host runs and VM
-runs:
+What does **not** work yet — signal acquisition produces zero usable
+clicks across all configurations tried.
 
-| Phase     | Symptom                                                           |
-| --------- | ----------------------------------------------------------------- |
-| BlackHole | `BlackHoleSinkCapture` emits **0 chunks** — its installTap never fires |
-| Tap       | `ProcessTapCapture` emits chunks at the expected rate (~98/s) but **every sample is 0.0** |
+## Findings from the debugging session
 
-Both phases report 100% drop rate as a consequence.
-
-## Root causes (verified during follow-up debugging session)
-
-### 1. BlackHole side — AVAudioEngine doesn't push to a manually-bound device
+### 1. AVAudioEngine output device binding is broken
 
 Setting `kAudioOutputUnitProperty_CurrentDevice` on
 `AVAudioEngine.outputNode.audioUnit` is accepted (readback confirms the
 new device ID) but the engine renders into the system default device,
-not the bound one. **Verified by isolation test**: a fresh AVAudioEngine
-output bound to BlackHole 16ch + a fresh AVAudioEngine input bound to
-BlackHole 16ch → 0 chunks (`/tmp/test-bh-output.swift`).
+not the bound one. **Verified by isolation test**
+(`/tmp/test-bh-output.swift`): a fresh AVAudioEngine output bound to
+BlackHole 16ch + a fresh AVAudioEngine input bound to the same → 0
+chunks delivered.
 
-The default-output swap workaround (set the system default to BlackHole
-16ch for the BlackHole phase) introduces a second regression: with BH
+Default-output-swap workaround introduces a second regression: with BH
 16ch as default, `engine.inputNode.outputFormat(0)` shifts from
 `1ch / 48000 Hz / Float32` to `2ch / 44100 Hz / Float32 deinterleaved`,
-which `installTap(format:)` rejects with `'Failed to create tap due to
-format mismatch'`.
+which `installTap(format:)` rejects with `Failed to create tap due to
+format mismatch`.
 
-**Replacing the AVAudioEngine-based output with raw AUHAL works** for
-writing to BlackHole 16ch (`AUHALSignalGenerator` in this branch, render
-callback fires at 512 frames/chunk). But BlackHoleSinkCapture still
-captures 0 chunks when AUHAL is the source.
+### 2. Raw AUHAL output to a specific device works
 
-Hypothesis: a single process with **both** an AUHAL output unit and an
-AVAudioEngine.inputNode bound to the same HAL device causes CoreAudio
-to silently fail one of them. Production usage is safe because the
-producer (Zoom) and the consumer (Unison) are different processes; the
-benchmark's same-process test is the unsupported case.
+`AUHALSignalGenerator` (in this branch) uses
+`kAudioUnitSubType_HALOutput` + `kAudioOutputUnitProperty_CurrentDevice`
++ render callback. **Render callback fires reliably** (verified at 512
+frames per callback). This is the path production code would use for
+per-device output.
 
-### 2. Tap side — ad-hoc bundles don't get a persistent TCC grant
+### 3. Raw AUHAL input also works, with caveats
 
-Apple's Process Tap requires a TCC audio-capture grant. Verified via
-the system log:
+`AUHALInputCapture` (in this branch) sets up an AUHAL input scope, binds
+to BlackHole 16ch, and pulls samples through `AudioUnitRender` in the
+input callback. Callbacks **do fire**, but two caveats observed:
+
+- **Throughput is partial**: ~80 chunks of 512 samples each over 4.5s
+  of capture, total ~0.85s of audio. The remaining time is dropped.
+  Root cause: the input callback runs on the realtime audio thread, and
+  we allocate a `[Float]` and append to a locked array per callback —
+  realtime-unsafe, the OS aborts or skips work to keep the audio
+  schedule. A production-quality fix uses a lockless ring buffer
+  pre-allocated up-front and a separate consumer thread.
+- **Loopback amplitude is attenuated**: BH 16ch round-trip peak was
+  ~0.09 from a 0.7-amplitude click train. Suspicion: BlackHole 16ch's
+  internal channel routing/mixing reduces per-channel amplitude when
+  the source is mono but the device exposes 16 channels — the click
+  energy spreads or attenuates. Easiest fix: write a full 16-channel
+  click (replicate the mono sample across all channels) or accept the
+  amplitude and lower the PeakDetector threshold.
+
+### 4. Process Tap silently denied for ad-hoc bundles
+
+Apple's Process Tap requires a TCC audio-capture grant. From the
+system log (`/usr/bin/log show --predicate "subsystem CONTAINS TCC"`):
 
 ```
-tccd: [com.apple.TCC:access] -[TCCDAccessIdentity matchesCodeRequirement:]
-    SecStaticCodeCheckValidity() static code from com.unison.tapbench :
-    anchor apple; status: -67050
+tccd: SecStaticCodeCheckValidity() static code from com.unison.tapbench
+    : anchor apple; status: -67050
 tccd: For com.unison.tapbench: matches platform requirements: No
 …
 tccd: ReqResult(Auth Right: Allowed (User Consent), DB Action: None)
 ```
 
-Two pieces of bad news:
-
 - `matches platform requirements: No` — the ad-hoc signature does not
-  satisfy "anchor apple", so TCC cannot trust the bundle's identity.
-- `DB Action: None` — even if the user clicks Allow on the prompt, the
-  grant is not persisted to the TCC database, so the next run prompts
-  again.
+  satisfy "anchor apple"; TCC cannot trust the bundle identity.
+- `DB Action: None` — even when the user clicks Allow, the grant is
+  not persisted. Next launch re-prompts.
 
-Result: ProcessTap captures chunks but every sample is silence —
-CoreAudio honors the unverified entitlement enough to deliver buffers
-but the per-process audio is muted on the tap path.
+Result: `ProcessTapCapture` IOProc fires and delivers chunks at the
+expected rate, but every sample is 0.0 — CoreAudio honors the
+unverified entitlement enough to deliver buffers but mutes the per-
+process audio.
 
-This is **not fixable in the prototype** without one of:
+Additionally, when the benchmark is launched as a child of Claude Code
+(directly or through `osascript`/`open`), TCC traces the responsibility
+chain to `com.anthropic.claude-code` and prompts for *Claude Code's*
+access rather than the benchmark's. Cleanest reproduction is launching
+the .app from Finder by double-click.
 
-- Signing the bundle with a real Apple Developer ID (then TCC trusts
-  the identity and the grant persists). Requires the user's Developer
-  ID Application certificate.
-- Manually inserting into `TCC.db` with Full Disk Access, which the
-  agent does not have.
-- Running with TCC enforcement disabled in Recovery / DEBUG mode.
-
-A related complication when running from inside Claude Code: TCC
-attributes the responsibility chain back to `com.anthropic.claude-code`
-as the "responsible" parent, even when the child binary is launched
-through `osascript` / `open`. This means the prompt shown to the user
-is for Claude Code's access, not the benchmark's.
-
-## What's solid in the prototype
+## What's solid
 
 - `HostTimeClock`, `PeakDetector`, `MetricsCalculator`, `Report` — pure
   logic, 21 unit tests, all pass
 - `ProcessTapCapture` lifecycle — IOProc installs, fires, tears down
   cleanly (silent samples are a TCC denial, not a code bug)
-- `CPUSampler` — produces sensible CPU% (1–4% in idle phases)
-- `AUHALSignalGenerator` — raw AUHAL render to a chosen device, render
-  callback fires; demonstrates per-device output works
+- `CPUSampler` — produces sensible CPU%
+- `AUHALSignalGenerator` — raw AUHAL render, fires reliably
+- `AUHALInputCapture` — raw AUHAL capture, fires (modulo realtime-
+  unsafe allocator dropping chunks)
 - VM driver script — boots VM, deploys, runs, collects JSON, stops VM;
   state-aware (handles stale `tart ip` after the VM stopped)
 - Bundle workflow — `bundle_app.sh --target tap-benchmark` produces a
   signed .app with the right entitlements, survives the in-VM re-sign
   with `--preserve-metadata=entitlements`
 
-## What's left to actually measure
+## What's needed to get real numbers
 
-The infrastructure is ready; signal acquisition needs ~1–2 days of
-focused work along one of these axes:
+1. **Lockless ring buffer in `AUHALInputCapture`** — replace the
+   per-callback `Array.append` with a pre-allocated `UnsafeMutableBufferPointer`
+   ring written from the audio thread and drained from a consumer task.
+   Closes the partial-throughput gap.
 
-1. **Replace `BlackHoleSinkCapture` for the benchmark** with a raw AUHAL
-   input reader that reads from BlackHole 16ch (mirroring
-   `AUHALSignalGenerator`'s approach for output). This removes the
-   AVAudioEngine in-process conflict and gives a clean BlackHole
-   latency measurement. Production `BlackHoleSinkCapture` stays
-   unchanged — the benchmark reads through its own path.
+2. **16-channel click in `AUHALSignalGenerator`** — emit identical
+   samples on all 16 channels of BH 16ch rather than mono. Verify
+   loopback amplitude reaches ~0.7. Or measure the attenuation
+   coefficient empirically and adjust the PeakDetector threshold.
 
-2. **Sign with Developer ID** to unblock the Tap side. Set
-   `DEVELOPER_ID` env var when running `bundle_app.sh --target
-   tap-benchmark`. The Tap chunks should then contain real audio.
+3. **Developer ID signing for the .app bundle** — set `DEVELOPER_ID`
+   env var before `bundle_app.sh --target tap-benchmark`. Without it,
+   Process Tap captures silence regardless of the source. Until this
+   is in place, the Tap phase can't be measured at all.
 
-Once both are done, the benchmark produces real numbers and the
-prototype's success criteria (median latency, jitter, drop rate, CPU,
-setup-friendly check, Zoom sanity) become measurable.
+4. **Direct Finder launch (or proper TCC seed)** in the VM, so the
+   responsibility chain doesn't lead back to Claude Code.
 
-Until then: the prototype's value is the **infrastructure** (build,
-deploy, isolate, measure surface, report) and the **negative results**
-documented here. The original architectural question — "Is Process Tap
-faster/easier than BlackHole?" — is **not yet answered** by this
-measurement attempt, but the question's tractability is unchanged: once
-the signal path is fixed, the same scaffolding will produce verdict
-numbers in minutes.
+Items 1+2 unblock BlackHole measurement on the host (in 1-2 hours of
+careful CoreAudio work). Item 3 unblocks Tap measurement (Developer ID
+certificate availability is the bottleneck). Item 4 is procedural.
+
+## Bottom line
+
+The prototype is a complete, working scaffold that didn't reach signal
+acquisition in the time available. The original architectural question
+— "Is Process Tap better than BlackHole 16ch?" — is unanswered by this
+measurement attempt, but the unanswered-ness is now well-bounded: every
+remaining obstacle is identified and has a known fix.

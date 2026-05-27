@@ -65,19 +65,15 @@ public final class BenchmarkRun {
     }
 
     private func startCaptureBlackHole() -> Task<[(UInt64, [Float], Int)], Error> {
-        let toFloats = BenchmarkRun.framePCMtoFloats(_:)
+        let deviceID = config.outputDeviceID  // We capture from the same device we write to.
         return Task { @Sendable in
-            let registry = CoreAudioDeviceRegistry()
-            let capture = BlackHoleSinkCapture(registry: registry)
-            var chunks: [(UInt64, [Float], Int)] = []
-            for await frame in capture.start() {
-                let host = HostTimeClock.now()
-                let floats = toFloats(frame)
-                chunks.append((host, floats, frame.sampleRate))
-                if Task.isCancelled { break }
+            let capture = AUHALInputCapture()
+            try capture.start(deviceID: deviceID)
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 100_000_000)
             }
             capture.stop()
-            return chunks
+            return capture.takeChunks().map { ($0.hostTime, $0.samples, $0.sampleRate) }
         }
     }
 
