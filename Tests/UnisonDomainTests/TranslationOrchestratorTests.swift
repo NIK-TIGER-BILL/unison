@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import UnisonDomain
 
@@ -563,4 +564,60 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
 
     let preserved = o.state.sessionStartedAt
     #expect(preserved == originalStartedAt, "Timer must not reset on reconnect — got \(String(describing: preserved)), expected \(originalStartedAt)")
+}
+
+// MARK: - ConnectivityHealth per-stream tracking
+
+@Test @MainActor func orchestrator_initialHealth_isHealthy() {
+    let o = makeOrchestrator()
+    #expect(o.connectivityHealth == .healthy)
+}
+
+@Test @MainActor func orchestrator_micFramesAudible_noDelta_3s_marksSlow() async throws {
+    let mic = MockMicrophoneCapture()
+    let factory = MockTranslationStreamFactory()
+    let clock = ManualClock()
+    let o = makeOrchestrator(mic: mic, factory: factory, clock: clock)
+    await o.start(mode: .test, languages: .default)
+    try? await Task.sleep(nanoseconds: 50_000_000)
+
+    // Audible mic frame (RMS > 0.001 because samples are non-zero)
+    let pcm = Data(repeating: 0x40, count: 4 * 4_800)  // 4800 float32 samples
+    let frame = AudioFrame(pcm: pcm, sampleRate: 48_000, channels: 1, format: .float32)
+    mic.emit(frame)
+    try? await Task.sleep(nanoseconds: 100_000_000)
+
+    // Advance time past the 3 s slow threshold without any delta arriving.
+    clock.advance(by: 3.5)
+    try? await Task.sleep(nanoseconds: 100_000_000)
+
+    #expect(o.connectivityHealth == .slow)
+}
+
+@Test @MainActor func orchestrator_deltaArrival_clearsSlow() async throws {
+    let mic = MockMicrophoneCapture()
+    let factory = MockTranslationStreamFactory()
+    let clock = ManualClock()
+    let o = makeOrchestrator(mic: mic, factory: factory, clock: clock)
+    await o.start(mode: .test, languages: .default)
+    try? await Task.sleep(nanoseconds: 50_000_000)
+
+    let pcm = Data(repeating: 0x40, count: 4 * 4_800)
+    mic.emit(AudioFrame(pcm: pcm, sampleRate: 48_000, channels: 1, format: .float32))
+    // Give the mic frame time to propagate through the capture
+    // pipeline (task1 → MainActor.run → markMicFrameReceived) before
+    // advancing time. Without this yield, the slow-detection
+    // iteration that fires on advance can race ahead of the mic
+    // frame and see `lastAudibleMicAt == nil`, never marking slow.
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    clock.advance(by: 3.5)
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    #expect(o.connectivityHealth == .slow)
+
+    // Simulate a delta arriving on the me-stream.
+    factory.streams[.me]?.emitTranscript(
+        TranscriptDelta(entryId: UUID(), speaker: .me, kind: .original, text: "ок", isFinal: false)
+    )
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    #expect(o.connectivityHealth == .healthy)
 }

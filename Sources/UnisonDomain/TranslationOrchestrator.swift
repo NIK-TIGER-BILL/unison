@@ -16,6 +16,49 @@ public final class TranslationOrchestrator {
             Self.log.info("state \(String(describing: oldValue)) → \(String(describing: self.state))")
         }
     }
+
+    /// Orthogonal QoS dimension published alongside `state`. UI binds
+    /// to this for the per-stream status indicator (popover dot, pill
+    /// hint, transcript banner). Only meaningful while `state ==
+    /// .translating`; the other states (`.paused`, `.reconnecting`,
+    /// `.error`) already speak for themselves.
+    public private(set) var connectivityHealth: ConnectivityHealth = .healthy {
+        didSet {
+            Self.log.info("connectivityHealth \(String(describing: oldValue)) → \(String(describing: self.connectivityHealth))")
+        }
+    }
+
+    /// Per-stream health. UI reads the aggregate via
+    /// `connectivityHealth`; the diagnostic dialog reads per-speaker for
+    /// asymmetric-failure debugging.
+    private var healthBySpeaker: [Speaker: ConnectivityHealth] = [:]
+
+    /// `clock.now()` of the most recent delta (input / output / audio)
+    /// per speaker. The slow-detection watchdog measures from here.
+    private var lastDeltaAtBySpeaker: [Speaker: Date] = [:]
+    /// `clock.now()` of the most recent mic frame whose RMS was above the
+    /// audible threshold (0.001). Slow only fires when the user is
+    /// actually speaking — pure silence is *not* a network problem.
+    private var lastAudibleMicAt: Date?
+
+    /// Task driving the slow-detection scan. Restarted on every
+    /// session start / reconnect. Cancelled on stop.
+    private var slowDetectionTask: Task<Void, Never>?
+
+    private static let slowThresholdSeconds: TimeInterval = 3
+    private static let slowCheckIntervalSeconds: TimeInterval = 0.5
+    private static let micAudibleRMSThreshold: Float = 0.001
+    /// How long after the most recent audible mic frame the user is
+    /// still considered "speaking" for the purpose of the slow check.
+    /// Wider than `slowThresholdSeconds` so the watchdog catches the
+    /// scenario "user said one phrase, then waited 3+ s for the
+    /// translation that never arrived" — in that scenario, by the time
+    /// we mark slow the last audible frame is already 3 s in the past,
+    /// so a 1 s window would never fire. The grace beyond
+    /// `slowThresholdSeconds` keeps us from over-firing in the
+    /// opposite direction (long sessions of pure silence).
+    private static let userSpeakingWindowSeconds: TimeInterval = 4
+
     public let transcript: TranscriptStore
 
     private let micCapture: any MicrophoneCapture
@@ -230,6 +273,18 @@ public final class TranslationOrchestrator {
         anyMicFrameThisSession = false
         anyServerDeltaThisSession = false
         state = .translating(mode: mode, startedAt: startedAt)
+        // Seed per-stream connectivity health for whichever streams
+        // this mode actually opens. The slow-detection loop iterates
+        // only over speakers that have a live stream, so seeding the
+        // dictionary here also acts as the "is this stream tracked"
+        // gate.
+        healthBySpeaker = [:]
+        if mode == .call || mode == .test { healthBySpeaker[.me] = .healthy }
+        if mode == .call || mode == .listen { healthBySpeaker[.peer] = .healthy }
+        lastDeltaAtBySpeaker = [:]
+        lastAudibleMicAt = nil
+        connectivityHealth = .healthy
+        startSlowDetectionLoop()
         observeDeviceChanges()
         armNoDataWatchdog()
         Self.log.info("start() — translating session active")
@@ -282,6 +337,11 @@ public final class TranslationOrchestrator {
     /// this so support can see at a glance whether the mic was
     /// physically picking up sound when the user "spoke".
     func markMicFrameReceived(format: String = "?", sampleRate: Int = 0, rms: Float = 0) {
+        // Slow detection: stamp the most recent audible mic frame so
+        // the watchdog only fires when the user is actually speaking.
+        if rms >= Self.micAudibleRMSThreshold {
+            lastAudibleMicAt = clock.now()
+        }
         guard !anyMicFrameThisSession else { return }
         anyMicFrameThisSession = true
         Self.log.info("first mic frame — format=\(format) sampleRate=\(sampleRate)Hz rms=\(String(format: "%.5f", rms))")
@@ -310,6 +370,99 @@ public final class TranslationOrchestrator {
         anyServerDeltaThisSession = true
         cancelNoDataWatchdog()
         Self.log.info("first server delta received — no-data watchdog disarmed")
+    }
+
+    /// Called by every server-delta callsite (audio + transcript on
+    /// both me / peer streams). Records the arrival time and, if the
+    /// speaker was previously `.slow`, flips it back to `.healthy`
+    /// and recomputes the published aggregate. Must be called BEFORE
+    /// `markFirstDataReceived()` so the order matches the test
+    /// expectation that a delta produces `.healthy` immediately.
+    private func recordDeltaArrival(speaker: Speaker) {
+        lastDeltaAtBySpeaker[speaker] = clock.now()
+        if healthBySpeaker[speaker] != .healthy {
+            healthBySpeaker[speaker] = .healthy
+            recomputeAggregateHealth()
+        }
+    }
+
+    private func recomputeAggregateHealth() {
+        let values = Array(healthBySpeaker.values)
+        let aggregate: ConnectivityHealth
+        switch values.count {
+        case 0: aggregate = .healthy
+        case 1: aggregate = ConnectivityHealth.aggregate(values[0])
+        default: aggregate = values.reduce(.healthy, ConnectivityHealth.aggregate)
+        }
+        if aggregate != connectivityHealth {
+            connectivityHealth = aggregate
+        }
+    }
+
+    /// Periodic slow-detection scan. For each speaker with an active
+    /// stream, if the user has been audibly speaking in the recent
+    /// past AND no delta has arrived from that speaker's stream in
+    /// `slowThresholdSeconds`, mark the speaker as `.slow`. The loop
+    /// runs every 0.5 s — finer than the threshold so we catch the
+    /// transition with at most a half-second lag.
+    private func startSlowDetectionLoop() {
+        slowDetectionTask?.cancel()
+        let clock = self.clock
+        slowDetectionTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await clock.sleep(for: Self.slowCheckIntervalSeconds)
+                guard let self else { return }
+                self.evaluateSlowDetection()
+            }
+        }
+    }
+
+    private func stopSlowDetectionLoop() {
+        slowDetectionTask?.cancel()
+        slowDetectionTask = nil
+    }
+
+    private func evaluateSlowDetection() {
+        guard case .translating = state else { return }
+        let now = clock.now()
+        let userIsSpeaking: Bool = {
+            guard let last = lastAudibleMicAt else { return false }
+            return now.timeIntervalSince(last) < Self.userSpeakingWindowSeconds
+        }()
+        guard userIsSpeaking else { return }
+        var changed = false
+        for speaker in [Speaker.me, Speaker.peer] {
+            let hasStream: Bool
+            switch speaker {
+            case .me: hasStream = meStream != nil
+            case .peer: hasStream = peerStream != nil
+            }
+            guard hasStream else { continue }
+            // No delta yet: the session just started but we're already
+            // past the audibility threshold (user is speaking). Measure
+            // staleness from the session start by treating "no delta
+            // yet" as "delta was never delivered" — if the user has
+            // been speaking for `slowThresholdSeconds` without any
+            // server response, that IS slow.
+            let lastDelta = lastDeltaAtBySpeaker[speaker]
+            let stale: Bool
+            if let lastDelta {
+                stale = now.timeIntervalSince(lastDelta) >= Self.slowThresholdSeconds
+            } else if let firstAudible = lastAudibleMicAt {
+                // The session's been running long enough that the
+                // user was audible >= slowThresholdSeconds ago but
+                // the server hasn't said anything yet. That's slow.
+                stale = now.timeIntervalSince(firstAudible) >= Self.slowThresholdSeconds
+            } else {
+                stale = false
+            }
+            let target: ConnectivityHealth = stale ? .slow : (healthBySpeaker[speaker] ?? .healthy)
+            if healthBySpeaker[speaker] != target {
+                healthBySpeaker[speaker] = target
+                changed = true
+            }
+        }
+        if changed { recomputeAggregateHealth() }
     }
 
     private func observeDeviceChanges() {
@@ -626,6 +779,11 @@ public final class TranslationOrchestrator {
     private func stopAllStreams() async {
         cancelReconnectWatchdog()
         cancelNoDataWatchdog()
+        stopSlowDetectionLoop()
+        healthBySpeaker = [:]
+        lastDeltaAtBySpeaker = [:]
+        lastAudibleMicAt = nil
+        connectivityHealth = .healthy
         for t in globalTasks { t.cancel() }
         for (_, tasks) in pipelineTasksBySpeaker {
             for t in tasks { t.cancel() }
@@ -745,7 +903,10 @@ public final class TranslationOrchestrator {
                     // the stream's handle()) means we mark "we
                     // actually delivered data" rather than just "we
                     // parsed an event".
-                    await MainActor.run { self?.markFirstDataReceived() }
+                    await MainActor.run { [weak self] in
+                        self?.recordDeltaArrival(speaker: .me)
+                        self?.markFirstDataReceived()
+                    }
                     resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
                 }
                 resampledContinuation.finish()
@@ -765,6 +926,7 @@ public final class TranslationOrchestrator {
         }
         let task3 = Task { @MainActor [transcript, stream, weak self] in
             for await d in stream.transcripts {
+                self?.recordDeltaArrival(speaker: .me)
                 self?.markFirstDataReceived()
                 transcript.apply(d)
             }
@@ -806,7 +968,10 @@ public final class TranslationOrchestrator {
             }
             let pump = Task {
                 for await wireFrame in stream.output {
-                    await MainActor.run { self?.markFirstDataReceived() }
+                    await MainActor.run { [weak self] in
+                        self?.recordDeltaArrival(speaker: .peer)
+                        self?.markFirstDataReceived()
+                    }
                     resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
                 }
                 resampledContinuation.finish()
@@ -819,6 +984,7 @@ public final class TranslationOrchestrator {
         }
         let transcripts = Task { @MainActor [transcript, stream, weak self] in
             for await d in stream.transcripts {
+                self?.recordDeltaArrival(speaker: .peer)
                 self?.markFirstDataReceived()
                 transcript.apply(d)
             }
