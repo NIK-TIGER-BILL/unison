@@ -433,7 +433,7 @@ public final class TranslationOrchestrator {
                     // is included so a second speaker's mid-reconnect
                     // failure still triggers its own retry cycle.
                     switch self.state {
-                    case .translating, .reconnecting:
+                    case .translating, .paused, .reconnecting:
                         await self.handleStreamFailure(
                             error: err,
                             speaker: speaker,

@@ -356,7 +356,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         switch state {
         case .idle:
             target = .idle
-        case .connecting, .translating:
+        case .connecting, .translating, .paused:
             target = .active
         case .reconnecting:
             // Treat reconnect as a degraded active for v1 — the design
