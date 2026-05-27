@@ -1,46 +1,37 @@
 import CoreAudio
 import Darwin
 import Foundation
+import UnisonDomain
 
 /// One-shot helper for nudging macOS to display the TCC audio-capture
 /// prompt. Used by onboarding when the user clicks "Разрешить".
 ///
 /// macOS does not expose a public API to query the current
 /// `kTCCServiceAudioCapture` status, so this function does not return
-/// whether the user granted access. It returns once the throwaway tap
-/// has been created (which is what triggers the prompt). The actual
-/// verification of "granted vs denied" happens at first translation
-/// Start via the silent-frame watchdog — see `SilentFrameWatchdog`.
+/// whether the user granted access. It runs a brief full ProcessTap
+/// lifecycle (create + aggregate device + IOProc + start) to engage
+/// TCC — `AudioHardwareCreateProcessTap` alone, or with an empty
+/// exclusion list, returns success without prompting because TCC only
+/// engages when the tap actually becomes operational via an
+/// AggregateDevice + IOProcID + AudioDeviceStart chain.
 public enum AudioCapturePermission {
+    /// Triggers the macOS TCC `kTCCServiceAudioCapture` prompt by
+    /// running a full ProcessTap lifecycle on a system-wide global
+    /// tap, then immediately tearing it down.
     public static func triggerPrompt() {
-        // Translate own PID to Audio Process Object.
-        var pid = getpid()
-        var addr = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyTranslatePIDToProcessObject,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var size = UInt32(MemoryLayout<AudioObjectID>.size)
-        var processObj: AudioObjectID = 0
-        let translateStatus = withUnsafeMutablePointer(to: &pid) { pidPtr in
-            AudioObjectGetPropertyData(
-                AudioObjectID(kAudioObjectSystemObject), &addr,
-                UInt32(MemoryLayout<pid_t>.size), pidPtr,
-                &size, &processObj
-            )
+        let capture = ProcessTapCapture(excludedBundleIDs: [])
+        // Subscribe to the stream so the start() chain runs to completion
+        // (create tap → aggregate device → IOProc → AudioDeviceStart). The
+        // AudioDeviceStart call is what engages TCC.
+        let stream = capture.start()
+        // Drain the stream concurrently and discard frames — TCC engages
+        // on AudioDeviceStart, not on frame consumption.
+        Task.detached {
+            for await _ in stream { /* discard */ }
         }
-        guard translateStatus == noErr, processObj != kAudioObjectUnknown else { return }
-
-        // Create a tap on ourselves — this is what triggers the TCC prompt
-        // for `kTCCServiceAudioCapture`. The tap is destroyed immediately.
-        let desc = CATapDescription(monoMixdownOfProcesses: [processObj])
-        desc.isPrivate = true
-        desc.muteBehavior = .unmuted
-
-        var tapID: AudioObjectID = 0
-        _ = AudioHardwareCreateProcessTap(desc, &tapID)
-        if tapID != 0 {
-            AudioHardwareDestroyProcessTap(tapID)
-        }
+        // Give TCC time to deliver its prompt to the user. macOS's prompt
+        // appears asynchronously after AudioDeviceStart returns.
+        Thread.sleep(forTimeInterval: 0.3)
+        capture.stop()
     }
 }

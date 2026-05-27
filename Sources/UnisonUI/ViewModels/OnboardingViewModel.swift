@@ -48,6 +48,8 @@ public struct OnboardingStep: Identifiable, Sendable {
 @MainActor
 @Observable
 public final class OnboardingViewModel {
+    static let log = UnisonLog(category: "OnboardingViewModel")
+
     private let permissions: any PermissionsService
     private let installer: any BlackHoleInstaller
     private let keychain: any KeychainService
@@ -280,22 +282,15 @@ public final class OnboardingViewModel {
     /// the silent-frame watchdog and surfaces a banner with a System Settings
     /// deep link.
     public func requestAudioCapturePermission() async {
+        Self.log.info("requestAudioCapturePermission() called")
         audioCaptureStatus = .inProgress
         refreshOverallBlackHoleStatus()
-        // macOS does not display the TCC prompt for LSUIElement apps unless
-        // the app is the frontmost activator at the moment of the request.
-        // Without this activation the AUTHREQ_PROMPTING log line fires but
-        // no user-visible dialog appears (verified in TCC log on 26.x).
         await MainActor.run {
             NSApp.activate(ignoringOtherApps: true)
         }
-        // Brief settle so the activation propagates before TCC delivers the
-        // prompt to SystemUIServer.
         try? await Task.sleep(nanoseconds: 100_000_000)
-        AudioCapturePermission.triggerPrompt()
-        // Give the user time to see and respond to the TCC dialog. We can't
-        // query the resulting state via public API, so we optimistically mark
-        // complete after the dialog is dismissed.
+        let status = AudioCapturePermission.triggerPrompt()
+        Self.log.info("AudioCapturePermission.triggerPrompt() returned OSStatus=\(status)")
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         audioCaptureStatus = .done
         refresh()
