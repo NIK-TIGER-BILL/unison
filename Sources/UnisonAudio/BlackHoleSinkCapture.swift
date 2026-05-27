@@ -122,20 +122,14 @@ public final class BlackHoleSinkCapture: PeerAudioCapture, @unchecked Sendable {
         // the same engine-connect fix was never replicated here.
         let mainMixer = engine.mainMixerNode
         mainMixer.outputVolume = 0  // mute the loopback BEFORE connecting
-        engine.connect(input, to: mainMixer, format: format)
-        Self.log.info("startTap — connected inputNode → mainMixerNode (volume=0, no loopback)")
-
-        // `prepare()` walks the graph and pre-allocates AUHAL state.
-        // Optional in theory but on macOS 26 it noticeably reduces
-        // the chance of the first tap callback being delayed by
-        // hundreds of ms while the engine cold-starts.
-        engine.prepare()
-
-        // Buffer size matches `AVAudioEngineMicrophone` from the same
-        // era (1024 frames ≈ 21ms at 48kHz). Apple's docs hint at
-        // smaller buffers being more reliable for first-callback
-        // delivery on macOS 26. Still well inside the OpenAI batcher's
-        // 100ms expectation.
+        // CRITICAL: install the tap BEFORE wiring inputNode →
+        // mainMixer + engine.prepare. The mic fix in commit 6f56bd0
+        // had this exact sequence; reversing it (connect first, then
+        // installTap) hangs the `installTap` call indefinitely on
+        // macOS 26 — verified empirically by stepping log lines
+        // through this path. The connect+prepare lines below complete
+        // the graph so AUHAL initializes the input scope; the tap
+        // is what actually delivers PCM frames once that happens.
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             guard let self, let cd = buffer.floatChannelData else { return }
             let n = Int(buffer.frameLength)
@@ -154,7 +148,18 @@ public final class BlackHoleSinkCapture: PeerAudioCapture, @unchecked Sendable {
             )
             self.continuation?.yield(frame)
         }
-        Self.log.info("startTap — tap installed (bufferSize=1024 frames); calling engine.start()")
+        Self.log.info("startTap — tap installed (bufferSize=1024 frames)")
+
+        // Complete the graph: connect inputNode → mainMixer (silenced
+        // via outputVolume=0 above) so AUHAL initializes the input
+        // scope and the tap actually fires. macOS 26 silently drops
+        // tap callbacks otherwise — see the engine.connect doc-comment
+        // upstream for the full failure mode.
+        engine.connect(input, to: mainMixer, format: format)
+        Self.log.info("startTap — connected inputNode → mainMixerNode (volume=0, no loopback)")
+
+        engine.prepare()
+        Self.log.info("startTap — calling engine.start()")
         try engine.start()
         Self.log.info("startTap — engine.start() returned; isRunning=\(engine.isRunning)")
     }
