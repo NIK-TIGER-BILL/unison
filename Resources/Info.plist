@@ -24,6 +24,8 @@
     <string>Copyright © 2026</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Unison перехватывает речь с микрофона для перевода в реальном времени.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Unison захватывает системный звук видеовстреч (Zoom, Meet, Teams) для перевода в реальном времени.</string>
     <key>LSUIElement</key>
     <true/>
 </dict>

@@ -58,8 +58,11 @@ public struct PopoverView: View {
                     detail: PopoverViewModel.userMessage(for: reason),
                     action: reason == .audioCaptureDenied
                         ? .openSettings(label: "Открыть Настройки") {
+                            // macOS 14.4+ split AudioCapture into per-service panes; the
+                            // Process Tap permission lives under "Screen & System Audio
+                            // Recording → System Audio Recording Only".
                             NSWorkspace.shared.open(
-                                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
+                                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
                             )
                         }
                         : .retry(label: "Повторить") {
