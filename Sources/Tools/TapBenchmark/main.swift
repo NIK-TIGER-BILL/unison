@@ -1,4 +1,205 @@
+import CoreAudio
 import Foundation
+import UnisonAudio
+import UnisonDomain
 
-print("tap-benchmark stub — see docs/superpowers/specs/2026-05-27-tap-vs-blackhole-benchmark-design.md")
-exit(0)
+struct CLIOptions {
+    var duration: Int = 30
+    var phase: String = "both"
+    var silent: Bool = false
+    var jsonOut: String?
+    var subcommand: String?
+}
+
+func parseArgs() -> CLIOptions {
+    var opts = CLIOptions()
+    var i = 1
+    let args = CommandLine.arguments
+    if args.count >= 2, !args[1].hasPrefix("-") {
+        opts.subcommand = args[1]
+        i = 2
+    }
+    while i < args.count {
+        let a = args[i]
+        switch a {
+        case "--duration":
+            i += 1
+            opts.duration = Int(args[i]) ?? 30
+        case "--phase":
+            i += 1
+            opts.phase = args[i]
+        case "--silent":
+            opts.silent = true
+        case "--json-out":
+            i += 1
+            opts.jsonOut = args[i]
+        case "-h", "--help":
+            printUsage()
+            exit(0)
+        default:
+            FileHandle.standardError.write("Unknown arg: \(a)\n".data(using: .utf8)!)
+            exit(1)
+        }
+        i += 1
+    }
+    return opts
+}
+
+func printUsage() {
+    print("""
+    tap-benchmark [sanity-check] [options]
+
+    Subcommands:
+      sanity-check                  Tap Zoom (us.zoom.xos) for 10s, print RMS
+
+    Options:
+      --duration N                  Duration in seconds (default 30)
+      --phase {blackhole,tap,both}  Which phases to run (default both)
+      --silent                      Route output to a null device for the tap phase
+      --json-out PATH               Write JSON report to PATH
+      -h, --help                    Show this help
+    """)
+}
+
+func defaultOutputDeviceID() -> AudioDeviceID {
+    var addr = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var id: AudioDeviceID = 0
+    var size: UInt32 = UInt32(MemoryLayout<AudioDeviceID>.size)
+    _ = AudioObjectGetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &id
+    )
+    return id
+}
+
+func blackHole16chDeviceID(registry: CoreAudioDeviceRegistry) -> AudioDeviceID? {
+    guard let bh = registry.findBlackHole16ch() else { return nil }
+    var addr = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyTranslateUIDToDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    var uid: CFString = bh.uid as CFString
+    var dev: AudioDeviceID = 0
+    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+    let status = withUnsafeMutablePointer(to: &uid) { uidPtr -> OSStatus in
+        AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject), &addr,
+            UInt32(MemoryLayout<CFString>.size), uidPtr,
+            &size, &dev
+        )
+    }
+    return status == noErr ? dev : nil
+}
+
+func runMain() async throws {
+    let opts = parseArgs()
+
+    if opts.subcommand == "sanity-check" {
+        await SanityCheck.run()
+        return
+    } else if let sub = opts.subcommand {
+        FileHandle.standardError.write("Unknown subcommand: \(sub)\n".data(using: .utf8)!)
+        exit(1)
+    }
+
+    let registry = CoreAudioDeviceRegistry()
+    let bhDevice = blackHole16chDeviceID(registry: registry)
+    let blackHolePresent = bhDevice != nil
+    let defaultOut = defaultOutputDeviceID()
+
+    var bhResult = PhaseResult(name: "BlackHole 16ch", metrics: nil, skipReason: nil)
+    var tapResult = PhaseResult(name: "Process Tap", metrics: nil, skipReason: nil)
+
+    if opts.phase == "blackhole" || opts.phase == "both" {
+        if let dev = bhDevice {
+            print("Running BlackHole phase (\(opts.duration)s)...")
+            let cfg = PhaseConfig(phase: .blackhole, durationSeconds: opts.duration,
+                                  outputDeviceID: dev, silentMode: false)
+            let run = BenchmarkRun(config: cfg)
+            do {
+                let metrics = try await run.run()
+                bhResult = PhaseResult(name: "BlackHole 16ch", metrics: metrics, skipReason: nil)
+            } catch {
+                bhResult = PhaseResult(name: "BlackHole 16ch", metrics: nil,
+                                        skipReason: "error: \(error)")
+            }
+        } else {
+            bhResult = PhaseResult(name: "BlackHole 16ch", metrics: nil,
+                                    skipReason: "BlackHole 16ch not installed")
+        }
+    }
+
+    if opts.phase == "both" {
+        try await Task.sleep(nanoseconds: 2_000_000_000)
+    }
+
+    if opts.phase == "tap" || opts.phase == "both" {
+        print("Running Process Tap phase (\(opts.duration)s)...")
+        let cfg = PhaseConfig(phase: .tap, durationSeconds: opts.duration,
+                              outputDeviceID: defaultOut, silentMode: opts.silent)
+        let run = BenchmarkRun(config: cfg)
+        do {
+            let metrics = try await run.run()
+            tapResult = PhaseResult(name: "Process Tap", metrics: metrics, skipReason: nil)
+        } catch {
+            tapResult = PhaseResult(name: "Process Tap", metrics: nil,
+                                     skipReason: "error: \(error)")
+        }
+    }
+
+    let setupFriendly: SetupFriendlyResult
+    if blackHolePresent {
+        setupFriendly = .skipped
+    } else if tapResult.metrics != nil {
+        setupFriendly = .pass
+    } else {
+        setupFriendly = .fail
+    }
+
+    let report = BenchmarkReport(
+        timestampISO: ISO8601DateFormatter().string(from: Date()),
+        durationSeconds: opts.duration,
+        clickCount: opts.duration * 5,
+        blackhole: bhResult,
+        tap: tapResult,
+        setupFriendly: setupFriendly,
+        blackHolePresent: blackHolePresent,
+        isVM: ProcessInfo.processInfo.environment["VM_BENCHMARK"] == "1"
+    )
+
+    print()
+    print(report.renderText())
+
+    if let path = opts.jsonOut {
+        do {
+            try report.renderJSON().write(to: URL(fileURLWithPath: path))
+            print("\nJSON written to \(path)")
+        } catch {
+            FileHandle.standardError.write(
+                "Failed to write JSON: \(error)\n".data(using: .utf8)!)
+        }
+    }
+}
+
+signal(SIGINT) { _ in
+    print("\nInterrupted — exiting.")
+    exit(130)
+}
+
+Task {
+    do {
+        try await runMain()
+    } catch {
+        FileHandle.standardError.write("Error: \(error)\n".data(using: .utf8)!)
+        exit(1)
+    }
+    exit(0)
+}
+
+// Run the main dispatch queue (also satisfies AppKit's run-loop requirement
+// when SanityCheck.swift imports AppKit for NSWorkspace).
+dispatchMain()
