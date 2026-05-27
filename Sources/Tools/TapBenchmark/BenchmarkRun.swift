@@ -36,7 +36,11 @@ public final class BenchmarkRun {
     public func run() async throws -> PhaseMetrics {
         let signal = try SignalGenerator()
         try signal.setOutputDevice(config.outputDeviceID)
-        signal.setGain(dB: config.silentMode ? -120 : -40)
+        // Full-amplitude click (0.7) must clear the PeakDetector threshold
+        // (0.3). Even -10 dB ≈ 0.22 falls below. In the VM there's no audio
+        // output to the host anyway; on host the clicks are audibly quiet
+        // bursts — acceptable for a benchmark tool.
+        signal.setGain(dB: 0)
 
         let cpu = CPUSampler()
         cpu.start()

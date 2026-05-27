@@ -23,7 +23,7 @@ set -euo pipefail
 VM_NAME="${VM_NAME:-unison-test}"
 VM_USER="${VM_USER:-admin}"
 VM_PASS="${VM_PASS:-admin}"
-SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR)
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR -o PreferredAuthentications=password -o PubkeyAuthentication=no)
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PATH="$REPO_DIR/build/TapBenchmark.app"
 OUT_DIR="$REPO_DIR/vm-tap-benchmark"
