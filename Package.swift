@@ -25,7 +25,7 @@ let package = Package(
         .target(name: "UnisonTranslation", dependencies: ["UnisonDomain"]),
         .target(name: "UnisonAudio", dependencies: ["UnisonDomain"]),
         .target(name: "UnisonSystem", dependencies: ["UnisonDomain"]),
-        .target(name: "UnisonUI", dependencies: ["UnisonDomain"]),
+        .target(name: "UnisonUI", dependencies: ["UnisonDomain", "UnisonAudio"]),
         .executableTarget(name: "UnisonApp", dependencies: [
             "UnisonDomain", "UnisonTranslation", "UnisonAudio",
             "UnisonSystem", "UnisonUI"
@@ -36,7 +36,7 @@ let package = Package(
             path: "Sources/Tools/TapBenchmark",
             exclude: ["Info.plist", "tap-benchmark.entitlements"]
         ),
-        .testTarget(name: "UnisonDomainTests", dependencies: ["UnisonDomain", "UnisonUI"]),
+        .testTarget(name: "UnisonDomainTests", dependencies: ["UnisonDomain", "UnisonUI", "UnisonAudio"]),
         .testTarget(name: "UnisonTranslationTests", dependencies: ["UnisonTranslation"]),
         .testTarget(name: "UnisonAudioTests", dependencies: ["UnisonAudio"],
                     resources: [.copy("Fixtures")]),

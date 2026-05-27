@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UnisonAudio
 import UnisonDomain
 
 public enum OnboardingStepKind: Sendable, Hashable {
@@ -57,6 +58,15 @@ public final class OnboardingViewModel {
     /// (`installer`/`permissions`/`keychain`) reports success.
     public private(set) var status: [OnboardingStepKind: OnboardingStepStatus] = [:]
 
+    /// Sub-state for the "Allow audio capture" sub-task inside the
+    /// `.blackHole` (Audio setup) step. Tracked separately from
+    /// `status[.blackHole]` because the overall step requires BOTH the
+    /// BlackHole 2ch install AND audio capture grant.
+    public private(set) var audioCaptureStatus: OnboardingStepStatus = .pending
+
+    /// Sub-state for the BlackHole 2ch install sub-task. Same rationale.
+    public private(set) var blackHoleInstallStatus: OnboardingStepStatus = .pending
+
     /// Mutable draft for the OpenAI key input. The view binds directly.
     /// Cleared on successful save.
     public var apiKeyDraft: String = ""
@@ -101,7 +111,23 @@ public final class OnboardingViewModel {
     }
 
     public func refresh() {
-        let bhDone = installer.is2chInstalled() && installer.is16chInstalled()
+        let bh2chDone = installer.is2chInstalled()
+        // Audio capture grant is not queryable via public API. We only know
+        // the user clicked through onboarding by reading our own state.
+        let audioCaptureDone = audioCaptureStatus.isDone
+        let bhDone = bh2chDone && audioCaptureDone
+
+        // Reflect install state in the sub-state property (preserves in-progress / error).
+        if bh2chDone {
+            blackHoleInstallStatus = .done
+        } else if case .inProgress = blackHoleInstallStatus {
+            // leave it
+        } else if case .error = blackHoleInstallStatus {
+            // preserve error
+        } else {
+            blackHoleInstallStatus = .pending
+        }
+
         let micDone = permissions.currentStatus(.microphone) == .granted
         let keyDone = keychain.loadAPIKey()?.isEmpty == false
         steps = [
@@ -125,6 +151,9 @@ public final class OnboardingViewModel {
                 status[step.kind] = .pending
             }
         }
+
+        // Keep overall .blackHole in sync with the two sub-states.
+        refreshOverallBlackHoleStatus()
 
         // Fire the completion callback exactly once. We only mark
         // `completionFired` when the callback actually ran, so that a
@@ -168,59 +197,95 @@ public final class OnboardingViewModel {
 
     // MARK: - Step actions
 
-    /// Runs the bundled BlackHole installer; reflects progress in
-    /// `status[.blackHole]`. On failure the error message is the one
-    /// the design specifies under the BlackHole error row.
-    ///
-    /// The installer is contractually required to verify that BlackHole
-    /// devices actually appear in CoreAudio before returning success —
-    /// see `BundledBlackHoleInstaller.runBundledInstaller` step 7.
-    /// That means on a no-throw return we can trust `is2chInstalled()`
-    /// to also be `true`, so we read the status straight from the
-    /// installer rather than blindly setting `.done` (which a later
-    /// `refresh()` would clobber back to `.pending` if the devices
-    /// hadn't actually shown up).
+    /// Runs the bundled BlackHole 2ch installer; reflects progress in
+    /// `blackHoleInstallStatus`. The overall `status[.blackHole]` is the
+    /// AND of `blackHoleInstallStatus` and `audioCaptureStatus`.
     public func installBlackHole() async {
-        status[.blackHole] = .inProgress
+        blackHoleInstallStatus = .inProgress
+        refreshOverallBlackHoleStatus()
         do {
             try await installer.runBundledInstaller()
-            // Re-read from the installer (which checks CoreAudio). If
-            // it returned without throwing, the post-install
-            // verification inside `runBundledInstaller` passed, so this
-            // should be `true`. Belt-and-braces guard against a future
-            // installer regression.
-            if installer.is2chInstalled() && installer.is16chInstalled() {
-                status[.blackHole] = .done
+            if installer.is2chInstalled() {
+                blackHoleInstallStatus = .done
             } else {
-                status[.blackHole] = .error("Установка завершилась, но BlackHole не появился среди аудиоустройств.")
+                blackHoleInstallStatus = .error(
+                    "Установка завершилась, но BlackHole 2ch не появился среди аудиоустройств."
+                )
             }
         } catch let error as BlackHoleInstallError {
             switch error {
             case .verificationFailed:
-                status[.blackHole] = .error("BlackHole не появился среди аудиоустройств. Перезапустите Unison или установите вручную.")
+                blackHoleInstallStatus = .error(
+                    "BlackHole 2ch не появился среди аудиоустройств. Перезапустите Unison или установите вручную."
+                )
             case .installFailed(let detail):
-                // `detail` is captured stderr from osascript — usually
-                // either "User canceled." or an `installer(8)` error.
-                // Most common path is the user dismissing the auth
-                // prompt, hence the existing copy.
                 let lower = detail.lowercased()
                 if lower.contains("canceled") || lower.contains("cancelled") || lower.contains("отмен") {
-                    status[.blackHole] = .error("Установка отменена. Введите пароль администратора, чтобы установить BlackHole.")
+                    blackHoleInstallStatus = .error(
+                        "Установка отменена. Введите пароль администратора, чтобы установить BlackHole 2ch."
+                    )
                 } else {
-                    status[.blackHole] = .error("Не удалось установить BlackHole. Подробности в Console.app (subsystem com.unison.app).")
+                    blackHoleInstallStatus = .error(
+                        "Не удалось установить BlackHole. Подробности в Console.app (subsystem com.unison.app)."
+                    )
                 }
             case .downloadFailed:
-                status[.blackHole] = .error("Не удалось скачать BlackHole. Проверьте подключение к интернету.")
+                blackHoleInstallStatus = .error(
+                    "Не удалось скачать BlackHole. Проверьте подключение к интернету."
+                )
             case .releaseFetchFailed:
-                status[.blackHole] = .error("Не удалось получить информацию о последнем релизе BlackHole с GitHub.")
+                blackHoleInstallStatus = .error(
+                    "Не удалось получить информацию о последнем релизе BlackHole с GitHub."
+                )
             case .signatureInvalid:
-                status[.blackHole] = .error("Подпись пакета BlackHole не прошла проверку.")
+                blackHoleInstallStatus = .error(
+                    "Подпись пакета BlackHole не прошла проверку."
+                )
             case .assetsNotFound:
-                status[.blackHole] = .error("Не удалось найти пакеты BlackHole для последнего релиза.")
+                blackHoleInstallStatus = .error(
+                    "Не удалось найти пакет BlackHole 2ch для последнего релиза."
+                )
             }
         } catch {
-            status[.blackHole] = .error("Не удалось установить BlackHole. Подробности в Console.app (subsystem com.unison.app).")
+            blackHoleInstallStatus = .error(
+                "Не удалось установить BlackHole. Подробности в Console.app (subsystem com.unison.app)."
+            )
         }
+        refresh()
+    }
+
+    /// Recomputes overall `status[.blackHole]` from the two sub-states.
+    private func refreshOverallBlackHoleStatus() {
+        let install = blackHoleInstallStatus
+        let capture = audioCaptureStatus
+        if install.isDone && capture.isDone {
+            status[.blackHole] = .done
+        } else if case .error(let m) = install {
+            status[.blackHole] = .error(m)
+        } else if case .error(let m) = capture {
+            status[.blackHole] = .error(m)
+        } else if install.isInProgress || capture.isInProgress {
+            status[.blackHole] = .inProgress
+        } else {
+            status[.blackHole] = .pending
+        }
+    }
+
+    /// Triggers the macOS TCC audio-capture prompt by creating + immediately
+    /// destroying a throwaway Process Tap. macOS does not expose a public API
+    /// to query the resulting permission state, so this method optimistically
+    /// marks the sub-task as `.done` once the prompt has been dismissed. The
+    /// actual "translation gets silent buffers" case is caught at runtime by
+    /// the silent-frame watchdog and surfaces a banner with a System Settings
+    /// deep link.
+    public func requestAudioCapturePermission() async {
+        audioCaptureStatus = .inProgress
+        refreshOverallBlackHoleStatus()
+        AudioCapturePermission.triggerPrompt()
+        // Give macOS time to display the prompt and the user time to respond.
+        // We can't tell grant vs deny, so we optimistically mark complete.
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        audioCaptureStatus = .done
         refresh()
     }
 
