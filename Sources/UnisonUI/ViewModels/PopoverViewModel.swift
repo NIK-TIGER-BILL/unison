@@ -318,6 +318,8 @@ public final class PopoverViewModel {
             // unplugged). Server-side stalls would surface via the
             // reconnect path with .networkLost.
             return "Микрофон не подаёт сигнал. Проверьте, что выбрано правильное устройство в Настройках, и попробуйте снова."
+        case .audioCaptureDenied:
+            return "Нет доступа к захвату системного звука. Откройте Настройки → Конфиденциальность и безопасность → Микрофон."
         }
     }
 }

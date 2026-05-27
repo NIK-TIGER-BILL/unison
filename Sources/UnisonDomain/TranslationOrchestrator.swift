@@ -30,6 +30,7 @@ public final class TranslationOrchestrator {
 
     private var meStream: (any TranslationStream)?
     private var peerStream: (any TranslationStream)?
+    private var silentFrameWatchdog: SilentFrameWatchdog?
     // Pipeline tasks bucketed per speaker so a reconnect cancels exactly the
     // tasks bound to the failed stream and leaves the healthy side untouched.
     private var pipelineTasksBySpeaker: [Speaker: [Task<Void, Never>]] = [:]
@@ -610,6 +611,8 @@ public final class TranslationOrchestrator {
     private func stopAllStreams() async {
         cancelReconnectWatchdog()
         cancelNoDataWatchdog()
+        silentFrameWatchdog?.stop()
+        silentFrameWatchdog = nil
         for t in globalTasks { t.cancel() }
         for (_, tasks) in pipelineTasksBySpeaker {
             for t in tasks { t.cancel() }
@@ -769,8 +772,18 @@ public final class TranslationOrchestrator {
             passthroughContinuation = $0
         }
 
+        let watchdog = SilentFrameWatchdog(thresholdSeconds: 10) { [weak self] in
+            Task { @MainActor [weak self] in
+                Self.log.error("Silent-frame watchdog tripped — TCC audio capture likely denied")
+                self?.state = .error(.audioCaptureDenied)
+            }
+        }
+        watchdog.start()
+        self.silentFrameWatchdog = watchdog
+
         let splitter = Task {
             for await frame in peerFrames {
+                watchdog.observe(frame.pcm)
                 translationContinuation.yield(frame)
                 passthroughContinuation.yield(frame)
             }

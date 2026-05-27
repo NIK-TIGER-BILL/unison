@@ -16,7 +16,8 @@ import Testing
     let allCases: [TranslationError] = [
         .permissionDenied(.microphone), .blackHole2chMissing,
         .apiKeyInvalid, .rateLimited(retryAfter: 5), .insufficientCredits,
-        .networkLost, .inputDeviceUnavailable, .outputDeviceUnavailable
+        .networkLost, .inputDeviceUnavailable, .outputDeviceUnavailable,
+        .audioCaptureDenied
     ]
     for err in allCases {
         #expect(err.shortMessage.count < 60, "Message too long: \(err.shortMessage)")

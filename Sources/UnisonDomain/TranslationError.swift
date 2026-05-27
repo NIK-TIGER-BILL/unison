@@ -18,6 +18,14 @@ public enum TranslationError: Error, Equatable, Sendable {
     /// "если какие-то ошибки, нужно же падать с ошибкой" — this is
     /// what makes the failure mode visible.
     case noDataFromServer
+    /// Raised by `SilentFrameWatchdog` when the peer audio stream
+    /// delivers all-zero samples for longer than the watchdog
+    /// threshold. The most likely cause is a TCC audio-capture denial
+    /// — `AudioHardwareCreateProcessTap` succeeds but the IOProc
+    /// receives silent buffers. There is no public API to query TCC
+    /// state for Process Tap, so runtime amplitude monitoring is the
+    /// only reliable detection mechanism.
+    case audioCaptureDenied
 
     public var shortMessage: String {
         switch self {
@@ -30,6 +38,7 @@ public enum TranslationError: Error, Equatable, Sendable {
         case .inputDeviceUnavailable: "Микрофон недоступен"
         case .outputDeviceUnavailable: "Выход аудио недоступен"
         case .noDataFromServer: "Микрофон не подаёт сигнал"
+        case .audioCaptureDenied: "Нет доступа к захвату системного звука"
         }
     }
 }
