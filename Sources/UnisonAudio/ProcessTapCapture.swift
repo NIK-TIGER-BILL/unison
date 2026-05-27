@@ -8,7 +8,10 @@ import UnisonDomain
 /// set of processes by bundle ID (macOS 14.2+). Emits Float32 `AudioFrame`s
 /// at the tap's native sample rate over an `AsyncStream`.
 public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
-    public let excludedBundleIDs: [String]
+    /// Closure that returns the current list of bundle IDs to exclude from
+    /// the tap. Called at every `start()` so changes to Settings take effect
+    /// on the next session without app restart.
+    private let excludedBundleIDsProvider: @Sendable () -> [String]
     private var processObjectIDs: [AudioObjectID] = []  // resolved at start()
     private var tapObjectID: AudioObjectID = 0
     private var aggregateDeviceID: AudioObjectID = 0
@@ -18,8 +21,15 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     private var started = false
     private let log: UnisonLog
 
+    /// Static-list init (mostly for tests).
     public init(excludedBundleIDs: [String] = []) {
-        self.excludedBundleIDs = excludedBundleIDs
+        self.excludedBundleIDsProvider = { excludedBundleIDs }
+        self.log = UnisonLog(category: "ProcessTapCapture")
+    }
+
+    /// Closure-based init (production — re-reads on every start).
+    public init(excludedBundleIDsProvider: @escaping @Sendable () -> [String]) {
+        self.excludedBundleIDsProvider = excludedBundleIDsProvider
         self.log = UnisonLog(category: "ProcessTapCapture")
     }
 
@@ -30,8 +40,6 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
             self.continuation = c
             do {
                 self.resolveExcludedProcessObjects()
-                let bundleIDsList = self.excludedBundleIDs.joined(separator: ", ")
-                self.log.info("[tap.start] excluded=\(bundleIDsList.isEmpty ? "<self only>" : bundleIDsList) processObjectIDs=\(self.processObjectIDs)")
                 self.log.info("[tap.tcc] kTCCServiceAudioCapture status=notQueryable (silent-frame watchdog will verify at runtime)")
                 try self.createTap()
                 try self.createAggregateDevice()
@@ -71,6 +79,7 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     // MARK: - Setup steps
 
     private func resolveExcludedProcessObjects() {
+        let currentExclusions = excludedBundleIDsProvider()
         var ids: [AudioObjectID] = []
         // Always exclude ourselves to avoid feedback.
         if let own = AudioProcessRegistry.processObjectID(forPID: getpid()) {
@@ -79,12 +88,14 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
         // Resolve each excluded bundle ID. Apps that aren't running OR
         // haven't produced audio yet won't have an Audio Process Object —
         // silently skip them; they can't appear in the system tap anyway.
-        for bundleID in excludedBundleIDs {
+        for bundleID in currentExclusions {
             if let obj = AudioProcessRegistry.processObjectID(forBundleID: bundleID) {
                 ids.append(obj)
             }
         }
         processObjectIDs = ids
+        let bundleIDsList = currentExclusions.joined(separator: ", ")
+        log.info("[tap.start] excluded=\(bundleIDsList.isEmpty ? "<self only>" : bundleIDsList) processObjectIDs=\(processObjectIDs)")
     }
 
     private func createTap() throws {

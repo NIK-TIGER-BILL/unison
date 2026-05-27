@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UnisonDomain
 
@@ -55,9 +56,15 @@ public struct PopoverView: View {
                 ErrorRow(
                     title: "Не удалось запустить",
                     detail: PopoverViewModel.userMessage(for: reason),
-                    action: .retry(label: "Повторить") {
-                        Task { await vm.start() }
-                    }
+                    action: reason == .audioCaptureDenied
+                        ? .openSettings(label: "Открыть Настройки") {
+                            NSWorkspace.shared.open(
+                                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
+                            )
+                        }
+                        : .retry(label: "Повторить") {
+                            Task { await vm.start() }
+                        }
                 )
                 HStack {
                     Spacer()
