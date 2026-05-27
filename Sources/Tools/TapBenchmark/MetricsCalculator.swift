@@ -1,6 +1,6 @@
 import Foundation
 
-public struct PhaseMetrics: Sendable, Equatable {
+public struct PhaseMetrics: Sendable, Equatable, Codable {
     public let medianLatencyMs: Double
     public let p95LatencyMs: Double
     public let jitterStdDevMs: Double
