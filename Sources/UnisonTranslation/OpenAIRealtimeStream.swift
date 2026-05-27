@@ -36,17 +36,35 @@ public actor OpenAIRealtimeStream: TranslationStream {
     /// the same id forever, so every fragment of every sentence got
     /// appended to a single ever-growing bubble.
     private var currentEntryId = UUID()
-    /// Set to `true` on each `output_transcript.delta` and cleared
-    /// whenever we rotate `currentEntryId`. When the next
-    /// `input_transcript.delta` arrives with this flag still set, it
-    /// means a fresh turn is starting — rotate the entry id so each
-    /// utterance lands in its own bubble even when the server omits
-    /// `output_transcript.done`. (The GA `gpt-realtime-translate` flow
-    /// emits `output_transcript.done` between turns most of the time,
-    /// but in practice it can be skipped on long mid-stream
-    /// continuations, which previously caused every subsequent
-    /// translation fragment to glue onto the very first bubble.)
-    private var sawOutputDeltaInTurn = false
+    /// Wall-clock timestamp of the most recent transcript delta
+    /// (input OR output, any kind). Used as the **only** turn-
+    /// boundary signal in the absence of reliable
+    /// `output_transcript.done` events: if the next delta arrives
+    /// after a gap of `Self.turnGapSeconds`, that's a new utterance
+    /// and we rotate `currentEntryId` so the new phrase lands in a
+    /// fresh bubble.
+    ///
+    /// Why not use `sawOutputDeltaInTurn` (the previous fallback):
+    /// empirical capture of the GA `gpt-realtime-translate` event
+    /// stream showed that input and output deltas are deeply
+    /// interleaved within a single utterance — OpenAI emits roughly
+    /// `IN × N → OUT × M → IN × P → OUT × Q → …` for one phrase, and
+    /// **`output_transcript.done` is not emitted for non-final
+    /// utterances**. The old fallback rotated on every
+    /// output-then-input transition, fragmenting one phrase into 5–10
+    /// separate bubbles with the original Russian text split across
+    /// them, mismatched from its English translation. The time-gap
+    /// heuristic doesn't rotate mid-phrase because deltas arrive
+    /// continuously (<300 ms apart) while the user is speaking, and
+    /// only rotates on a real pause — which is the user's intuitive
+    /// definition of a phrase boundary.
+    private var lastDeltaAt: Date?
+    /// Pause threshold for the time-gap turn-boundary heuristic. 2.0 s
+    /// is comfortably longer than the natural pause between deltas of
+    /// the same utterance (typically 50–300 ms) while still being
+    /// short enough that the user perceives the next phrase as
+    /// "starting fresh" rather than appended to the prior bubble.
+    private static let turnGapSeconds: TimeInterval = 2.0
     /// Signal raised when `session.closed` arrives from the server.
     /// `close()` awaits this (with a short timeout) so any audio the
     /// server flushes between our `session.close` and the actual close
@@ -195,6 +213,21 @@ public actor OpenAIRealtimeStream: TranslationStream {
         if lastClassifiedError == nil {
             lastClassifiedError = error
         }
+    }
+
+    /// Rotate `currentEntryId` when the gap since the previous delta
+    /// exceeds `turnGapSeconds`. Called from both input and output
+    /// delta handlers BEFORE building the `TranscriptDelta` — that
+    /// way, the new delta carries the fresh id and lands in a new
+    /// bubble. After the check we stamp `lastDeltaAt = now` so the
+    /// next delta measures its gap from this one.
+    private func rotateIfPause() {
+        let now = Date()
+        if let prev = lastDeltaAt, now.timeIntervalSince(prev) >= Self.turnGapSeconds {
+            Self.log.info("[\(speaker)] gap \(String(format: "%.2f", now.timeIntervalSince(prev)))s ≥ \(Self.turnGapSeconds)s → rotating entryId")
+            currentEntryId = UUID()
+        }
+        lastDeltaAt = now
     }
 
     public func send(_ frame: AudioFrame) async {
@@ -367,7 +400,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
             }
             outputContinuation.yield(frame)
         case .outputTranscriptDelta(let p):
-            sawOutputDeltaInTurn = true
+            rotateIfPause()
             let delta = TranscriptDelta(
                 entryId: currentEntryId, speaker: speaker,
                 kind: .translated, text: p.delta, isFinal: false
@@ -382,21 +415,16 @@ public actor OpenAIRealtimeStream: TranslationStream {
         case .inputTranscriptDelta(let p):
             // Source-language fragment of what the speaker said. Tagged
             // as `.original` so `TranscriptStore.apply` writes it into
-            // `entry.originalText` — that's the bubble's primary text
-            // for `.me` (and the secondary text for `.peer`).
+            // `entry.originalText` — the bubble's primary text for
+            // `.me` (and secondary for `.peer`).
             //
-            // Fallback turn-boundary detection: if the previous chunk
-            // we saw on this stream was an output (translated) delta,
-            // this input delta starts a fresh utterance. Rotate the
-            // entry id so the new bubble carries both original and
-            // translation instead of appending forever to the first
-            // bubble. Done via this side-channel because the server
-            // doesn't always emit `output_transcript.done` between
-            // turns on the GA translate flow.
-            if sawOutputDeltaInTurn {
-                currentEntryId = UUID()
-                sawOutputDeltaInTurn = false
-            }
+            // Turn boundary is driven by `rotateIfPause` (time-gap
+            // heuristic). The previous "rotate on input-after-output"
+            // fallback was wrong: empirical capture of the GA event
+            // stream shows OpenAI interleaves `IN` and `OUT` deltas
+            // continuously within a single utterance, so that fallback
+            // fragmented one phrase into ~10 bubbles per pause.
+            rotateIfPause()
             let delta = TranscriptDelta(
                 entryId: currentEntryId, speaker: speaker,
                 kind: .original, text: p.delta, isFinal: false
@@ -409,21 +437,15 @@ public actor OpenAIRealtimeStream: TranslationStream {
             }
             transcriptContinuation.yield(delta)
         case .outputTranscriptDone:
-            // Turn boundary: rotate the entry id ONLY on the OUTPUT
-            // done event because that's the LAST event of a turn.
-            // The OpenAI realtime translate flow per turn is:
-            //   input_transcript.delta × N  (source builds up)
-            //   input_transcript.done       (source complete)
-            //   output_transcript.delta × M (translation builds up)
-            //   output_transcript.done      ← rotate here
-            // Rotating on `input_transcript.done` was a bug: the
-            // translation deltas that arrived AFTER the rotation
-            // landed in a fresh bubble with the same source text
-            // (input had already populated the previous bubble's
-            // originalText), so the user saw two duplicate bubbles
-            // per utterance with split translations.
+            // Authoritative turn boundary when the server DOES emit
+            // it. The GA `gpt-realtime-translate` flow only sometimes
+            // emits this between turns (and not at all for many
+            // observed utterances), so we can't rely on it alone —
+            // `rotateIfPause` carries the rest. When the server does
+            // emit it, rotate immediately so the next delta starts a
+            // fresh bubble even if there's no audible pause.
             currentEntryId = UUID()
-            sawOutputDeltaInTurn = false
+            lastDeltaAt = nil
         case .inputTranscriptDone:
             // Informational only — marks the end of the source
             // transcription phase, but the turn continues with the
