@@ -34,7 +34,7 @@ public final class BenchmarkRun {
     }
 
     public func run() async throws -> PhaseMetrics {
-        let signal = try SignalGenerator()
+        let signal = AUHALSignalGenerator()
         try signal.setOutputDevice(config.outputDeviceID)
         signal.setGain(dB: 0)
 

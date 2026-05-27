@@ -23,6 +23,15 @@ public final class SignalGenerator {
 
     /// Bind the engine's output to a specific CoreAudio device (e.g. BlackHole 16ch
     /// for the BlackHole phase, or default output for the Tap phase).
+    ///
+    /// KNOWN ISSUE: AVAudioEngine accepts the property set
+    /// (`AudioUnitGetProperty` reads back the new device ID) but it does
+    /// not actually push audio to that device — verified by isolation
+    /// tests. The default-output swap workaround introduces a different
+    /// regression: `inputNode.outputFormat(0)` shifts to a 2ch/44.1k
+    /// deinterleaved format that `installTap` rejects with a format
+    /// mismatch. Reliable per-device output for this benchmark needs raw
+    /// AUHAL — see docs/superpowers/results/2026-05-27-...md.
     public func setOutputDevice(_ deviceID: AudioDeviceID) throws {
         guard let outputUnit = engine.outputNode.audioUnit else {
             throw SignalGeneratorError.outputUnitUnavailable
@@ -43,15 +52,11 @@ public final class SignalGenerator {
         engine.mainMixerNode.outputVolume = pow(10, dB / 20)
     }
 
-    /// Starts the engine and schedules `clickCount` clicks separated by `intervalMs`.
-    /// Returns when scheduling is done; clicks play out over `clickCount * intervalMs` real time.
     public func startAndScheduleClicks(clickCount: Int) throws {
         guard let click = clickBuffer else { throw SignalGeneratorError.bufferUnavailable }
         try engine.start()
         player.play()
 
-        // Schedule clicks at absolute host times, starting 500ms in the future
-        // to give the engine time to warm up and avoid the first click being lost.
         let warmupMs: Double = 500
         let firstTicks = HostTimeClock.now() + HostTimeClock.ticks(forMilliseconds: warmupMs)
         let intervalTicks = HostTimeClock.ticks(forMilliseconds: intervalMs)
@@ -70,12 +75,11 @@ public final class SignalGenerator {
         engine.stop()
     }
 
-    /// Wait until all scheduled clicks have played out (last expected + 200ms grace).
     public func waitUntilFinished() async throws {
         guard let last = expectedClickHostTimes.last else { return }
         let waitTarget = last + HostTimeClock.ticks(forMilliseconds: 200)
         while HostTimeClock.now() < waitTarget {
-            try await Task.sleep(nanoseconds: 10_000_000)  // 10ms
+            try await Task.sleep(nanoseconds: 10_000_000)
         }
     }
 
@@ -88,7 +92,6 @@ public final class SignalGenerator {
         guard let data = buf.floatChannelData?[0] else {
             throw SignalGeneratorError.bufferAllocationFailed
         }
-        // Hann-windowed white noise → broadband click, clean amplitude profile.
         for i in 0..<Int(frameCount) {
             let window = 0.5 - 0.5 * cos(2 * .pi * Float(i) / Float(frameCount - 1))
             data[i] = clickAmplitude * window * Float.random(in: -1...1)
