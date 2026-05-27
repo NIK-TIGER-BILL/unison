@@ -102,9 +102,21 @@ fi
 
 # --- 2. Boot the VM if not already running ---------------------------------------
 start_vm_if_needed() {
-  if tart_ip="$(tart ip "$VM_NAME" 2>/dev/null)" && [ -n "${tart_ip:-}" ]; then
-    log "VM \"$VM_NAME\" already running at $tart_ip"
-    return 0
+  # `tart ip` returns the last-known IP even when the VM is stopped, so we
+  # can't trust it alone — check the actual VM state from `tart list`.
+  local state
+  state="$(tart list --format json 2>/dev/null \
+            | python3 -c 'import json,sys
+for vm in json.load(sys.stdin):
+    if vm.get("Name")=="'"$VM_NAME"'":
+        print(vm.get("State","unknown")); break' 2>/dev/null || echo unknown)"
+  if [ "$state" = "running" ]; then
+    local tart_ip
+    tart_ip="$(tart ip "$VM_NAME" 2>/dev/null || true)"
+    if [ -n "$tart_ip" ]; then
+      log "VM \"$VM_NAME\" already running at $tart_ip"
+      return 0
+    fi
   fi
   log "Starting VM \"$VM_NAME\" in background…"
   nohup tart run "$VM_NAME" >"$OUT_DIR/.vm.log" 2>&1 &
@@ -179,21 +191,29 @@ ssh_vm "
 
 # --- 6. Run the benchmark --------------------------------------------------------
 RESULT_FILE="results-$(date +%s).json"
+LOG_FILE="/tmp/tap-benchmark.out"
 log "Running benchmark inside VM (scenario=$SCENARIO duration=${DURATION}s)…"
 
-if [ "$SCENARIO" = "sanity-zoom" ]; then
+# Run via `launchctl asuser` so the binary inherits the GUI session's audio
+# stack — over SSH we're outside any console user session, and AVAudioEngine
+# silently emits nothing without one. Output is redirected to a file because
+# launchctl detaches stdout.
+run_in_user_session() {
+  local cmd="$1"
   ssh_vm "
-    VM_BENCHMARK=1 /Users/$VM_USER/TapBenchmark.app/Contents/MacOS/tap-benchmark sanity-check
-  " || true
-else
-  ssh_vm "
-    VM_BENCHMARK=1 /Users/$VM_USER/TapBenchmark.app/Contents/MacOS/tap-benchmark \
-      --duration $DURATION --phase both --silent --json-out ~/$RESULT_FILE
-  " || true
+    echo $VM_PASS | sudo -S launchctl asuser \$(id -u $VM_USER) \
+      /bin/sh -c '$cmd > $LOG_FILE 2>&1'
+    cat $LOG_FILE
+  "
+}
 
-  # Pull results back
-  if ssh_vm "[ -f ~/$RESULT_FILE ]" >/dev/null 2>&1; then
-    scp_from_vm "~/$RESULT_FILE" "$OUT_DIR/$RESULT_FILE"
+if [ "$SCENARIO" = "sanity-zoom" ]; then
+  run_in_user_session "VM_BENCHMARK=1 /Users/$VM_USER/TapBenchmark.app/Contents/MacOS/tap-benchmark sanity-check" || true
+else
+  run_in_user_session "VM_BENCHMARK=1 /Users/$VM_USER/TapBenchmark.app/Contents/MacOS/tap-benchmark --duration $DURATION --phase both --json-out /Users/$VM_USER/$RESULT_FILE" || true
+
+  if ssh_vm "[ -f /Users/$VM_USER/$RESULT_FILE ]" >/dev/null 2>&1; then
+    scp_from_vm "/Users/$VM_USER/$RESULT_FILE" "$OUT_DIR/$RESULT_FILE"
     log "Results saved to $OUT_DIR/$RESULT_FILE"
   else
     warn "Benchmark did not produce results file (may have crashed or timed out)"
