@@ -12,8 +12,24 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
 
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
+    /// Time-stretch node between `player` and the engine's main mixer.
+    /// Its `rate` is modulated by `pacing` based on queue depth so
+    /// OpenAI Realtime's burst-rate audio doesn't accumulate unbounded
+    /// latency on the BlackHole 2ch route to the conferencing app. The
+    /// peer still hears the user's own translated voice at the right
+    /// pitch — only the tempo is adjusted to keep the queue ≤ ~1s.
+    private let timePitch = AVAudioUnitTimePitch()
     private let registry: CoreAudioDeviceRegistry
     private var started = false
+    /// Cached output format. Same instance used to connect the node
+    /// graph and to build per-chunk `AVAudioPCMBuffer`s — sharing it
+    /// avoids the tiny per-chunk allocation and guarantees the player
+    /// accepts each scheduled buffer.
+    private let playerFormat: AVAudioFormat
+    /// Pacing controller for adaptive playback rate. Created lazily
+    /// once the engine is up; `reset()` at the start of each `play(_:)`
+    /// invocation so a stop-restart cycle doesn't carry stale state.
+    private var pacing: PlaybackPacing?
     /// Latches once per `play(_:)` invocation to keep the format-mismatch
     /// warning out of the per-frame hot path. The first dropped frame
     /// shouts loudly so the diagnostic dump captures it; subsequent
@@ -23,6 +39,8 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
     /// scheduled. Used to surface "the pipeline started delivering audio"
     /// exactly once so the log isn't drowned by the per-chunk firehose.
     private var loggedFirstFrame = false
+    /// Per-`play(_:)` chunk index for periodic RMS sampling.
+    private var chunkIndex = 0
 
     /// Test-only WAV capture handle. When `UNISON_DUMP_OUTPUT_WAV=path` is
     /// set in the process environment, every scheduled frame's float32 PCM
@@ -37,6 +55,10 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
 
     public init(registry: CoreAudioDeviceRegistry) {
         self.registry = registry
+        self.playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                          sampleRate: 48_000,
+                                          channels: 1,
+                                          interleaved: false)!
     }
 
     public func play(_ frames: AsyncStream<AudioFrame>) async {
@@ -49,6 +71,9 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         }
         loggedFormatMismatch = false
         loggedFirstFrame = false
+        chunkIndex = 0
+        pacing?.reset()
+        pacing?.start()
         for await frame in frames {
             schedule(frame)
         }
@@ -56,6 +81,7 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
     }
 
     public func stop() {
+        pacing?.stop()
         player.stop()
         engine.stop()
         started = false
@@ -71,6 +97,7 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         Self.log.info("startIfNeeded — found BlackHole 2ch device uid=\(bh2.uid)")
 
         engine.attach(player)
+        engine.attach(timePitch)
 
         // CRITICAL: assign the output device BEFORE wiring graph connections.
         // AVAudioEngine resolves the implicit `mainMixerNode → outputNode`
@@ -96,8 +123,11 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
             Self.log.error("startIfNeeded — audioDeviceID(forUID: \(bh2.uid)) returned nil; engine will route to default output")
         }
 
-        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48_000, channels: 1, interleaved: false)!
-        engine.connect(player, to: engine.mainMixerNode, format: format)
+        // player → timePitch → mainMixer. timePitch starts at rate=1.0,
+        // PlaybackPacing modulates it once the engine is running.
+        engine.connect(player, to: timePitch, format: playerFormat)
+        engine.connect(timePitch, to: engine.mainMixerNode, format: playerFormat)
+        timePitch.rate = 1.0
 
         do {
             try engine.start()
@@ -107,36 +137,63 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         }
         player.play()
         started = true
+        if pacing == nil {
+            pacing = PlaybackPacing(player: player,
+                                    timePitch: timePitch,
+                                    log: Self.log,
+                                    label: "blackhole2ch")
+        }
         Self.log.info("startIfNeeded — engine started; player playing; ready to schedule buffers")
     }
 
     private func schedule(_ frame: AudioFrame) {
-        guard frame.format == .float32 else {
+        // Strict format check: the pipeline upstream is responsible for
+        // delivering 48k F32 mono. A mismatch indicates a routing bug
+        // — log loudly and drop rather than silently reformatting.
+        guard frame.format == .float32,
+              frame.sampleRate == Int(playerFormat.sampleRate),
+              frame.channels == Int(playerFormat.channelCount) else {
             if !loggedFormatMismatch {
                 loggedFormatMismatch = true
-                Self.log.error("schedule — DROPPING frame: expected .float32, got \(String(describing: frame.format)) at \(frame.sampleRate)Hz × \(frame.channels)ch (\(frame.sampleCount) samples). Subsequent drops silent until next play().")
+                Self.log.error("schedule — DROPPING frame: expected 48k F32 mono, got \(frame.sampleRate)Hz \(String(describing: frame.format)) × \(frame.channels)ch (\(frame.sampleCount) samples). Subsequent drops silent until next play().")
             }
             return
         }
-        let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: Double(frame.sampleRate),
-            channels: AVAudioChannelCount(frame.channels),
-            interleaved: false
-        )!
         let frameCount = AVAudioFrameCount(frame.sampleCount)
-        guard let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else { return }
+        guard frameCount > 0,
+              let buf = AVAudioPCMBuffer(pcmFormat: playerFormat, frameCapacity: frameCount) else { return }
         buf.frameLength = frameCount
         frame.pcm.withUnsafeBytes { raw in
             let p = raw.bindMemory(to: Float.self).baseAddress!
             memcpy(buf.floatChannelData![0], p, frame.pcm.count)
         }
+        if chunkIndex % 10 == 0 {
+            let rms = Self.rms(frame)
+            Self.log.debug("[blackhole2ch] translated chunk \(chunkIndex) rms=\(String(format: "%.5f", rms))")
+        }
+        chunkIndex += 1
         player.scheduleBuffer(buf, completionHandler: nil)
+        pacing?.didSchedule(samples: AVAudioFramePosition(frameCount))
         appendFrameToDumpIfNeeded(frame)
         if !loggedFirstFrame {
             loggedFirstFrame = true
             Self.log.info("schedule — first frame scheduled to BlackHole 2ch (\(frame.sampleRate)Hz × \(frame.channels)ch, \(frame.sampleCount) samples)")
         }
+    }
+
+    /// Root-mean-square amplitude of a float32 PCM frame. Cheap; called
+    /// every 10th scheduled chunk for diagnostic logging.
+    private static func rms(_ frame: AudioFrame) -> Float {
+        guard frame.format == .float32, frame.sampleCount > 0 else { return 0 }
+        var sumSq: Float = 0
+        frame.pcm.withUnsafeBytes { raw in
+            let p = raw.bindMemory(to: Float.self)
+            for i in 0..<frame.sampleCount {
+                let s = p[i]
+                sumSq += s * s
+            }
+        }
+        return (sumSq / Float(frame.sampleCount)).squareRoot()
     }
 
     // MARK: - WAV dump (test-only)
