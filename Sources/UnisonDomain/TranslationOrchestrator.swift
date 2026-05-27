@@ -70,6 +70,25 @@ public final class TranslationOrchestrator {
     private let deviceRegistry: any AudioDeviceRegistry
     private let clock: any Clock
     private let transformer: any AudioFormatTransformer
+    /// System-network path watcher. The orchestrator subscribes to its
+    /// `statusStream` once per session start; an `.unsatisfied` event
+    /// tears down streams + captures and flips to
+    /// `.paused(.networkLost)`, a subsequent `.satisfied` resumes.
+    /// The protocol lives in `UnisonDomain` so the orchestrator can
+    /// depend on it without dragging `Network.framework` into the
+    /// domain layer; production wires the `NWPathMonitor`-backed
+    /// `NetworkMonitor` from `UnisonSystem`.
+    private let networkMonitor: any NetworkPathMonitoring
+    /// Task draining `networkMonitor.statusStream`. Spawned in `start`,
+    /// cancelled in `stopAllStreams` so a stopped orchestrator doesn't
+    /// keep observing the network.
+    private var networkObserverTask: Task<Void, Never>?
+    /// Force terminal `.error(.networkLost)` if pause-recovery hasn't
+    /// succeeded in `pauseRecoveryWatchdogSeconds`. Defense in depth —
+    /// without it a never-returning network would leave the app stuck
+    /// in `.paused` forever.
+    private var pauseRecoveryWatchdogTask: Task<Void, Never>?
+    private static let pauseRecoveryWatchdogSeconds: TimeInterval = 60
 
     private var meStream: (any TranslationStream)?
     private var peerStream: (any TranslationStream)?
@@ -151,7 +170,8 @@ public final class TranslationOrchestrator {
         permissions: any PermissionsService,
         deviceRegistry: any AudioDeviceRegistry,
         clock: any Clock,
-        transformer: any AudioFormatTransformer
+        transformer: any AudioFormatTransformer,
+        networkMonitor: any NetworkPathMonitoring
     ) {
         self.transcript = TranscriptStore()
         self.micCapture = micCapture
@@ -163,6 +183,7 @@ public final class TranslationOrchestrator {
         self.deviceRegistry = deviceRegistry
         self.clock = clock
         self.transformer = transformer
+        self.networkMonitor = networkMonitor
     }
 
     public func start(mode: SessionMode, languages: LanguagePair, settings: Settings = .default) async {
@@ -285,6 +306,7 @@ public final class TranslationOrchestrator {
         lastAudibleMicAt = nil
         connectivityHealth = .healthy
         startSlowDetectionLoop()
+        startNetworkObserver(mode: mode, languages: languages)
         observeDeviceChanges()
         armNoDataWatchdog()
         Self.log.info("start() — translating session active")
@@ -556,6 +578,160 @@ public final class TranslationOrchestrator {
         reconnectWatchdogTask = nil
     }
 
+    // MARK: - NetworkMonitor pause / auto-resume
+
+    /// Subscribe to `networkMonitor.statusStream` for the duration of
+    /// the session. The first yield on attach is the current status,
+    /// so a `.satisfied` initial value is a no-op; transitions drive
+    /// `.paused ↔ .translating` via `handleNetworkStatusChange`.
+    private func startNetworkObserver(mode: SessionMode, languages: LanguagePair) {
+        networkObserverTask?.cancel()
+        let stream = networkMonitor.statusStream
+        networkObserverTask = Task { @MainActor [weak self] in
+            for await status in stream {
+                if Task.isCancelled { return }
+                guard let self else { return }
+                self.handleNetworkStatusChange(status, mode: mode, languages: languages)
+            }
+        }
+    }
+
+    private func stopNetworkObserver() {
+        networkObserverTask?.cancel()
+        networkObserverTask = nil
+    }
+
+    private func handleNetworkStatusChange(
+        _ status: NetworkPathStatus,
+        mode: SessionMode,
+        languages: LanguagePair
+    ) {
+        switch status {
+        case .unsatisfied:
+            enterNetworkPause(mode: mode)
+        case .satisfied:
+            if case .paused(_, _, _, .networkLost) = state {
+                resumeFromNetworkPause(mode: mode, languages: languages)
+            }
+        }
+    }
+
+    /// Tear down streams + captures and flip to `.paused(.networkLost)`.
+    /// Idempotent — calling while already paused is a no-op.
+    private func enterNetworkPause(mode: SessionMode) {
+        if case .paused = state { return }
+        guard let startedAt = sessionStartedAt else { return }
+        Self.log.info("network unsatisfied — entering .paused(.networkLost)")
+        stopSlowDetectionLoop()
+        for (_, tasks) in pipelineTasksBySpeaker {
+            for t in tasks { t.cancel() }
+        }
+        pipelineTasksBySpeaker.removeAll()
+        micCapture.stop()
+        peerCapture.stop()
+        Task { @MainActor [weak self] in
+            await self?.meStream?.close()
+            await self?.peerStream?.close()
+        }
+        meStream = nil
+        peerStream = nil
+        state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: .networkLost)
+        armPauseRecoveryWatchdog()
+    }
+
+    private func resumeFromNetworkPause(mode: SessionMode, languages: LanguagePair) {
+        guard case .paused(_, _, let startedAt, .networkLost) = state else { return }
+        Self.log.info("network satisfied during pause — resuming")
+        state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: .awaitingNetwork)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.resumeStreams(mode: mode, languages: languages, startedAt: startedAt)
+        }
+    }
+
+    private func resumeStreams(
+        mode: SessionMode,
+        languages: LanguagePair,
+        startedAt: Date
+    ) async {
+        if mode == .call || mode == .listen {
+            let peer = translationFactory.make(speaker: .peer)
+            do {
+                try await peer.connect(target: languages.mine)
+                peerStream = peer
+                wireIncomingPipeline(stream: peer)
+                observeConnectionState(stream: peer, speaker: .peer, target: languages.mine, mode: mode)
+            } catch {
+                await failResume(error: error)
+                return
+            }
+        }
+        if mode == .call || mode == .test {
+            let me = translationFactory.make(speaker: .me)
+            do {
+                try await me.connect(target: languages.peer)
+                meStream = me
+                wireOutgoingPipeline(stream: me, destination: mode == .test ? .speakers : .virtualMic)
+                observeConnectionState(stream: me, speaker: .me, target: languages.peer, mode: mode)
+            } catch {
+                await failResume(error: error)
+                return
+            }
+        }
+        cancelPauseRecoveryWatchdog()
+        state = .translating(mode: mode, startedAt: startedAt)
+        healthBySpeaker = [:]
+        if mode == .call || mode == .test { healthBySpeaker[.me] = .recovering }
+        if mode == .call || mode == .listen { healthBySpeaker[.peer] = .recovering }
+        recomputeAggregateHealth()
+        startSlowDetectionLoop()
+        armRecoveringFlash()
+    }
+
+    private func failResume(error: Error) async {
+        Self.log.error("resume failed: \(String(describing: error)); falling back to terminal .error")
+        await stopAllStreams()
+        state = .error(.networkLost)
+    }
+
+    /// Force terminal `.error(.networkLost)` if pause-recovery hasn't
+    /// succeeded in `pauseRecoveryWatchdogSeconds` (60 s). Defense in
+    /// depth — without it a never-returning network leaves the app in
+    /// `.paused` forever.
+    private func armPauseRecoveryWatchdog() {
+        pauseRecoveryWatchdogTask?.cancel()
+        let clock = self.clock
+        pauseRecoveryWatchdogTask = Task { @MainActor [weak self] in
+            try? await clock.sleep(for: Self.pauseRecoveryWatchdogSeconds)
+            guard let self else { return }
+            if Task.isCancelled { return }
+            if case .paused = self.state {
+                Self.log.error("pause-recovery watchdog fired after \(Self.pauseRecoveryWatchdogSeconds)s — forcing terminal .networkLost")
+                await self.stopAllStreams()
+                self.state = .error(.networkLost)
+            }
+        }
+    }
+
+    private func cancelPauseRecoveryWatchdog() {
+        pauseRecoveryWatchdogTask?.cancel()
+        pauseRecoveryWatchdogTask = nil
+    }
+
+    /// Hold `.recovering` health for 2 s after resume, then drop to the
+    /// natural `.healthy` (or whatever the slow-detection loop computes).
+    private func armRecoveringFlash() {
+        let clock = self.clock
+        Task { @MainActor [weak self] in
+            try? await clock.sleep(for: 2)
+            guard let self else { return }
+            for s in [Speaker.me, Speaker.peer] where self.healthBySpeaker[s] == .recovering {
+                self.healthBySpeaker[s] = .healthy
+            }
+            self.recomputeAggregateHealth()
+        }
+    }
+
     private func observeConnectionState(
         stream: any TranslationStream,
         speaker: Speaker,
@@ -779,6 +955,8 @@ public final class TranslationOrchestrator {
     private func stopAllStreams() async {
         cancelReconnectWatchdog()
         cancelNoDataWatchdog()
+        stopNetworkObserver()
+        cancelPauseRecoveryWatchdog()
         stopSlowDetectionLoop()
         healthBySpeaker = [:]
         lastDeltaAtBySpeaker = [:]

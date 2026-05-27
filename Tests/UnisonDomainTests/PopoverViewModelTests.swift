@@ -18,7 +18,8 @@ private func makeOrchestratorForVM(perms: MockPermissionsService = .init()) -> T
         permissions: perms,
         deviceRegistry: registry,
         clock: SystemClock(),
-        transformer: MockAudioFormatTransformer()
+        transformer: MockAudioFormatTransformer(),
+        networkMonitor: MockNetworkPathMonitor(initial: .satisfied)
     )
 }
 

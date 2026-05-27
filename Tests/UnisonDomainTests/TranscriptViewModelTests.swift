@@ -21,7 +21,8 @@ private func makeOrchestrator(mixer: MockAudioOutputMixer = .init()) -> Translat
         permissions: perms,
         deviceRegistry: registry,
         clock: SystemClock(),
-        transformer: MockAudioFormatTransformer()
+        transformer: MockAudioFormatTransformer(),
+        networkMonitor: MockNetworkPathMonitor(initial: .satisfied)
     )
 }
 

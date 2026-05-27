@@ -27,7 +27,8 @@ private func makeOrchestrator(
     perms: MockPermissionsService? = nil,
     registry: MockAudioDeviceRegistry? = nil,
     clock: any Clock = SystemClock(),
-    transformer: any AudioFormatTransformer = MockAudioFormatTransformer()
+    transformer: any AudioFormatTransformer = MockAudioFormatTransformer(),
+    networkMonitor: any NetworkPathMonitoring = MockNetworkPathMonitor(initial: .satisfied)
 ) -> TranslationOrchestrator {
     let resolvedRegistry = registry ?? defaultRegistry()
     let resolvedPerms = perms ?? defaultPerms()
@@ -35,7 +36,8 @@ private func makeOrchestrator(
         micCapture: mic, peerCapture: peer, outputMixer: mixer,
         virtualMicPlayer: bhPlayer, translationFactory: factory,
         permissions: resolvedPerms, deviceRegistry: resolvedRegistry, clock: clock,
-        transformer: transformer
+        transformer: transformer,
+        networkMonitor: networkMonitor
     )
 }
 
@@ -187,7 +189,8 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
         permissions: defaultPerms(),
         deviceRegistry: defaultRegistry(),
         clock: SystemClock(),
-        transformer: MockAudioFormatTransformer()
+        transformer: MockAudioFormatTransformer(),
+        networkMonitor: MockNetworkPathMonitor(initial: .satisfied)
     )
     await o.start(mode: .call, languages: .default)
     #expect(o.state.errorValue == .apiKeyInvalid)
@@ -218,7 +221,8 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
         permissions: defaultPerms(),
         deviceRegistry: defaultRegistry(),
         clock: SystemClock(),
-        transformer: MockAudioFormatTransformer()
+        transformer: MockAudioFormatTransformer(),
+        networkMonitor: MockNetworkPathMonitor(initial: .satisfied)
     )
     await o.start(mode: .call, languages: .default)
     #expect(o.state.errorValue == .networkLost)
@@ -620,4 +624,47 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
     )
     try? await Task.sleep(nanoseconds: 100_000_000)
     #expect(o.connectivityHealth == .healthy)
+}
+
+// MARK: - NetworkMonitor → .paused / auto-resume
+
+@Test @MainActor func orchestrator_networkUnsatisfied_transitionsToPaused() async throws {
+    let netMon = MockNetworkPathMonitor(initial: .satisfied)
+    let o = makeOrchestrator(networkMonitor: netMon)
+    await o.start(mode: .test, languages: .default)
+    try? await Task.sleep(nanoseconds: 50_000_000)
+    guard case .translating = o.state else {
+        Issue.record("Expected .translating, got \(o.state)")
+        return
+    }
+    netMon.simulate(.unsatisfied)
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    if case .paused(_, _, _, let reason) = o.state {
+        #expect(reason == .networkLost)
+    } else {
+        Issue.record("Expected .paused(.networkLost), got \(o.state)")
+    }
+}
+
+@Test @MainActor func orchestrator_networkSatisfiedWhilePaused_resumes() async throws {
+    let netMon = MockNetworkPathMonitor(initial: .satisfied)
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, networkMonitor: netMon)
+    await o.start(mode: .test, languages: .default)
+    try? await Task.sleep(nanoseconds: 50_000_000)
+
+    netMon.simulate(.unsatisfied)
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    guard case .paused = o.state else {
+        Issue.record("Expected .paused after unsatisfied, got \(o.state)")
+        return
+    }
+
+    netMon.simulate(.satisfied)
+    try? await Task.sleep(nanoseconds: 300_000_000)
+    if case .translating = o.state {
+        // ok
+    } else {
+        Issue.record("Expected .translating after network restored, got \(o.state)")
+    }
 }

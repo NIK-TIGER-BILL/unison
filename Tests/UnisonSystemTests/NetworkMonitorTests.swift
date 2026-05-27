@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import UnisonSystem
+@testable import UnisonDomain
 
 @Test func mockNetworkMonitor_publishesStatusUpdates() async {
     let monitor = MockNetworkPathMonitor(initial: .satisfied)
