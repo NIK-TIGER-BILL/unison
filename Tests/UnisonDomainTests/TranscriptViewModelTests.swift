@@ -212,6 +212,30 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     #expect(vm.bubbleGroups[0].bubbles.last?.isLive == false)
 }
 
+// MARK: - translationLost surfacing (T9)
+
+@MainActor
+@Test func bubble_translationAtRiskWithEmptyTranslation_marksLost() {
+    let store = TranscriptStore()
+    let id = UUID()
+    store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .original, text: "Тест", isFinal: false))
+    store.markActiveEntriesAtRisk()
+    let vm = TranscriptViewModel(store: store)
+    let groups = vm.bubbleGroups
+    #expect(groups.first?.bubbles.first?.translationLost == true)
+}
+
+@MainActor
+@Test func bubble_translationDelivered_clearsLost() {
+    let store = TranscriptStore()
+    let id = UUID()
+    store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .original, text: "Тест", isFinal: false))
+    store.markActiveEntriesAtRisk()
+    store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .translated, text: "Test", isFinal: true))
+    let vm = TranscriptViewModel(store: store)
+    #expect(vm.bubbleGroups.first?.bubbles.first?.translationLost == false)
+}
+
 // MARK: - Live bubble finalisation
 
 @MainActor

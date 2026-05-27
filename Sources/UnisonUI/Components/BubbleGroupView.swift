@@ -30,7 +30,8 @@ public struct BubbleGroupView: View {
                     isLastInGroup: item.bubble.isLastInGroup,
                     isLive: item.bubble.isLive,
                     scale: scale,
-                    isTestMode: isTestMode
+                    isTestMode: isTestMode,
+                    translationLost: item.bubble.translationLost
                 )
                 .padding(.top, offset == 0
                     ? 0

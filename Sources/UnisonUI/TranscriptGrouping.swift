@@ -59,7 +59,8 @@ enum TranscriptGrouping {
                         secondaryText: b.secondaryText,
                         isFirstInGroup: isFirst,
                         isLastInGroup: isLast,
-                        isLive: isLive
+                        isLive: isLive,
+                        translationLost: b.translationLost
                     )
                 )
             }
@@ -89,6 +90,11 @@ enum TranscriptGrouping {
         let primaryParts = splitOnSentence(primaryRaw, threshold: splitThreshold)
         let secondaryParts = splitOnSentence(secondaryRaw, threshold: splitThreshold)
         let n = max(primaryParts.count, secondaryParts.count, 1)
+        // The "translation lost" placeholder belongs at the tail of the
+        // broken phrase, not interleaved into earlier-rendered fragments
+        // — so we apply the flag only to the LAST bubble of this entry's
+        // split.
+        let translationLost = entry.translationAtRisk && entry.translatedText.isEmpty
         var out: [BubbleViewModel] = []
         out.reserveCapacity(n)
         for i in 0..<n {
@@ -96,6 +102,7 @@ enum TranscriptGrouping {
             let s = secondaryParts[safe: i] ?? secondaryParts.last ?? secondaryRaw
             // Stable derivative id so SwiftUI diffing works across re-groups.
             let bubbleId = derive(entry.id, suffix: i)
+            let isLastOfSplit = (i == n - 1)
             out.append(
                 BubbleViewModel(
                     id: bubbleId,
@@ -104,7 +111,8 @@ enum TranscriptGrouping {
                     secondaryText: s,
                     isFirstInGroup: false,
                     isLastInGroup: false,
-                    isLive: false
+                    isLive: false,
+                    translationLost: translationLost && isLastOfSplit
                 )
             )
         }
