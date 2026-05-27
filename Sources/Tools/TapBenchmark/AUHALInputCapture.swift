@@ -4,12 +4,16 @@ import Darwin
 import Foundation
 
 /// Reads audio from a specific CoreAudio device via a raw AUHAL input
-/// unit, bypassing AVAudioEngine. Used by the benchmark for the
-/// BlackHole 16ch phase — production code uses `BlackHoleSinkCapture`
-/// which works fine when the producer is a different process (Zoom),
-/// but a same-process AUHAL producer + AVAudioEngine consumer combo
-/// produced zero chunks (HAL device conflict). Same-process raw AUHAL
-/// on both ends works.
+/// unit, bypassing AVAudioEngine.
+///
+/// Operates in the device's native channel count and reads channel 0
+/// only. Going via the native format avoids CoreAudio's downmix from
+/// N→1 channels (an average across all channels), which would attenuate
+/// the signal by ~1/N when only channel 0 carries it.
+///
+/// Realtime-safe: the input callback writes into pre-allocated ring
+/// storage without locks or heap allocations. The consumer reads the
+/// captured range after `stop()`.
 public final class AUHALInputCapture {
     public struct Chunk {
         public let hostTime: UInt64
@@ -19,10 +23,61 @@ public final class AUHALInputCapture {
 
     private var unit: AudioUnit?
     private var sampleRate: Double = 48000
-    private var chunks: [Chunk] = []
-    private let lock = NSLock()
+    private var deviceChannels: UInt32 = 1
 
-    public init() {}
+    // Pre-allocated ring storage: holds channel-0 samples and per-callback
+    // host-time anchors. Sized for 30 s at 48 kHz to comfortably cover any
+    // realistic benchmark phase.
+    private var ringSamples: UnsafeMutableBufferPointer<Float>
+    private var ringHostTimes: UnsafeMutableBufferPointer<UInt64>
+    private var ringChunkStarts: UnsafeMutableBufferPointer<Int>
+    private var ringSampleCounts: UnsafeMutableBufferPointer<Int>
+    private var chunkCount: Int = 0
+    private var sampleCount: Int = 0
+    private let ringCapacity: Int
+    private let chunkSlotsCapacity: Int
+
+    // Scratch buffer list for AudioUnitRender output. Sized for max plausible
+    // frames per callback (4096 is generous for any aggregate device).
+    private let maxFramesPerSlice = 4096
+    private var renderScratch: UnsafeMutableBufferPointer<Float>
+    private var renderBufferList: UnsafeMutablePointer<AudioBufferList>
+    private var renderBufferListByteSize: Int
+
+    public init(maxDurationSeconds: Int = 30) {
+        ringCapacity = 48000 * maxDurationSeconds
+        chunkSlotsCapacity = ringCapacity / 64  // upper bound on callback firings
+        ringSamples = .allocate(capacity: ringCapacity)
+        ringSamples.initialize(repeating: 0)
+        ringHostTimes = .allocate(capacity: chunkSlotsCapacity)
+        ringHostTimes.initialize(repeating: 0)
+        ringChunkStarts = .allocate(capacity: chunkSlotsCapacity)
+        ringChunkStarts.initialize(repeating: 0)
+        ringSampleCounts = .allocate(capacity: chunkSlotsCapacity)
+        ringSampleCounts.initialize(repeating: 0)
+
+        // Scratch for AU render. Sized for max device channels (16) × maxFrames.
+        renderScratch = .allocate(capacity: 16 * maxFramesPerSlice)
+        renderScratch.initialize(repeating: 0)
+        // Allocate an AudioBufferList that can hold up to 16 non-interleaved buffers.
+        let buffersByteSize = MemoryLayout<AudioBufferList>.size
+            + MemoryLayout<AudioBuffer>.size * 15  // ABL has 1 inline + (N-1) tail
+        renderBufferListByteSize = buffersByteSize
+        renderBufferList = UnsafeMutableRawPointer
+            .allocate(byteCount: buffersByteSize,
+                      alignment: MemoryLayout<AudioBufferList>.alignment)
+            .assumingMemoryBound(to: AudioBufferList.self)
+    }
+
+    deinit {
+        stop()
+        ringSamples.deallocate()
+        ringHostTimes.deallocate()
+        ringChunkStarts.deallocate()
+        ringSampleCounts.deallocate()
+        renderScratch.deallocate()
+        UnsafeMutableRawPointer(renderBufferList).deallocate()
+    }
 
     public func start(deviceID: AudioDeviceID) throws {
         var desc = AudioComponentDescription(
@@ -38,21 +93,18 @@ public final class AUHALInputCapture {
         try check(AudioComponentInstanceNew(comp, &newUnit), "AudioComponentInstanceNew")
         guard let u = newUnit else { throw AUHALError.componentNotFound }
 
-        // Enable input scope, disable output scope (we're capturing).
         var enable: UInt32 = 1
         try check(
             AudioUnitSetProperty(u, kAudioOutputUnitProperty_EnableIO,
                                   kAudioUnitScope_Input, 1,
                                   &enable, UInt32(MemoryLayout<UInt32>.size)),
             "EnableIO input")
-        var disable: UInt32 = 0
-        try check(
-            AudioUnitSetProperty(u, kAudioOutputUnitProperty_EnableIO,
-                                  kAudioUnitScope_Output, 0,
-                                  &disable, UInt32(MemoryLayout<UInt32>.size)),
-            "DisableIO output")
+        // Note: previously we disabled output scope on this AU. With BH 16ch,
+        // disabling output here apparently disables the device's output clock
+        // for *all* AUs in the same process, which made the producer AUHAL
+        // freeze after one render call. Leaving output enabled here keeps the
+        // device clock alive without affecting capture behavior.
 
-        // Bind to the capture device.
         var devID = deviceID
         try check(
             AudioUnitSetProperty(u, kAudioOutputUnitProperty_CurrentDevice,
@@ -60,39 +112,42 @@ public final class AUHALInputCapture {
                                   &devID, UInt32(MemoryLayout<AudioDeviceID>.size)),
             "setCurrentDevice")
 
-        // Query the device's native input format, then ask the AU to expose mono Float32.
-        var fmt = AudioStreamBasicDescription()
+        // Query the device's native input format and match it.
+        var deviceFmt = AudioStreamBasicDescription()
         var fmtSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
         try check(
             AudioUnitGetProperty(u, kAudioUnitProperty_StreamFormat,
                                   kAudioUnitScope_Input, 1,
-                                  &fmt, &fmtSize),
+                                  &deviceFmt, &fmtSize),
             "getInputStreamFormat")
-        sampleRate = fmt.mSampleRate
+        sampleRate = deviceFmt.mSampleRate
+        deviceChannels = deviceFmt.mChannelsPerFrame
 
-        // Our consumer format: Float32 mono interleaved at the device's sample rate.
-        var outFmt = AudioStreamBasicDescription()
-        outFmt.mSampleRate = sampleRate
-        outFmt.mFormatID = kAudioFormatLinearPCM
-        outFmt.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked
-        outFmt.mFramesPerPacket = 1
-        outFmt.mChannelsPerFrame = 1
-        outFmt.mBitsPerChannel = 32
-        outFmt.mBytesPerFrame = 4
-        outFmt.mBytesPerPacket = 4
+        // Ask the AU to deliver in the same channel count, Float32 non-interleaved.
+        var ourFmt = AudioStreamBasicDescription()
+        ourFmt.mSampleRate = sampleRate
+        ourFmt.mFormatID = kAudioFormatLinearPCM
+        ourFmt.mFormatFlags = kAudioFormatFlagIsFloat
+            | kAudioFormatFlagsNativeEndian
+            | kAudioFormatFlagIsPacked
+            | kAudioFormatFlagIsNonInterleaved
+        ourFmt.mChannelsPerFrame = deviceChannels
+        ourFmt.mFramesPerPacket = 1
+        ourFmt.mBitsPerChannel = 32
+        ourFmt.mBytesPerFrame = 4
+        ourFmt.mBytesPerPacket = 4
         try check(
             AudioUnitSetProperty(u, kAudioUnitProperty_StreamFormat,
                                   kAudioUnitScope_Output, 1,
-                                  &outFmt, UInt32(MemoryLayout<AudioStreamBasicDescription>.size)),
+                                  &ourFmt, UInt32(MemoryLayout<AudioStreamBasicDescription>.size)),
             "setOutputStreamFormat")
 
-        // Input callback (the AU calls us, we call AudioUnitRender to pull samples).
         var cb = AURenderCallbackStruct(
-            inputProc: { (inRefCon, ioActionFlags, inTimeStamp,
+            inputProc: { (inRefCon, ioFlags, inTimeStamp,
                           inBusNumber, inNumberFrames, _) -> OSStatus in
                 let capture = Unmanaged<AUHALInputCapture>.fromOpaque(inRefCon).takeUnretainedValue()
                 return capture.inputCallback(
-                    ioActionFlags: ioActionFlags,
+                    ioFlags: ioFlags,
                     timeStamp: inTimeStamp,
                     busNumber: inBusNumber,
                     numberFrames: inNumberFrames
@@ -105,43 +160,52 @@ public final class AUHALInputCapture {
                                   kAudioUnitScope_Global, 0,
                                   &cb, UInt32(MemoryLayout<AURenderCallbackStruct>.size)),
             "setInputCallback")
-
         try check(AudioUnitInitialize(u), "AudioUnitInitialize")
         try check(AudioOutputUnitStart(u), "AudioOutputUnitStart")
         unit = u
     }
 
+    // Realtime callback. No allocations, no locks. Writes channel-0 samples
+    // into the pre-allocated ring; bumps cursors with simple stores.
     private func inputCallback(
-        ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
+        ioFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
         timeStamp: UnsafePointer<AudioTimeStamp>,
         busNumber: UInt32,
         numberFrames: UInt32
     ) -> OSStatus {
         guard let u = unit else { return noErr }
-        let frameCount = Int(numberFrames)
-        // Allocate a scratch buffer list pointing at heap-allocated Float storage.
-        let byteCount = frameCount * MemoryLayout<Float>.size
-        let storage = UnsafeMutablePointer<Float>.allocate(capacity: frameCount)
-        defer { storage.deallocate() }
+        let n = Int(numberFrames)
+        if n > maxFramesPerSlice { return noErr }
+        if chunkCount >= chunkSlotsCapacity { return noErr }
+        if sampleCount + n > ringCapacity { return noErr }
 
-        var bufferList = AudioBufferList(
-            mNumberBuffers: 1,
-            mBuffers: AudioBuffer(
+        // Wire renderBufferList to point into renderScratch (non-interleaved).
+        renderBufferList.pointee.mNumberBuffers = deviceChannels
+        let ablPtr = UnsafeMutableAudioBufferListPointer(renderBufferList)
+        for ch in 0..<Int(deviceChannels) {
+            ablPtr[ch] = AudioBuffer(
                 mNumberChannels: 1,
-                mDataByteSize: UInt32(byteCount),
-                mData: UnsafeMutableRawPointer(storage)
+                mDataByteSize: UInt32(n * MemoryLayout<Float>.size),
+                mData: UnsafeMutableRawPointer(
+                    renderScratch.baseAddress!.advanced(by: ch * maxFramesPerSlice)
+                )
             )
-        )
-        let status = AudioUnitRender(u, ioActionFlags, timeStamp,
-                                     busNumber, numberFrames, &bufferList)
+        }
+        let status = AudioUnitRender(u, ioFlags, timeStamp,
+                                      busNumber, numberFrames, renderBufferList)
         guard status == noErr else { return status }
 
-        let samples = Array(UnsafeBufferPointer(start: storage, count: frameCount))
-        let host = timeStamp.pointee.mHostTime
-        let rate = Int(sampleRate)
-        lock.lock()
-        chunks.append(Chunk(hostTime: host, samples: samples, sampleRate: rate))
-        lock.unlock()
+        // Copy channel 0 into the ring.
+        let dstStart = sampleCount
+        let src = renderScratch.baseAddress!  // channel 0
+        let dst = ringSamples.baseAddress!.advanced(by: dstStart)
+        memcpy(dst, src, n * MemoryLayout<Float>.size)
+
+        ringHostTimes[chunkCount] = timeStamp.pointee.mHostTime
+        ringChunkStarts[chunkCount] = dstStart
+        ringSampleCounts[chunkCount] = n
+        chunkCount += 1
+        sampleCount += n
         return noErr
     }
 
@@ -154,15 +218,21 @@ public final class AUHALInputCapture {
         }
     }
 
-    public func takeChunks() -> [Chunk] {
-        lock.lock()
-        let out = chunks
-        chunks.removeAll(keepingCapacity: true)
-        lock.unlock()
+    /// Return the captured chunks as [Chunk]. Call after `stop()`.
+    public func snapshot() -> [Chunk] {
+        var out: [Chunk] = []
+        out.reserveCapacity(chunkCount)
+        for i in 0..<chunkCount {
+            let start = ringChunkStarts[i]
+            let count = ringSampleCounts[i]
+            let slice = Array(UnsafeBufferPointer(start: ringSamples.baseAddress!.advanced(by: start),
+                                                  count: count))
+            out.append(Chunk(hostTime: ringHostTimes[i],
+                             samples: slice,
+                             sampleRate: Int(sampleRate)))
+        }
         return out
     }
-
-    deinit { stop() }
 
     private func check(_ status: OSStatus, _ name: String) throws {
         guard status == noErr else {

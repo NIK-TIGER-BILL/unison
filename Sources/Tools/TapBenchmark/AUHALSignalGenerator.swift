@@ -6,37 +6,32 @@ import Foundation
 /// Click-train generator that writes directly to a chosen CoreAudio device
 /// via a raw AUHAL output unit, bypassing AVAudioEngine.
 ///
-/// Why not AVAudioEngine: setting `kAudioOutputUnitProperty_CurrentDevice`
-/// on `AVAudioEngine.outputNode.audioUnit` is accepted (the property
-/// reads back correctly) but the engine doesn't actually push audio to
-/// the targeted device. Swapping the system default has its own
-/// side-effects (`inputNode.outputFormat(0)` shifts to a format that
-/// `installTap` rejects). Raw AUHAL with a render callback is the
-/// reliable per-device approach used by professional audio apps.
+/// Operates in the device's native channel count. The click is written to
+/// channel 0; other channels are zeroed. Going via the device's native
+/// format avoids CoreAudio's mono→multichannel upmix, which would otherwise
+/// route through a downmix on the input side and attenuate the round-trip
+/// amplitude by ~1/N for an N-channel device.
 public final class AUHALSignalGenerator {
     public private(set) var expectedClickHostTimes: [UInt64] = []
 
     private var unit: AudioUnit?
-    private let sampleRate: Double = 48000
+    private var sampleRate: Double = 48000
+    private var deviceChannels: UInt32 = 1
     private let clickDurationMs: Double = 2
-    private let intervalSamples: UInt64
-    private let clickSamples: Int
+    private let intervalMs: Double = 200
     private let clickAmplitude: Float = 0.7
     private var gain: Float = 1.0
     private var click: [Float] = []
+    private var intervalSamples: UInt64 = 0
+    private var clickSamples: Int = 0
 
-    // Render state — accessed only from the render callback.
+    // Render state — only mutated on the render callback thread.
     private var renderedSamples: UInt64 = 0
-    private var firstHostTime: UInt64 = 0      // mHostTime of the very first render
-    private var firstClickAtSample: UInt64 = 0 // when the first click starts (sample count)
+    private var firstHostTime: UInt64 = 0
+    private var firstClickAtSample: UInt64 = 0
     private var totalClicks: Int = 0
-    private var intervalMs: Double = 200
 
-    public init() {
-        intervalSamples = UInt64(sampleRate * 0.200)  // 200ms interval
-        clickSamples = Int(sampleRate * clickDurationMs / 1000)
-        click = AUHALSignalGenerator.makeClick(samples: clickSamples, amplitude: clickAmplitude)
-    }
+    public init() {}
 
     public func setOutputDevice(_ deviceID: AudioDeviceID) throws {
         var desc = AudioComponentDescription(
@@ -59,24 +54,40 @@ public final class AUHALSignalGenerator {
                                   &devID, UInt32(MemoryLayout<AudioDeviceID>.size)),
             "setCurrentDevice")
 
-        // Stream format: Float32 mono interleaved at 48 kHz.
-        var fmt = AudioStreamBasicDescription()
-        fmt.mSampleRate = sampleRate
-        fmt.mFormatID = kAudioFormatLinearPCM
-        fmt.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagsNativeEndian | kAudioFormatFlagIsPacked
-        fmt.mFramesPerPacket = 1
-        fmt.mChannelsPerFrame = 1
-        fmt.mBitsPerChannel = 32
-        fmt.mBytesPerFrame = 4
-        fmt.mBytesPerPacket = 4
-        // Input scope = data flowing INTO the audio unit (we're providing samples).
+        // Query the device's native output stream format to match channel count.
+        var deviceFmt = AudioStreamBasicDescription()
+        var fmtSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        try check(
+            AudioUnitGetProperty(u, kAudioUnitProperty_StreamFormat,
+                                  kAudioUnitScope_Output, 0,
+                                  &deviceFmt, &fmtSize),
+            "getDeviceOutputFormat")
+        sampleRate = deviceFmt.mSampleRate
+        deviceChannels = deviceFmt.mChannelsPerFrame
+        intervalSamples = UInt64(sampleRate * 0.001 * intervalMs)
+        clickSamples = Int(sampleRate * clickDurationMs / 1000)
+        click = AUHALSignalGenerator.makeClick(samples: clickSamples,
+                                               amplitude: clickAmplitude)
+
+        // Match device channel count, Float32 non-interleaved.
+        var ourFmt = AudioStreamBasicDescription()
+        ourFmt.mSampleRate = sampleRate
+        ourFmt.mFormatID = kAudioFormatLinearPCM
+        ourFmt.mFormatFlags = kAudioFormatFlagIsFloat
+            | kAudioFormatFlagsNativeEndian
+            | kAudioFormatFlagIsPacked
+            | kAudioFormatFlagIsNonInterleaved
+        ourFmt.mChannelsPerFrame = deviceChannels
+        ourFmt.mFramesPerPacket = 1
+        ourFmt.mBitsPerChannel = 32
+        ourFmt.mBytesPerFrame = 4
+        ourFmt.mBytesPerPacket = 4
         try check(
             AudioUnitSetProperty(u, kAudioUnitProperty_StreamFormat,
                                   kAudioUnitScope_Input, 0,
-                                  &fmt, UInt32(MemoryLayout<AudioStreamBasicDescription>.size)),
+                                  &ourFmt, UInt32(MemoryLayout<AudioStreamBasicDescription>.size)),
             "setStreamFormat")
 
-        // Render callback.
         var cb = AURenderCallbackStruct(
             inputProc: { (inRefCon, _, inTimeStamp, _, inNumberFrames, ioData) -> OSStatus in
                 guard let ioData = ioData else { return noErr }
@@ -93,76 +104,65 @@ public final class AUHALSignalGenerator {
                                   kAudioUnitScope_Input, 0,
                                   &cb, UInt32(MemoryLayout<AURenderCallbackStruct>.size)),
             "setRenderCallback")
-
         try check(AudioUnitInitialize(u), "AudioUnitInitialize")
         unit = u
     }
 
-    public func setGain(dB: Float) {
-        gain = pow(10, dB / 20)
-    }
+    public func setGain(dB: Float) { gain = pow(10, dB / 20) }
 
     public func startAndScheduleClicks(clickCount: Int) throws {
         guard let u = unit else { throw AUHALError.unitNotInitialized }
         totalClicks = clickCount
-        intervalMs = 200
         renderedSamples = 0
         firstHostTime = 0
-        // First click 500ms after render start.
         firstClickAtSample = UInt64(sampleRate * 0.500)
         expectedClickHostTimes.removeAll(keepingCapacity: true)
 
         try check(AudioOutputUnitStart(u), "AudioOutputUnitStart")
 
-        // Pre-compute expected host times. firstHostTime will be set by the
-        // first render callback; we resolve actual host times after that.
-        // For now, queue placeholders — analyse() reads them later.
-        let ticksPerSample = UInt64(1_000_000_000 / sampleRate) *
-            UInt64(HostTimeClock.timebase.denom) /
-            UInt64(HostTimeClock.timebase.numer)
+        let ticksPerSample = HostTimeClock.ticks(forMilliseconds: 1000.0 / sampleRate)
         for i in 0..<clickCount {
             let sampleOffset = firstClickAtSample + UInt64(i) * intervalSamples
-            // Without firstHostTime yet, we provisionally store ticksPerSample * offset.
-            // Real value gets patched in `lockedFirstHostTime()`.
             expectedClickHostTimes.append(sampleOffset * ticksPerSample)
         }
     }
 
-    /// Called from the render callback (audio thread, no allocations).
     private func render(timestamp: AudioTimeStamp,
                         frames: Int,
                         buffers: UnsafeMutablePointer<AudioBufferList>) {
         if firstHostTime == 0 {
             firstHostTime = timestamp.mHostTime
-            // Patch the placeholder host times with the real base.
             for i in 0..<expectedClickHostTimes.count {
                 expectedClickHostTimes[i] = firstHostTime + expectedClickHostTimes[i]
             }
         }
         let abl = UnsafeMutableAudioBufferListPointer(buffers)
-        guard let firstBuf = abl.first,
-              let dst = firstBuf.mData?.assumingMemoryBound(to: Float.self) else { return }
-
-        // Zero the buffer, then splat in any clicks whose sample range falls inside [renderedSamples, renderedSamples+frames).
-        for i in 0..<frames { dst[i] = 0 }
         let chunkStart = renderedSamples
         let chunkEnd = renderedSamples + UInt64(frames)
-        for i in 0..<totalClicks {
-            let clickStart = firstClickAtSample + UInt64(i) * intervalSamples
-            let clickEnd = clickStart + UInt64(clickSamples)
-            if clickEnd <= chunkStart || clickStart >= chunkEnd { continue }
-            // Splat overlapping portion.
-            let overlapStart = max(clickStart, chunkStart)
-            let overlapEnd = min(clickEnd, chunkEnd)
-            for j in overlapStart..<overlapEnd {
-                let srcIdx = Int(j - clickStart)
-                let dstIdx = Int(j - chunkStart)
-                if srcIdx >= 0 && srcIdx < click.count && dstIdx >= 0 && dstIdx < frames {
-                    dst[dstIdx] = click[srcIdx] * gain
+        defer { renderedSamples += UInt64(frames) }
+
+        // Mirror the click on ALL channels — BlackHole may route through a
+        // device-specific channel mapping that we cannot assume; replicating
+        // makes the signal land somewhere readable downstream.
+        for chIdx in 0..<abl.count {
+            let buf = abl[chIdx]
+            guard let mData = buf.mData?.assumingMemoryBound(to: Float.self) else { continue }
+            for i in 0..<frames { mData[i] = 0 }
+            for clickIdx in 0..<totalClicks {
+                let cStart = firstClickAtSample + UInt64(clickIdx) * intervalSamples
+                let cEnd = cStart + UInt64(clickSamples)
+                if cEnd <= chunkStart || cStart >= chunkEnd { continue }
+                let overlapStart = max(cStart, chunkStart)
+                let overlapEnd = min(cEnd, chunkEnd)
+                for j in overlapStart..<overlapEnd {
+                    let srcIdx = Int(j - cStart)
+                    let dstIdx = Int(j - chunkStart)
+                    if srcIdx >= 0 && srcIdx < click.count && dstIdx >= 0 && dstIdx < frames {
+                        mData[dstIdx] = click[srcIdx] * gain
+                    }
                 }
             }
         }
-        renderedSamples += UInt64(frames)
     }
 
     public func stop() {
@@ -178,7 +178,6 @@ public final class AUHALSignalGenerator {
 
     public func waitUntilFinished() async throws {
         guard let last = expectedClickHostTimes.last, firstHostTime != 0 else {
-            // First render hasn't fired yet — give it a brief moment then re-check.
             try await Task.sleep(nanoseconds: 100_000_000)
             return
         }
