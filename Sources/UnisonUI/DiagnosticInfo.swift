@@ -58,7 +58,7 @@ public struct DiagnosticInfo: Sendable, Equatable {
         blackHole2ch: String,
         blackHole16ch: String,
         openAIKeyStatus: String,
-        connectivityHealth: ConnectivityHealth,
+        connectivityHealth: ConnectivityHealth = .healthy,
         meStreamHealth: ConnectivityHealth? = nil,
         peerStreamHealth: ConnectivityHealth? = nil,
         recentErrors: [String] = [],

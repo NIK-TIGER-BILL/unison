@@ -672,7 +672,7 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
 @Test @MainActor func orchestrator_pauseRecoveryWatchdog_firesAfter60s() async throws {
     let netMon = MockNetworkPathMonitor(initial: .satisfied)
     let clock = ManualClock()
-    let o = makeOrchestrator(networkMonitor: netMon, clock: clock)
+    let o = makeOrchestrator(clock: clock, networkMonitor: netMon)
     await o.start(mode: .test, languages: .default)
     try? await Task.sleep(nanoseconds: 50_000_000)
     netMon.simulate(.unsatisfied)
