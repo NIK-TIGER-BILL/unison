@@ -66,6 +66,9 @@ public final class DiagnosticCollector {
             blackHole2ch: bh2,
             blackHole16ch: bh16,
             openAIKeyStatus: openAIKeyStatus,
+            connectivityHealth: composition.orchestrator.connectivityHealth,
+            meStreamHealth: composition.orchestrator.streamHealth(for: .me),
+            peerStreamHealth: composition.orchestrator.streamHealth(for: .peer),
             recentErrors: Array(recentErrors),
             recentLogLines: allLines,
             collectedAt: Date()

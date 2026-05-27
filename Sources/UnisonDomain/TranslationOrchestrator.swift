@@ -1045,6 +1045,12 @@ public final class TranslationOrchestrator {
         outputMixer.setOriginalGain(min(max(v, 0), 1))
     }
 
+    /// Read per-speaker connectivity health for the diagnostic snapshot.
+    /// Returns nil if the speaker's stream is not active.
+    public func streamHealth(for speaker: Speaker) -> ConnectivityHealth? {
+        healthBySpeaker[speaker]
+    }
+
     // MARK: - Pipelines
 
     // Bound buffer size for splitter/resampled streams. At ~100ms per frame,

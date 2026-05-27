@@ -1,4 +1,5 @@
 import SwiftUI
+import UnisonDomain
 
 /// Modal diagnostic dialog. Renders a snapshot of `DiagnosticInfo` with
 /// a "Скопировать в буфер" button so the user can paste the full dump
@@ -33,6 +34,7 @@ public struct DiagnosticSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     section(title: "Система", lines: info.systemLines)
                     section(title: "Состояние", lines: info.statusLines)
+                    streamHealthSection
                     if !info.recentErrors.isEmpty {
                         section(title: "Последние ошибки", lines: info.recentErrors)
                     }
@@ -120,6 +122,29 @@ public struct DiagnosticSheet: View {
         }
     }
 
+    private var streamHealthSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Связь потоков")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(UnisonColors.whiteAlpha(0.80))
+            VStack(alignment: .leading, spacing: 8) {
+                DiagRow(
+                    label: "Me-stream",
+                    value: info.meStreamHealth.map(humanReadable) ?? "—"
+                )
+                DiagRow(
+                    label: "Peer-stream",
+                    value: info.peerStreamHealth.map(humanReadable) ?? "—"
+                )
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.black.opacity(0.18))
+            )
+        }
+    }
+
     private var footer: some View {
         HStack {
             Text("Не содержит вашего ключа — только наличие и длину.")
@@ -143,6 +168,36 @@ public struct DiagnosticSheet: View {
             }
             .buttonStyle(.glassProminent)
             .keyboardShortcut("c", modifiers: [.command])
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func humanReadable(_ h: ConnectivityHealth) -> String {
+        switch h {
+        case .healthy: return "норма"
+        case .slow: return "медленно"
+        case .recovering: return "восстановление"
+        }
+    }
+}
+
+// MARK: - DiagRow
+
+private struct DiagRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(.white)
+                .frame(width: 100, alignment: .leading)
+            Text(value)
+                .font(.system(size: 12))
+                .foregroundStyle(UnisonColors.whiteAlpha(0.85))
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
