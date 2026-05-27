@@ -24,6 +24,11 @@ public final class TranscriptStore {
                 entries[idx].originalText = (entries[idx].originalText ?? "") + delta.text
             case .translated:
                 entries[idx].translatedText += delta.text
+                // A late-arriving translation chunk proves the entry's
+                // translation was not lost after all — clear the at-risk
+                // flag the pause/reconnect transition stamped on the
+                // entry while it was mid-flight.
+                entries[idx].translationAtRisk = false
             }
         } else {
             let targetLang: Language = {
@@ -45,6 +50,18 @@ public final class TranscriptStore {
     }
 
     public func clear() { entries.removeAll() }
+
+    /// Flag every currently-accumulating entry (one without a complete
+    /// translation) as "at risk" of translation loss. Called by the
+    /// orchestrator when it transitions to `.paused` / `.reconnecting`
+    /// so the bubble view can later render a placeholder for entries
+    /// that never received their translation. A late-arriving
+    /// translation delta clears the flag in `apply(_:)`.
+    public func markActiveEntriesAtRisk() {
+        for idx in entries.indices where entries[idx].translatedText.isEmpty {
+            entries[idx].translationAtRisk = true
+        }
+    }
 
     public func exportAsText() -> String {
         entries.map { e in

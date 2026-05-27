@@ -637,6 +637,11 @@ public final class TranslationOrchestrator {
         if case .paused = state { return }
         guard let startedAt = sessionStartedAt else { return }
         Self.log.info("network unsatisfied — entering .paused(.networkLost)")
+        // Stamp any in-flight entries (an original chunk arrived but the
+        // server never delivered its translation) as at-risk so the
+        // bubble view can render the "перевод не получен" placeholder
+        // if no late translation lands during / after the pause.
+        transcript.markActiveEntriesAtRisk()
         stopSlowDetectionLoop()
         for (_, tasks) in pipelineTasksBySpeaker {
             for t in tasks { t.cancel() }
@@ -827,6 +832,11 @@ public final class TranslationOrchestrator {
         receivedAnyData: Bool
     ) async {
         Self.log.error("handleStreamFailure — speaker=\(String(describing: speaker)), error=\(String(describing: error)), receivedAnyData=\(receivedAnyData)")
+        // Stamp any in-flight entries (original chunk arrived but the
+        // server hadn't delivered its translation yet) as at-risk so the
+        // bubble view can render the "перевод не получен" placeholder
+        // if no late translation lands during the reconnect cycle.
+        transcript.markActiveEntriesAtRisk()
         // Don't try to recover from terminal errors
         switch error {
         case .apiKeyInvalid, .insufficientCredits, .permissionDenied:
