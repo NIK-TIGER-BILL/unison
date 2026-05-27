@@ -139,7 +139,10 @@ scp_from_vm(){ sshpass -p "$VM_PASS" scp "${SSH_OPTS[@]}" "$VM_USER@$VM_IP:$1" "
 log "Copying TapBenchmark.app into VM…"
 ssh_vm "rm -rf /Users/$VM_USER/TapBenchmark.app"
 scp_to_vm "$APP_PATH" "/Users/$VM_USER/TapBenchmark.app"
-ssh_vm "codesign --force --sign - /Users/$VM_USER/TapBenchmark.app 2>/dev/null || true"
+# Re-sign preserving entitlements — a bare `codesign --sign -` STRIPS the
+# entitlements, and without `com.apple.security.device.audio-input` the
+# Process Tap creation will fail with TCC error inside the VM.
+ssh_vm "codesign --force --sign - --preserve-metadata=entitlements /Users/$VM_USER/TapBenchmark.app 2>/dev/null || true"
 
 # --- 4. Configure scenario (BlackHole presence) -----------------------------------
 case "$SCENARIO" in
@@ -157,6 +160,8 @@ case "$SCENARIO" in
       echo $VM_PASS | sudo -S rm -rf /Library/Audio/Plug-Ins/HAL/BlackHole16ch.driver 2>/dev/null || true
       echo $VM_PASS | sudo -S launchctl kickstart -kp system/com.apple.audio.coreaudiod 2>/dev/null || true
     " || true
+    # Give coreaudiod time to come back up before we start the benchmark.
+    sleep 5
     ;;
   sanity-zoom)
     log "(sanity-zoom requires Zoom installed and running in VM — manual step)"
@@ -165,8 +170,11 @@ esac
 
 # --- 5. Pre-grant TCC audio capture permission ------------------------------------
 log "Pre-granting TCC audio capture…"
+# Reset both services — macOS 14+ Process Tap uses AudioCapture, but
+# older paths and broader audio-input still go through Microphone.
 ssh_vm "
-  echo $VM_PASS | sudo -S tccutil reset Microphone com.unison.tapbench 2>/dev/null || true
+  echo $VM_PASS | sudo -S tccutil reset Microphone   com.unison.tapbench 2>/dev/null || true
+  echo $VM_PASS | sudo -S tccutil reset AudioCapture com.unison.tapbench 2>/dev/null || true
 " || true
 
 # --- 6. Run the benchmark --------------------------------------------------------

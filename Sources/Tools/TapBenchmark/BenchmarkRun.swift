@@ -42,7 +42,7 @@ public final class BenchmarkRun {
         cpu.start()
         defer { cpu.stop() }
 
-        let captureTask: Task<[(UInt64, [Float])], Error>
+        let captureTask: Task<[(UInt64, [Float], Int)], Error>
         switch config.phase {
         case .blackhole:
             captureTask = startCaptureBlackHole()
@@ -64,16 +64,16 @@ public final class BenchmarkRun {
                        cpuSamples: cpu.samples)
     }
 
-    private func startCaptureBlackHole() -> Task<[(UInt64, [Float])], Error> {
+    private func startCaptureBlackHole() -> Task<[(UInt64, [Float], Int)], Error> {
         let toFloats = BenchmarkRun.framePCMtoFloats(_:)
         return Task { @Sendable in
             let registry = CoreAudioDeviceRegistry()
             let capture = BlackHoleSinkCapture(registry: registry)
-            var chunks: [(UInt64, [Float])] = []
+            var chunks: [(UInt64, [Float], Int)] = []
             for await frame in capture.start() {
                 let host = HostTimeClock.now()
                 let floats = toFloats(frame)
-                chunks.append((host, floats))
+                chunks.append((host, floats, frame.sampleRate))
                 if Task.isCancelled { break }
             }
             capture.stop()
@@ -81,15 +81,15 @@ public final class BenchmarkRun {
         }
     }
 
-    private func startCaptureTap() -> Task<[(UInt64, [Float])], Error> {
+    private func startCaptureTap() -> Task<[(UInt64, [Float], Int)], Error> {
         let toFloats = BenchmarkRun.framePCMtoFloats(_:)
         return Task { @Sendable in
             let capture = ProcessTapCapture(targetPID: getpid())
-            var chunks: [(UInt64, [Float])] = []
+            var chunks: [(UInt64, [Float], Int)] = []
             for await frame in capture.start() {
                 let host = HostTimeClock.now()
                 let floats = toFloats(frame)
-                chunks.append((host, floats))
+                chunks.append((host, floats, frame.sampleRate))
                 if Task.isCancelled { break }
             }
             capture.stop()
@@ -111,16 +111,22 @@ public final class BenchmarkRun {
     }
 
     private func analyse(
-        captured: [(UInt64, [Float])],
+        captured: [(UInt64, [Float], Int)],
         expected: [UInt64],
         cpuSamples: [Double]
     ) -> PhaseMetrics {
-        let detector = PeakDetector(threshold: 0.3, refractorySamples: 4800) // 100ms @ 48k
+        // Refractory is ~100ms; sample-rate-aware so the window stays 100ms
+        // regardless of whether the capture is 44.1, 48, or 96 kHz.
+        let firstRate = captured.first?.2 ?? 48000
+        let detector = PeakDetector(
+            threshold: 0.3,
+            refractorySamples: max(1, firstRate / 10)
+        )
         var detectedTimes: [UInt64] = []
-        let nsPerSample: Double = 1_000_000_000 / 48000
 
-        for (chunkHostTime, samples) in captured {
+        for (chunkHostTime, samples, sampleRate) in captured {
             let peaks = detector.detectPeaks(in: samples)
+            let nsPerSample: Double = 1_000_000_000 / Double(sampleRate)
             for peakIdx in peaks {
                 let offsetNs = UInt64(Double(peakIdx) * nsPerSample)
                 let offsetTicks = offsetNs * UInt64(HostTimeClock.timebase.denom) /
