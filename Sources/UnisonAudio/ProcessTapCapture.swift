@@ -42,13 +42,23 @@ public final class ProcessTapCapture: @unchecked Sendable {
     }
 
     public func stop() {
+        // teardown() invokes AudioDeviceStop, which is synchronous — it returns
+        // only after the last IOProc callback completes. So no further IOProc
+        // can race with the continuation mutation below.
         teardown()
         continuation?.finish()
         continuation = nil
         started = false
     }
 
-    deinit { teardown() }
+    deinit {
+        // Must finish the continuation so any pending AsyncStream consumer
+        // doesn't hang forever when the owner is dropped without calling stop().
+        // teardown() is synchronous on AudioDeviceStop, so no IOProc will fire
+        // after this returns.
+        teardown()
+        continuation?.finish()
+    }
 
     // MARK: - Setup steps
 
@@ -188,10 +198,13 @@ public final class ProcessTapCapture: @unchecked Sendable {
                                count: frameCount)
             }
         }
+        // Use the actual buffer channel count rather than assuming mono — the
+        // CATapDescription requests a mono mixdown, but the HAL may deliver
+        // multi-channel buffers in some configurations.
         let frame = AudioFrame(
             pcm: data,
             sampleRate: Int(nativeSampleRate),
-            channels: 1,
+            channels: Int(firstBuffer.mNumberChannels),
             format: .float32
         )
         continuation?.yield(frame)
