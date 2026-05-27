@@ -11,7 +11,14 @@ public final class BlackHoleSinkCapture: PeerAudioCapture, @unchecked Sendable {
     /// see `UnisonLog`.
     private static let log = UnisonLog(category: "BlackHoleSinkCapture")
 
-    private let engine = AVAudioEngine()
+    /// `var` — recreated on every `start()` call. Reusing the same
+    /// `AVAudioEngine` instance across stop/start cycles leaves stale
+    /// graph state (the `inputNode → mainMixerNode` connection
+    /// installed during the previous session) that hangs the second
+    /// `installTap` call on macOS 26. Allocating a fresh engine
+    /// sidesteps the issue entirely — there's no observable downside,
+    /// `AVAudioEngine()` is cheap (no I/O until `prepare`/`start`).
+    private var engine = AVAudioEngine()
     private let registry: CoreAudioDeviceRegistry
     private var continuation: AsyncStream<AudioFrame>.Continuation?
     /// Same idempotency latch as `AVAudioEngineMicrophone.started`.
@@ -39,6 +46,14 @@ public final class BlackHoleSinkCapture: PeerAudioCapture, @unchecked Sendable {
             Self.log.info("start() — previous session left started=true; calling stop() first")
             stop()
         }
+        // Fresh engine per session. Reusing the previous one (after
+        // `engine.stop()` + `removeTap()` in `stop()`) leaves the
+        // `inputNode → mainMixerNode` connection from the previous
+        // session in the graph, which hangs the next `installTap`
+        // call on macOS 26 — the user-visible symptom is "Start works
+        // the first time but the second Start sticks in `connecting`
+        // and the timer never starts".
+        engine = AVAudioEngine()
         Self.log.info("start() — opening BlackHole 16ch capture")
         return AsyncStream { [weak self] c in
             guard let self else { c.finish(); return }
