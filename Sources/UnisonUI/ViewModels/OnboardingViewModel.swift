@@ -286,7 +286,12 @@ public final class OnboardingViewModel {
         audioCaptureStatus = .inProgress
         refreshOverallBlackHoleStatus()
         await MainActor.run {
-            NSApp.activate(ignoringOtherApps: true)
+            // NSApp is nil in unit-test runs (no AppKit instance), so
+            // guard before calling — otherwise the OnboardingViewModel
+            // tests trap on this implicitly-unwrapped optional.
+            if let app = NSApp {
+                app.activate(ignoringOtherApps: true)
+            }
         }
         try? await Task.sleep(nanoseconds: 100_000_000)
         AudioCapturePermission.triggerPrompt()
