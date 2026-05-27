@@ -171,6 +171,11 @@ public final class SettingsViewModel {
         emitChange()
     }
 
+    public func setExcludedTapBundleIDs(_ ids: [String]) {
+        settings.excludedTapBundleIDs = ids
+        emitChange()
+    }
+
     /// Persist a new OpenAI API key. Writes to the configured Keychain
     /// (if any); the value is also kept in memory so the view's binding
     /// reflects the saved state without reloading. Empty values clear
