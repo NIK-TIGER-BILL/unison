@@ -13,7 +13,8 @@ let package = Package(
         .library(name: "UnisonAudio", targets: ["UnisonAudio"]),
         .library(name: "UnisonSystem", targets: ["UnisonSystem"]),
         .library(name: "UnisonUI", targets: ["UnisonUI"]),
-        .executable(name: "Unison", targets: ["UnisonApp"])
+        .executable(name: "Unison", targets: ["UnisonApp"]),
+        .executable(name: "tap-benchmark", targets: ["TapBenchmark"])
     ],
     // Note: swift-snapshot-testing requires XCTest, which is not
     // available on Command Line Tools-only setups. We ship our own
@@ -29,6 +30,12 @@ let package = Package(
             "UnisonDomain", "UnisonTranslation", "UnisonAudio",
             "UnisonSystem", "UnisonUI"
         ]),
+        .executableTarget(
+            name: "TapBenchmark",
+            dependencies: ["UnisonAudio", "UnisonDomain"],
+            path: "Sources/Tools/TapBenchmark",
+            exclude: ["Info.plist", "tap-benchmark.entitlements"]
+        ),
         .testTarget(name: "UnisonDomainTests", dependencies: ["UnisonDomain", "UnisonUI"]),
         .testTarget(name: "UnisonTranslationTests", dependencies: ["UnisonTranslation"]),
         .testTarget(name: "UnisonAudioTests", dependencies: ["UnisonAudio"],
@@ -47,6 +54,10 @@ let package = Package(
             // "unhandled file" warning per snapshot. Explicit exclude
             // mutes the warning and keeps the test binary small.
             exclude: ["__Snapshots__"]
+        ),
+        .testTarget(
+            name: "TapBenchmarkTests",
+            dependencies: ["TapBenchmark"]
         )
     ]
 )
