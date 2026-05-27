@@ -5,7 +5,6 @@ import Testing
 private func defaultRegistry() -> MockAudioDeviceRegistry {
     let r = MockAudioDeviceRegistry()
     r.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    r.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     return r
 }
 
@@ -63,7 +62,6 @@ private func makeOrchestrator(
 
 @Test @MainActor func orchestrator_startCall_failsWithoutBlackHole2ch() async {
     let registry = MockAudioDeviceRegistry()
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     registry.bh2ch = nil
     let o = makeOrchestrator(registry: registry)
     await o.start(mode: .call, languages: .default)
@@ -75,7 +73,6 @@ private func makeOrchestrator(
     let perms = MockPermissionsService()
     perms.statuses[.microphone] = .denied
     let registry = MockAudioDeviceRegistry()
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     registry.bh2ch = nil
     let o = makeOrchestrator(mic: mic, perms: perms, registry: registry)
     await o.start(mode: .listen, languages: .default)
@@ -114,7 +111,6 @@ private func makeOrchestrator(
 @Test @MainActor func orchestrator_listenMode_opensOnlyIncomingStream() async throws {
     let factory = MockTranslationStreamFactory()
     let registry = MockAudioDeviceRegistry()
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     registry.bh2ch = nil
     let o = makeOrchestrator(factory: factory, registry: registry)
     await o.start(mode: .listen, languages: LanguagePair(mine: .ru, peer: .en))
@@ -316,7 +312,6 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
 @Test @MainActor func orchestrator_blackHole2chDisappearsInCallMode_transitionsToError() async throws {
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     let o = makeOrchestrator(registry: registry)
     await o.start(mode: .call, languages: .default)
 
@@ -338,7 +333,6 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
 @Test @MainActor func orchestrator_inputDeviceDisappears_fallsBackToDefault() async throws {
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     registry.inputs = [AudioDevice(uid: "airpods", name: "AirPods", kind: .input)]
     var settings = Settings.default
     settings.inputDeviceUID = "airpods"

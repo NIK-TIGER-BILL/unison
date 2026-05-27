@@ -8,7 +8,6 @@ import Testing
 private func makeOrchestrator(mixer: MockAudioOutputMixer = .init()) -> TranslationOrchestrator {
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     let perms = MockPermissionsService()
     perms.statuses[.microphone] = .granted
     return TranslationOrchestrator(

@@ -6,8 +6,7 @@ import UnisonDomain
 
 /// Captures system-wide audio output via CoreAudio Process Tap, excluding a
 /// set of processes by bundle ID (macOS 14.2+). Emits Float32 `AudioFrame`s
-/// at the tap's native sample rate over an `AsyncStream`, mirroring
-/// `BlackHoleSinkCapture`'s API.
+/// at the tap's native sample rate over an `AsyncStream`.
 public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     public let excludedBundleIDs: [String]
     private var processObjectIDs: [AudioObjectID] = []  // resolved at start()
@@ -175,9 +174,7 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     // MARK: - IOProc (REALTIME thread)
     //
     // Allocating a `Data` and yielding to `AsyncStream.Continuation` here is
-    // technically not strictly realtime-safe, but it matches
-    // BlackHoleSinkCapture's installTap pattern exactly. Keeping symmetry
-    // makes the benchmark comparison fair. A future production rollout would
+    // technically not strictly realtime-safe. A future optimization would
     // swap this for a lockless ring buffer + consumer thread.
 
     private func onIOProc(

@@ -38,11 +38,9 @@ public struct HelpView: View {
                     flowArrow
                     flowItem(icon: "phone.fill", label: "Zoom\nmic")
                 }
-                // Incoming: Zoom audio → BlackHole 16ch → Unison → headphones.
+                // Incoming: Zoom audio → Process Tap → Unison → headphones.
                 HStack(spacing: 6) {
                     flowItem(icon: "phone.fill", label: "Zoom\naudio")
-                    flowArrow
-                    flowItem(icon: "speaker.wave.2.fill", label: "BlackHole\n16ch")
                     flowArrow
                     flowItem(icon: "waveform.path.ecg", label: "Unison\nперевод")
                     flowArrow
@@ -57,7 +55,6 @@ public struct HelpView: View {
             VStack(alignment: .leading, spacing: 8) {
                 stepRow(index: 1, text: "Откройте настройки звука в Zoom (или Google Meet, Discord и т. д.)")
                 stepRow(index: 2, text: "Микрофон → BlackHole 2ch")
-                stepRow(index: 3, text: "Динамик → BlackHole 16ch")
             }
         }
     }

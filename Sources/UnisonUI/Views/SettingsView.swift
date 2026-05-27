@@ -156,7 +156,7 @@ public struct SettingsView: View {
                     .labelsHidden()
                 }
 
-                Text("Куда играть перевод. Системный output должен быть «BlackHole 16ch».")
+                Text("Куда играть перевод.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -321,9 +321,6 @@ public struct SettingsView: View {
         card(title: "BlackHole") {
             LabeledContent("BlackHole 2ch") {
                 blackHoleStatusRow(status: vm.blackHole2chStatus)
-            }
-            LabeledContent("BlackHole 16ch") {
-                blackHoleStatusRow(status: vm.blackHole16chStatus)
             }
             LabeledContent {
                 InlineButton(

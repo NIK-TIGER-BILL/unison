@@ -19,14 +19,12 @@ struct PopoverViewSnapshotTests {
         state: SessionState = .idle,
         settings: Settings = .default,
         permsGranted: Bool = true,
-        bh2chPresent: Bool = true,
-        bh16chPresent: Bool = true
+        bh2chPresent: Bool = true
     ) -> PopoverViewModel {
         let perms = PreviewPermissions()
         perms.statuses[.microphone] = permsGranted ? .granted : .denied
         let registry = PreviewDeviceRegistry()
         if !bh2chPresent { registry.bh2ch = nil }
-        if !bh16chPresent { registry.bh16ch = nil }
         return .previewing(
             settings: settings,
             state: state,
@@ -68,8 +66,10 @@ struct PopoverViewSnapshotTests {
         snap(darkFloor(PopoverView(vm: vm), size: SnapSize.popover), size: SnapSize.popover)
     }
 
-    @Test func popover_blockedByMissingBlackHole() throws {
-        let vm = makeVM(state: .idle, bh16chPresent: false)
+    @Test func popover_blockedByMissingBlackHole2ch() throws {
+        var settings = Settings.default
+        settings.sessionMode = .call
+        let vm = makeVM(state: .idle, settings: settings, bh2chPresent: false)
         snap(darkFloor(PopoverView(vm: vm), size: SnapSize.popover), size: SnapSize.popover)
     }
 

@@ -75,24 +75,39 @@ func defaultOutputDeviceID() -> AudioDeviceID {
     return id
 }
 
-func blackHole16chDeviceID(registry: CoreAudioDeviceRegistry) -> AudioDeviceID? {
-    guard let bh = registry.findBlackHole16ch() else { return nil }
+/// Find the BlackHole 16ch device ID by scanning CoreAudio's device list
+/// directly. `CoreAudioDeviceRegistry.findBlackHole16ch()` was removed from
+/// production code — this benchmark keeps its own lookup so the 16ch phase
+/// remains self-contained.
+func blackHole16chDeviceID() -> AudioDeviceID? {
     var addr = AudioObjectPropertyAddress(
-        mSelector: kAudioHardwarePropertyTranslateUIDToDevice,
+        mSelector: kAudioHardwarePropertyDevices,
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain
     )
-    var uid: CFString = bh.uid as CFString
-    var dev: AudioDeviceID = 0
-    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-    let status = withUnsafeMutablePointer(to: &uid) { uidPtr -> OSStatus in
-        AudioObjectGetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject), &addr,
-            UInt32(MemoryLayout<CFString>.size), uidPtr,
-            &size, &dev
+    var size: UInt32 = 0
+    AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size)
+    let count = Int(size) / MemoryLayout<AudioDeviceID>.size
+    var ids = [AudioDeviceID](repeating: 0, count: count)
+    AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &ids)
+
+    for id in ids {
+        var nameAddr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceNameCFString,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
         )
+        var nameSize = UInt32(MemoryLayout<CFString?>.size)
+        var cfName: CFString?
+        let status = withUnsafeMutablePointer(to: &cfName) { ptr in
+            AudioObjectGetPropertyData(id, &nameAddr, 0, nil, &nameSize, ptr)
+        }
+        if status == noErr, let name = cfName as String?,
+           name.lowercased().contains("blackhole 16ch") {
+            return id
+        }
     }
-    return status == noErr ? dev : nil
+    return nil
 }
 
 func runMain() async throws {
@@ -106,8 +121,7 @@ func runMain() async throws {
         exit(1)
     }
 
-    let registry = CoreAudioDeviceRegistry()
-    let bhDevice = blackHole16chDeviceID(registry: registry)
+    let bhDevice = blackHole16chDeviceID()
     let blackHolePresent = bhDevice != nil
     let defaultOut = defaultOutputDeviceID()
 

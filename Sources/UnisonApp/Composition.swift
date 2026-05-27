@@ -411,7 +411,6 @@ final class MockBlackHoleInstaller: BlackHoleInstaller, @unchecked Sendable {
     }
 
     func is2chInstalled() -> Bool { installed }
-    func is16chInstalled() -> Bool { installed }
     func runBundledInstaller() async throws {
         try await Task.sleep(nanoseconds: 1_500_000_000)
         installed = true

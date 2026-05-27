@@ -1,8 +1,8 @@
 public enum SessionMode: String, CaseIterable, Codable, Sendable {
     /// Real call. Mic → translated → BlackHole 2ch (virtual mic in
-    /// peer's Zoom). Peer audio (BlackHole 16ch) → translated → speakers.
+    /// peer's Zoom). Peer audio (via Process Tap) → translated → speakers.
     case call
-    /// Passive listen. No mic. Peer audio (BlackHole 16ch) → translated
+    /// Passive listen. No mic. Peer audio (via Process Tap) → translated
     /// → speakers. Used when you're consuming a podcast / video in a
     /// foreign language and just want to hear your own language.
     case listen

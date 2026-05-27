@@ -137,7 +137,7 @@ public final class TranslationOrchestrator {
 
         // Permission gates. Mic permission is required by both `.call`
         // and `.test` (anything that captures from the mic). `.listen`
-        // only consumes BlackHole 16ch, no mic permission needed.
+        // only consumes Process Tap audio, no mic permission needed.
         if mode.requiresMicrophone {
             let status = permissions.currentStatus(.microphone)
             Self.log.info("start() — microphone permission currentStatus=\(String(describing: status))")
@@ -149,9 +149,8 @@ public final class TranslationOrchestrator {
                 return
             }
         }
-        // BlackHole device gates. Only required by modes that touch
-        // BlackHole — `.call` writes to BH 2ch (virtual mic) and reads
-        // BH 16ch (system audio). `.listen` only reads BH 16ch.
+        // BlackHole 2ch gate. Only `.call` writes to BH 2ch (virtual mic).
+        // `.listen` uses Process Tap only — no BH 2ch needed.
         // `.test` doesn't touch BlackHole at all — that's the whole
         // point of the mode (verify translation without needing the
         // driver installed or a real call active).

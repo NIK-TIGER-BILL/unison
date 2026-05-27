@@ -217,10 +217,9 @@ public final class PopoverViewModel {
         let blocked = String(describing: startBlockedReason)
         let micStatus = String(describing: permissions.currentStatus(.microphone))
         let bh2 = deviceRegistry.findBlackHole2ch() != nil
-        let bh16 = deviceRegistry.findBlackHole16ch() != nil
         let preState = String(describing: state)
         Self.log.info("start() called — mode=\(mode.rawValue), pair=\(mineCode)→\(peerCode)")
-        Self.log.info("start() pre-flight — blockedReason=\(blocked), mic=\(micStatus), BH2ch=\(bh2 ? "present" : "missing"), BH16ch=\(bh16 ? "present" : "missing"), state=\(preState)")
+        Self.log.info("start() pre-flight — blockedReason=\(blocked), mic=\(micStatus), BH2ch=\(bh2 ? "present" : "missing"), state=\(preState)")
 
         if orchestrator == nil {
             Self.log.error("start() — orchestrator is nil (preview VM); skipping")
