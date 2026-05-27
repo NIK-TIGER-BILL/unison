@@ -302,3 +302,26 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     #expect(vm.elapsedSecondsString == "00:00")
 }
 
+// MARK: - pillStatusText / pillDotState (T12)
+
+@MainActor
+@Test func transcriptVM_pauseNetworkLost_pillStatus() {
+    let store = TranscriptStore()
+    let vm = TranscriptViewModel(store: store)
+    let started = Date()
+    vm.previewState = .paused(mode: .call, since: Date(), startedAt: started, reason: .networkLost)
+    #expect(vm.pillStatusText == "Пауза")
+    #expect(vm.pillDotState == .paused)
+}
+
+@MainActor
+@Test func transcriptVM_translatingHealthy_pillStatus_empty() {
+    let store = TranscriptStore()
+    let vm = TranscriptViewModel(store: store)
+    let started = Date()
+    vm.previewState = .translating(mode: .call, startedAt: started)
+    vm.previewConnectivityHealth = .healthy
+    #expect(vm.pillStatusText == "")
+    #expect(vm.pillDotState == .active)
+}
+

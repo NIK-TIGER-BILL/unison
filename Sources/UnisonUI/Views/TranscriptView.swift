@@ -99,6 +99,8 @@ public struct TranscriptView: View {
                 isHidden: vm.isHidden,
                 isSettingsOpen: isSettingsOpen,
                 isTestMode: vm.isTestMode,
+                dotState: vm.pillDotState,
+                statusText: vm.pillStatusText,
                 onToggleSettings: { isSettingsOpen.toggle() },
                 onToggleHidden: { vm.toggleHidden() },
                 onStop: { vm.requestStop() }
