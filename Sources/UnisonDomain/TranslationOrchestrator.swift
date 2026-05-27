@@ -771,10 +771,18 @@ public final class TranslationOrchestrator {
             passthroughContinuation = $0
         }
 
-        let watchdog = SilentFrameWatchdog(thresholdSeconds: 10) { [weak self] in
+        // Silent-frame heuristic — informational only. It cannot distinguish
+        // "TCC denied capture" from "nothing is playing right now": both
+        // produce all-zero samples from Process Tap. We saw the false-positive
+        // when TCC log explicitly returned `Auth Right: Allowed (User Consent)`
+        // for kTCCServiceAudioCapture but the user wasn't playing any audio
+        // when they clicked Start. Hard-erroring the session in that case is
+        // wrong UX. We keep the watchdog at a longer threshold and use it for
+        // diagnostics only — don't punish a quiet meeting start.
+        let watchdog = SilentFrameWatchdog(thresholdSeconds: 30) { [weak self] in
             Task { @MainActor [weak self] in
-                Self.log.error("Silent-frame watchdog tripped — TCC audio capture likely denied")
-                self?.state = .error(.audioCaptureDenied)
+                Self.log.info("Silent-frame watchdog — 30s of zero amplitude; either TCC denied capture or no app is producing audio right now")
+                _ = self  // intentionally not flipping state to .error
             }
         }
         watchdog.start()
