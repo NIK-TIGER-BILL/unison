@@ -17,9 +17,11 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     private var continuation: AsyncStream<AudioFrame>.Continuation?
     private var nativeSampleRate: Double = 48000
     private var started = false
+    private let log: UnisonLog
 
     public init(excludedBundleIDs: [String] = []) {
         self.excludedBundleIDs = excludedBundleIDs
+        self.log = UnisonLog(category: "ProcessTapCapture")
     }
 
     public func start() -> AsyncStream<AudioFrame> {
@@ -29,6 +31,9 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
             self.continuation = c
             do {
                 self.resolveExcludedProcessObjects()
+                let bundleIDsList = self.excludedBundleIDs.joined(separator: ", ")
+                self.log.info("[tap.start] excluded=\(bundleIDsList.isEmpty ? "<self only>" : bundleIDsList) processObjectIDs=\(self.processObjectIDs)")
+                self.log.info("[tap.tcc] kTCCServiceAudioCapture status=notQueryable (silent-frame watchdog will verify at runtime)")
                 try self.createTap()
                 try self.createAggregateDevice()
                 try self.queryNativeSampleRate()
@@ -36,6 +41,7 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
                 try self.startDevice()
                 self.started = true
             } catch {
+                self.log.error("[tap.stop] reason=error: \(String(describing: error))")
                 c.finish()
                 self.teardown()
             }
@@ -46,6 +52,7 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
         // teardown() invokes AudioDeviceStop, which is synchronous — it returns
         // only after the last IOProc callback completes. So no further IOProc
         // can race with the continuation mutation below.
+        self.log.info("[tap.stop] reason=user")
         teardown()
         continuation?.finish()
         continuation = nil
@@ -57,6 +64,7 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
         // doesn't hang forever when the owner is dropped without calling stop().
         // teardown() is synchronous on AudioDeviceStop, so no IOProc will fire
         // after this returns.
+        self.log.info("[tap.stop] reason=deinit")
         teardown()
         continuation?.finish()
     }
