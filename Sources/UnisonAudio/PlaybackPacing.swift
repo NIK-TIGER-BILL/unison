@@ -2,28 +2,46 @@ import Foundation
 import AVFoundation
 import UnisonDomain
 
-/// Adaptive playback-rate controller for translation audio.
+/// Adaptive playback-rate controller for translation audio (v3).
 ///
-/// OpenAI Realtime returns translated PCM faster than wall-clock when
-/// the model is responding; scheduling each chunk straight into an
-/// `AVAudioPlayerNode` lets the node's internal queue grow unbounded.
-/// On Bluetooth output the resulting clock skew + accumulated latency
-/// were the most likely cause of the "translation gets quieter over
-/// time and jumps in volume" report — the driver's rate-correction
-/// path kicks in once the queue gets unreasonably deep.
+/// **Why v3 exists.** v1 (`maxRate=1.15`, linear interpolation) was too
+/// timid — buffer grew on long bursts. v2 (P+D with `maxRate=2.5`) ran
+/// the rate to 1.7–2.0× even when arrival rate was only 1.0× real-time,
+/// emptying the buffer between chunks and producing the "word-by-word
+/// with pauses" symptom the user reported. Empirical measurement (see
+/// the `arrival_ema` diag logs) showed the model emits at ≈ 1.0× wall-
+/// clock for our test speaker, with brief clause-bursts to ~1.5×. The
+/// v2 P+D controller had no way to know the long-run arrival rate, so
+/// it treated every per-chunk impulse as if the queue were exploding.
 ///
-/// This controller tracks "samples scheduled" against
-/// `player.playerTime(forNodeTime:)` (which counts samples actually
-/// pulled from the node) and ramps an `AVAudioUnitTimePitch`'s `rate`
-/// up to `maxRate` to drain the backlog without dropping any audio.
-/// Pitch is preserved — speech still sounds like the same voice, just
-/// faster. The ramp uses hysteresis (`targetQueueSec` ↔ `panicQueueSec`)
-/// so the rate doesn't oscillate around the boundary.
+/// **v3 model.** Track the long-run arrival rate as an EMA. Track the
+/// queue depth as a slow EMA so per-chunk impulses don't dominate.
+/// Compute the player's target rate as `arrival_rate + buffer_correction`
+/// where the correction is proportional to "buffer too full" vs "buffer
+/// too empty". Then slew-rate-limit the change so the rate moves
+/// smoothly (under 0.5/sec) and is imperceptible inside a single chunk.
+///
+/// **Invariants enforced.**
+/// 1. `timePitch.rate >= 1.0` always — never play slower than real-time.
+///    Anything slower would let the buffer overflow forever.
+/// 2. `timePitch.rate <= maxRate` (2.5) — above that TimePitch artefacts
+///    become audible on speech.
+/// 3. Rate changes are slew-limited to `maxRateStepPerTick` (0.05 = 0.5
+///    per second). At a 100 ms tick interval this is imperceptible
+///    inside a single ~400 ms chunk.
+///
+/// **What this does NOT solve.** Bluetooth driver clock skew, per-chunk
+/// network jitter, and the model's clause-burst timing all live below
+/// this controller. The pacing keeps the queue *bounded* and the
+/// playback *smooth* — but if the model ever genuinely emits slower
+/// than 1.0× for a sustained period (unlikely but possible), the
+/// buffer must underrun because we can't go below 1.0×.
 ///
 /// Owned by the player; one instance per `AVAudioPlayerNode` whose
 /// output passes through the matching `AVAudioUnitTimePitch`. Call
 /// `start()` once the engine + nodes are running, `didSchedule(samples:)`
-/// after each `scheduleBuffer`, and `reset()` / `stop()` on the engine
+/// after each `scheduleBuffer`, hook the buffer's completion handler to
+/// `didComplete(samples:)`, and `reset()` / `stop()` on the engine
 /// stop path.
 public final class PlaybackPacing: @unchecked Sendable {
     private let player: AVAudioPlayerNode
@@ -32,73 +50,129 @@ public final class PlaybackPacing: @unchecked Sendable {
     private let log: UnisonLog
     private let label: String
 
-    /// Below this queue depth the P-term is 0 (no speedup).
-    static let targetQueueSec: Double = 0.2
-    /// At or above this queue depth the P-term saturates to 1.0.
-    static let panicQueueSec: Double = 1.5
-    /// Hard ceiling on `timePitch.rate`. AVAudioUnitTimePitch supports
-    /// much higher but speech becomes unintelligible past ~3x.
+    // MARK: - Constants
+
+    /// Desired steady-state buffer depth in audio-seconds. The player
+    /// aims to hold roughly this much queued audio at all times — large
+    /// enough to absorb chunk-arrival jitter, small enough not to add
+    /// perceptible latency.
+    static let targetBufferSec: Double = 0.4
+    /// Hard ceiling on `timePitch.rate`. TimePitch supports much higher
+    /// but artefacts (formant smearing, robotic edges) become obvious
+    /// past ≈ 2.5× on speech.
     static let maxRate: Double = 2.5
-    /// Velocity coefficient. `D = clamp(velocity * kDerivative, ±derivativeClamp)`.
-    static let kDerivative: Double = 1.5
-    /// Hard limit on the D-term so a noisy velocity spike doesn't
-    /// whiplash the rate.
-    static let derivativeClamp: Double = 0.5
-    /// Smoothing factor when the new target is higher than current —
-    /// fast attack so bursts get caught quickly.
-    static let attackFactor: Double = 0.7
-    /// Smoothing factor when the new target is lower than current —
-    /// slow release so we keep eating buffered audio before easing off.
-    static let releaseFactor: Double = 0.15
-    /// Polling interval for `tick()`. Velocity is computed as
-    /// `(depth - prevDepth) / tickIntervalSec` assuming the constant
-    /// — Task.sleep jitter (±10ms) is masked by the smoothing pass.
+    /// Hard floor on `timePitch.rate`. Below 1.0 the player falls behind
+    /// real-time and the buffer overflows indefinitely; we never go
+    /// slower than wall-clock even if the buffer is empty.
+    static let minRate: Double = 1.0
+    /// Multiplier on `(depth_smooth - targetBufferSec)` to translate
+    /// buffer error into a rate correction. Tuned so a `panic` depth of
+    /// ≈ 1.5 s (excess = 1.1) hits `maxRate=2.5` from a 1.0 baseline:
+    /// `1.0 + 1.1 × ≈ 1.36 = 2.5`. Round to 1.0 — the slew limiter and
+    /// the EMA filtering make the exact gain non-critical.
+    static let correctionGain: Double = 1.0
+    /// Maximum change in `timePitch.rate` per tick. At a 100 ms tick
+    /// interval, 0.05 means the rate can move at most 0.5 per second
+    /// — well below the threshold of audible glitching on TimePitch.
+    static let maxRateStepPerTick: Double = 0.05
+    /// EMA coefficient for the depth smoother. With `dt=0.1s` this is
+    /// `1 - exp(-dt/τ)` for τ ≈ 2 s, i.e. ≈ 0.05. Long enough to filter
+    /// per-chunk 0 ↔ 0.4 oscillation, short enough to respond to a
+    /// genuine clause-burst within a couple of seconds.
+    static let depthSmoothAlpha: Double = 0.05
+    /// EMA coefficient for the arrival-rate tracker. τ ≈ 5 s — long
+    /// enough to track a steady speaker pace, short enough to adapt
+    /// when the speaker changes cadence.
+    static let arrivalRateAlpha: Double = 0.02
+    /// Polling interval for `tick()`.
     static let tickIntervalSec: Double = 0.1
-    /// Re-log when rate or queue has moved beyond this delta. Keeps
-    /// the diagnostic noise bounded.
+    /// Re-log only when the rate or buffer has moved beyond these
+    /// deltas, to keep diagnostic noise bounded.
     static let logHysteresis: Double = 0.03
 
-    /// Result of one pacing calculation. Decomposed so the diagnostic
-    /// log can show why the rate is what it is (which term dominated).
+    // MARK: - Pure rate computation
+
+    /// Decomposed snapshot of one pacing tick. Returned by `targetRate`
+    /// and consumed by the diagnostic log and the slew step.
     struct RateState: Equatable {
-        let target: Double
-        let p: Double
-        let d: Double
+        /// Buffer-depth error: `depth_smooth - targetBufferSec`. Positive
+        /// means "buffer too full → speed up"; negative means "buffer
+        /// too empty → slow down toward floor".
+        let bufferError: Double
+        /// Rate correction proportional to buffer error.
+        let correction: Double
+        /// Raw target before clamping: `arrival + correction`.
+        let unboundedTarget: Double
+        /// Final target after clamping to `[minRate, maxRate]`. The
+        /// slew step pulls `applied_rate` toward this value.
+        let clampedTarget: Double
     }
 
-    /// Pure rate-target computation. Combines a proportional term
-    /// (how far above `targetQueueSec` we are) with a derivative term
-    /// (how fast the queue is growing or draining), clamps the result
-    /// into `[1.0, maxRate]`. Returns the raw unsmoothed target — the
-    /// caller applies asymmetric smoothing (via `attackFactor`/`releaseFactor` — added in Task 3).
-    static func computeRate(depth: Double, velocity: Double) -> RateState {
-        let pNum = max(0.0, depth - targetQueueSec)
-        let p = min(1.0, pNum / (panicQueueSec - targetQueueSec))
-        let d = max(-derivativeClamp, min(derivativeClamp, velocity * kDerivative))
-        let raw = 1.0 + (p + d) * (maxRate - 1.0)
-        let target = min(maxRate, max(1.0, raw))
-        return RateState(target: target, p: p, d: d)
+    /// Pure rate-target computation. Combines a long-run arrival-rate
+    /// estimate with a buffer-error correction, then clamps the result
+    /// to `[minRate, maxRate]`. The caller applies the slew-rate limit
+    /// via `slewToward(currentRate:target:maxStep:)`.
+    static func targetRate(arrivalRateEMA: Double, depthSmooth: Double) -> RateState {
+        let bufferError = depthSmooth - targetBufferSec
+        let correction = bufferError * correctionGain
+        let unbounded = arrivalRateEMA + correction
+        let clamped = min(maxRate, max(minRate, unbounded))
+        return RateState(
+            bufferError: bufferError,
+            correction: correction,
+            unboundedTarget: unbounded,
+            clampedTarget: clamped
+        )
     }
 
-    /// One-tick smoothing step. Pulls `currentRate` toward `target`
-    /// using `attackFactor` when ramping up (we want to catch bursts
-    /// quickly) and `releaseFactor` when ramping down (we want to
-    /// hold the elevated rate briefly so any residual buffered audio
-    /// finishes draining before we let off).
-    static func smoothed(currentRate: Double, target: Double) -> Double {
-        let factor = target > currentRate ? attackFactor : releaseFactor
-        return currentRate + (target - currentRate) * factor
+    /// One-tick slew step. Pulls `currentRate` toward `target` by at
+    /// most `maxStep` (in either direction). Keeps rate changes
+    /// imperceptibly gradual: at the default `maxRateStepPerTick=0.05`
+    /// and `tickIntervalSec=0.1`, the rate can move at most 0.5 per
+    /// second.
+    static func slewToward(currentRate: Double, target: Double, maxStep: Double) -> Double {
+        let delta = target - currentRate
+        let clampedDelta = max(-maxStep, min(maxStep, delta))
+        return currentRate + clampedDelta
     }
+
+    // MARK: - Stored state
 
     private let lock = NSLock()
     private var scheduledSamples: AVAudioFramePosition = 0
-    /// Last tick's queue depth in seconds — used to compute velocity.
-    /// Reset to 0 in `reset()` so a stop-restart cycle doesn't carry
-    /// a stale value into the first tick.
-    private var prevDepth: Double = 0
+    /// Running total of samples the player has consumed from its scheduled
+    /// queue. Bumped by `didComplete(samples:)` from each `scheduleBuffer`
+    /// completion handler. The pair (`scheduledSamples`, `completedSamples`)
+    /// gives the genuine queue depth without leaking the engine's
+    /// pre-first-buffer silence (which `playerTime.sampleTime` would have
+    /// included and overrun us with — see the type doc comment for why).
+    private var completedSamples: AVAudioFramePosition = 0
     private var ticker: Task<Void, Never>?
     private var lastLoggedRate: Double = 1.0
     private var lastLoggedQueueSec: Double = 0
+    /// DIAG: tick counter so we can force-log every Nth tick at info level.
+    private var tickCount: Int = 0
+    /// Previous-tick snapshots for per-tick arrival and consumption
+    /// rates. Both are reset to 0 on each `reset()`.
+    private var prevScheduledForRate: AVAudioFramePosition = 0
+    private var prevCompletedForRate: AVAudioFramePosition = 0
+    /// Smoothed (EMA) arrival rate. Calibrates the steady-state player
+    /// rate: a healthy session converges this to the average wall-clock
+    /// ratio the server is emitting at (≈ 1.0× for real-time speakers,
+    /// 1.2–1.5× during clause-bursts).
+    private var arrivalRateEMA: Double = 1.0
+    /// Smoothed (EMA) consumption rate. Tracked for diagnostics so we
+    /// can verify arrival ≈ consumption in steady state.
+    private var consumptionRateEMA: Double = 1.0
+    /// Smoothed (EMA) buffer depth in audio-seconds. The pacing
+    /// controller reads this instead of the instantaneous depth so
+    /// per-chunk 0 ↔ 0.4 s impulses don't dominate the rate.
+    private var depthSmooth: Double = 0
+    /// The player's currently-applied rate, kept in Double for slew
+    /// arithmetic. Written to `timePitch.rate` as `Float` on each tick.
+    private var appliedRate: Double = 1.0
+
+    // MARK: - Init / lifecycle
 
     /// - parameter label: short tag for log lines (e.g. "speakers",
     ///   "blackhole2ch") so the two pacing controllers can be told
@@ -115,6 +189,8 @@ public final class PlaybackPacing: @unchecked Sendable {
         self.label = label
     }
 
+    // MARK: - Public API
+
     /// Account for samples just queued via `scheduleBuffer`. Cheap;
     /// call from the schedule hot path.
     public func didSchedule(samples: AVAudioFramePosition) {
@@ -122,8 +198,17 @@ public final class PlaybackPacing: @unchecked Sendable {
         scheduledSamples += samples
     }
 
-    /// Begin polling queue depth and adjusting `timePitch.rate`. Idempotent
-    /// — calling twice replaces the previous tick task.
+    /// Account for samples just consumed by the player. Called from the
+    /// `scheduleBuffer` completion handler, which fires on a CoreAudio
+    /// render thread — must be lock-protected since `tick()` reads the
+    /// counter from the async ticker Task.
+    public func didComplete(samples: AVAudioFramePosition) {
+        lock.lock(); defer { lock.unlock() }
+        completedSamples += samples
+    }
+
+    /// Begin polling buffer depth and adjusting `timePitch.rate`.
+    /// Idempotent — calling twice replaces the previous tick task.
     public func start() {
         ticker?.cancel()
         ticker = Task { [weak self] in
@@ -141,39 +226,69 @@ public final class PlaybackPacing: @unchecked Sendable {
         ticker = nil
     }
 
-    /// Zero the scheduled-samples counter and the timePitch rate. Call
-    /// at the start of each `play(_:)` invocation so a stop-restart
-    /// cycle doesn't carry a stale backlog into the new session.
+    /// Reset all counters and EMAs. Call at the start of each `play(_:)`
+    /// invocation so a stop-restart cycle doesn't carry stale state.
     public func reset() {
         lock.lock()
         scheduledSamples = 0
-        prevDepth = 0
+        completedSamples = 0
+        prevScheduledForRate = 0
+        prevCompletedForRate = 0
         lock.unlock()
         timePitch.rate = 1.0
+        appliedRate = 1.0
         lastLoggedRate = 1.0
         lastLoggedQueueSec = 0
+        tickCount = 0
+        arrivalRateEMA = 1.0
+        consumptionRateEMA = 1.0
+        depthSmooth = 0
     }
 
+    // MARK: - Tick
+
     private func tick() {
-        guard let nodeTime = player.lastRenderTime,
-              let playerTime = player.playerTime(forNodeTime: nodeTime)
-        else { return }
+        tickCount += 1
         lock.lock()
-        let queuedSamples = max(0, scheduledSamples - playerTime.sampleTime)
+        let scheduledSnapshot = scheduledSamples
+        let completedSnapshot = completedSamples
+        let scheduledDelta = scheduledSnapshot - prevScheduledForRate
+        let completedDelta = completedSnapshot - prevCompletedForRate
+        prevScheduledForRate = scheduledSnapshot
+        prevCompletedForRate = completedSnapshot
+        let queuedSamples = max(0, scheduledSnapshot - completedSnapshot)
         let depth = Double(queuedSamples) / sampleRate
-        let velocity = (depth - prevDepth) / Self.tickIntervalSec
-        prevDepth = depth
         lock.unlock()
 
-        let state = Self.computeRate(depth: depth, velocity: velocity)
-        let currentRate = Double(timePitch.rate)
-        let newRate = Self.smoothed(currentRate: currentRate, target: state.target)
-        timePitch.rate = Float(newRate)
+        // Per-tick instantaneous rates as dimensionless ratios
+        // (audio-seconds per wall-clock-second).
+        let dtSamples = Self.tickIntervalSec * sampleRate
+        let instantArrival = Double(scheduledDelta) / dtSamples
+        let instantConsumption = Double(completedDelta) / dtSamples
 
-        if abs(newRate - lastLoggedRate) >= Self.logHysteresis ||
+        // Update EMAs.
+        arrivalRateEMA += (instantArrival - arrivalRateEMA) * Self.arrivalRateAlpha
+        consumptionRateEMA += (instantConsumption - consumptionRateEMA) * Self.arrivalRateAlpha
+        depthSmooth += (depth - depthSmooth) * Self.depthSmoothAlpha
+
+        // Compute target and slew toward it.
+        let state = Self.targetRate(arrivalRateEMA: arrivalRateEMA, depthSmooth: depthSmooth)
+        appliedRate = Self.slewToward(currentRate: appliedRate,
+                                      target: state.clampedTarget,
+                                      maxStep: Self.maxRateStepPerTick)
+        timePitch.rate = Float(appliedRate)
+
+        // DIAG: log every 10th tick (1 s) at info level so the steady-state
+        // arrival/consumption ratio and the rate's progression are
+        // visible without per-chunk noise.
+        if tickCount % 10 == 0 {
+            log.info("[\(label)] pacing tick=\(tickCount) depth=\(String(format: "%.3fs", depth)) depth_smooth=\(String(format: "%.3fs", depthSmooth)) arrival_ema=\(String(format: "%.3fx", arrivalRateEMA)) consumption_ema=\(String(format: "%.3fx", consumptionRateEMA)) target=\(String(format: "%.3f", state.clampedTarget)) applied=\(String(format: "%.3f", appliedRate))")
+        }
+
+        if abs(appliedRate - lastLoggedRate) >= Self.logHysteresis ||
             abs(depth - lastLoggedQueueSec) >= 0.5 {
-            log.debug("[\(label)] pacing — queue=\(String(format: "%.2fs", depth)) velocity=\(String(format: "%+.2fs/s", velocity)) rate=\(String(format: "%.3f", newRate)) (P=\(String(format: "%.2f", state.p)) D=\(String(format: "%+.2f", state.d)))")
-            lastLoggedRate = newRate
+            log.debug("[\(label)] pacing — queue=\(String(format: "%.2fs", depth)) arrival=\(String(format: "%.2fx", arrivalRateEMA)) target=\(String(format: "%.3f", state.clampedTarget)) applied=\(String(format: "%.3f", appliedRate)) bufErr=\(String(format: "%+.2f", state.bufferError))")
+            lastLoggedRate = appliedRate
             lastLoggedQueueSec = depth
         }
     }

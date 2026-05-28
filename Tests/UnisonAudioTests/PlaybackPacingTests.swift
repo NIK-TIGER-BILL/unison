@@ -2,81 +2,80 @@ import Foundation
 import Testing
 @testable import UnisonAudio
 
-@Test func pacing_noQueue_targetIsOne() {
-    let r = PlaybackPacing.computeRate(depth: 0.0, velocity: 0.0)
-    #expect(r.target == 1.0)
-    #expect(r.p == 0.0)
-    #expect(r.d == 0.0)
+// MARK: - targetRate
+
+@Test func pacing_atBufferTarget_targetMatchesArrival() {
+    // At exactly the desired buffer depth (0.4 s), correction = 0, so
+    // the player should simply match the arrival rate.
+    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.0, depthSmooth: 0.4)
+    #expect(r.bufferError == 0.0)
+    #expect(r.correction == 0.0)
+    #expect(r.clampedTarget == 1.0)
 }
 
-@Test func pacing_atTarget_targetIsOne() {
-    // At exactly the target queue depth, P=0 (no speedup).
-    let r = PlaybackPacing.computeRate(depth: 0.2, velocity: 0.0)
-    #expect(r.target == 1.0)
-    #expect(r.p == 0.0)
-    #expect(r.d == 0.0)
+@Test func pacing_arrivalAboveOne_targetTracksArrival() {
+    // Fast speaker: model emits at 1.3× wall-clock, buffer at target.
+    // Player needs to consume at 1.3× to keep up. No correction.
+    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.3, depthSmooth: 0.4)
+    #expect(abs(r.clampedTarget - 1.3) < 0.0001)
 }
 
-@Test func pacing_midRange_targetIsApproxOneAndThreeQuarters() {
-    // depth=0.85, target=0.2, panic=1.5 → P=(0.85-0.2)/1.3=0.5
-    // target = 1.0 + 0.5 * (2.5 - 1.0) = 1.75
-    let r = PlaybackPacing.computeRate(depth: 0.85, velocity: 0.0)
-    #expect(abs(r.target - 1.75) < 0.0001)
-    #expect(abs(r.p - 0.5) < 0.0001)
+@Test func pacing_bufferOverTarget_targetGetsCorrection() {
+    // Buffer 1.0 s (over target by 0.6) → correction = +0.6.
+    // Player rate = arrival (1.0) + correction (0.6) = 1.6.
+    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.0, depthSmooth: 1.0)
+    #expect(abs(r.bufferError - 0.6) < 0.0001)
+    #expect(abs(r.clampedTarget - 1.6) < 0.0001)
 }
 
-@Test func pacing_atPanic_targetSaturatesAtMax() {
-    let r = PlaybackPacing.computeRate(depth: 1.5, velocity: 0.0)
-    #expect(r.target == 2.5)
-    #expect(r.p == 1.0)
-    #expect(r.d == 0.0)
+@Test func pacing_bufferPanic_targetSaturatesAtMax() {
+    // Buffer 1.5 s + arrival 1.5× → unbounded target = 1.5 + 1.1 = 2.6.
+    // Clamped to maxRate 2.5.
+    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.5, depthSmooth: 1.5)
+    #expect(r.unboundedTarget > 2.5)
+    #expect(r.clampedTarget == 2.5)
 }
 
-@Test func pacing_anticipatesGrowth_targetRisesEvenAtShallowQueue() {
-    // depth=0.3 → P=(0.3-0.2)/1.3 ≈ 0.0769
-    // velocity=+0.5 → D = clamp(0.5*1.5, ±0.5) = 0.5 (clamped)
-    // target = 1.0 + (0.0769 + 0.5) * 1.5 ≈ 1.865
-    let r = PlaybackPacing.computeRate(depth: 0.3, velocity: 0.5)
-    #expect(r.target > 1.5)
-    #expect(r.target < 2.0)
-    #expect(r.d == 0.5)
+@Test func pacing_bufferEmpty_targetFloorsAtOne() {
+    // Buffer near 0 (underrun risk). Correction = -0.4 × 1.0 = -0.4.
+    // Unbounded target = 1.0 - 0.4 = 0.6 → clamped to minRate 1.0.
+    // This is the critical invariant: we NEVER slow below real-time.
+    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.0, depthSmooth: 0.0)
+    #expect(r.unboundedTarget < 1.0)
+    #expect(r.clampedTarget == 1.0)
 }
 
-@Test func pacing_drainingQueue_reducesTargetBelowPureProportional() {
-    // depth=1.0, velocity=-0.5
-    // P=(1.0-0.2)/1.3 ≈ 0.615
-    // D = clamp(-0.5*1.5, ±0.5) = -0.5
-    // target = 1.0 + (0.615 - 0.5) * 1.5 ≈ 1.173
-    let withDrain = PlaybackPacing.computeRate(depth: 1.0, velocity: -0.5)
-    let noDrain = PlaybackPacing.computeRate(depth: 1.0, velocity: 0.0)
-    #expect(withDrain.target < noDrain.target)
-    #expect(abs(withDrain.target - 1.173) < 0.01)
-    #expect(withDrain.d == -0.5)
+@Test func pacing_slowArrival_targetStillFloorsAtOne() {
+    // Pathological case: model emits slower than real-time (0.7×).
+    // We still cannot go below 1.0 — the floor protects against
+    // buffer overflow. The slow arrival eventually empties the
+    // buffer; underrun is unavoidable in this case but the rate
+    // never goes below realtime.
+    let r = PlaybackPacing.targetRate(arrivalRateEMA: 0.7, depthSmooth: 0.4)
+    #expect(r.clampedTarget == 1.0)
 }
 
-@Test func pacing_derivativeIsClamped_extremeVelocityDoesNotExplodeRate() {
-    // velocity=10 is absurd. D should clamp to 0.5 not 15.
-    // depth=0.2 (P=0). target = 1.0 + 0.5 * 1.5 = 1.75
-    let r = PlaybackPacing.computeRate(depth: 0.2, velocity: 10.0)
-    #expect(abs(r.target - 1.75) < 0.0001)
-    #expect(r.d == 0.5)
+// MARK: - slewToward
+
+@Test func pacing_slew_upBySmallStep() {
+    // current=1.0, target=2.5, maxStep=0.05 → next=1.05 (capped).
+    let next = PlaybackPacing.slewToward(currentRate: 1.0, target: 2.5, maxStep: 0.05)
+    #expect(abs(next - 1.05) < 0.0001)
 }
 
-@Test func pacing_attack_movesSeventyPercentTowardTarget() {
-    // currentRate=1.0, target=2.5 → next = 1.0 + (2.5-1.0)*0.7 = 2.05
-    let next = PlaybackPacing.smoothed(currentRate: 1.0, target: 2.5)
-    #expect(abs(next - 2.05) < 0.0001)
+@Test func pacing_slew_downBySmallStep() {
+    // current=2.0, target=1.0, maxStep=0.05 → next=1.95.
+    let next = PlaybackPacing.slewToward(currentRate: 2.0, target: 1.0, maxStep: 0.05)
+    #expect(abs(next - 1.95) < 0.0001)
 }
 
-@Test func pacing_release_movesFifteenPercentTowardTarget() {
-    // currentRate=2.5, target=1.0 → next = 2.5 + (1.0-2.5)*0.15 = 2.275
-    let next = PlaybackPacing.smoothed(currentRate: 2.5, target: 1.0)
-    #expect(abs(next - 2.275) < 0.0001)
+@Test func pacing_slew_closeEnough_noOvershoot() {
+    // current=1.02, target=1.04, maxStep=0.05 → reaches target without overshoot.
+    let next = PlaybackPacing.slewToward(currentRate: 1.02, target: 1.04, maxStep: 0.05)
+    #expect(abs(next - 1.04) < 0.0001)
 }
 
-@Test func pacing_atTarget_smoothingIsIdentity() {
-    // No change requested — output equals input regardless of which
-    // factor would have applied.
-    let next = PlaybackPacing.smoothed(currentRate: 1.5, target: 1.5)
+@Test func pacing_slew_atTarget_unchanged() {
+    let next = PlaybackPacing.slewToward(currentRate: 1.5, target: 1.5, maxStep: 0.05)
     #expect(next == 1.5)
 }
