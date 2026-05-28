@@ -92,6 +92,15 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         translatedPlayer.play()
         originalPlayer.play()
 
+        // Diagnostic dump: if `UNISON_DUMP_PLAYBACK_WAV=<path>` is set,
+        // install a tap on the timePitch output and stream every render
+        // block to a 48 kHz float32 mono WAV. Captures EXACTLY what the
+        // mainMixer receives — the same signal whose amplitude envelope
+        // we want to verify against the model output. Used to diagnose
+        // the user-reported fade on Bluetooth output without needing
+        // them to instrument anything themselves.
+        startPlaybackDumpIfRequested()
+
         if pacing == nil {
             pacing = PlaybackPacing(player: translatedPlayer,
                                     timePitch: timePitch,
@@ -100,6 +109,105 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         }
         pacing?.reset()
         pacing?.start()
+    }
+
+    /// Test-only dump file handle for the pre-mixer tap. Format: float32
+    /// mono at 48 kHz. Written incrementally — last 8 bytes of the WAV
+    /// header (data chunk size) is patched on stop. If the process is
+    /// killed before stop(), the WAV size is the 0xFFFF_FFFF sentinel
+    /// and most players will read to EOF anyway.
+    private var dumpHandle: FileHandle?
+    private var dumpedByteCount: UInt32 = 0
+
+    private func startPlaybackDumpIfRequested() {
+        guard let path = ProcessInfo.processInfo.environment["UNISON_DUMP_PLAYBACK_WAV"],
+              !path.isEmpty else { return }
+        // If we're called from a stop-restart cycle, tap may still be installed.
+        timePitch.removeTap(onBus: 0)
+
+        let url = URL(fileURLWithPath: path)
+        FileManager.default.createFile(atPath: path, contents: nil)
+        guard let handle = try? FileHandle(forWritingTo: url) else {
+            Self.log.error("UNISON_DUMP_PLAYBACK_WAV — could not open \(path)")
+            return
+        }
+        // Placeholder WAV header (data chunk size = 0xFFFF_FFFF until stop()
+        // patches it). 48 kHz mono float32 PCM.
+        handle.write(Self.buildWAVHeader(sampleRate: 48_000,
+                                         channels: 1,
+                                         bitsPerSample: 32,
+                                         isFloat: true,
+                                         dataSize: 0xFFFF_FFFF))
+        dumpHandle = handle
+        dumpedByteCount = 0
+        Self.log.info("UNISON_DUMP_PLAYBACK_WAV — capturing post-timePitch audio to \(path)")
+
+        let tapFormat = timePitch.outputFormat(forBus: 0)
+        timePitch.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { [weak self] buffer, _ in
+            guard let self else { return }
+            let frames = Int(buffer.frameLength)
+            guard frames > 0, let ch = buffer.floatChannelData?[0] else { return }
+            let bytes = frames * MemoryLayout<Float>.size
+            let data = Data(bytes: ch, count: bytes)
+            self.appendDumpData(data)
+        }
+    }
+
+    private func appendDumpData(_ d: Data) {
+        guard let handle = dumpHandle else { return }
+        handle.write(d)
+        dumpedByteCount &+= UInt32(d.count)
+    }
+
+    private func closePlaybackDumpIfNeeded() {
+        guard let handle = dumpHandle else { return }
+        timePitch.removeTap(onBus: 0)
+        let dataSize = dumpedByteCount
+        let fileSize = dataSize &+ 36
+        try? handle.seek(toOffset: 4)
+        handle.write(Self.uint32LE(fileSize))
+        try? handle.seek(toOffset: 40)
+        handle.write(Self.uint32LE(dataSize))
+        try? handle.close()
+        dumpHandle = nil
+        let durationSec = Double(dataSize) / 4.0 / 48_000.0
+        Self.log.info("UNISON_DUMP_PLAYBACK_WAV — closed; \(dataSize) bytes (~\(String(format: "%.2f", durationSec))s)")
+    }
+
+    // MARK: - WAV header helpers (shared with BlackHole2chPlayer)
+
+    private static func buildWAVHeader(sampleRate: UInt32,
+                                       channels: UInt16,
+                                       bitsPerSample: UInt16,
+                                       isFloat: Bool,
+                                       dataSize: UInt32) -> Data {
+        var header = Data()
+        let byteRate = sampleRate * UInt32(channels) * UInt32(bitsPerSample / 8)
+        let blockAlign = channels * (bitsPerSample / 8)
+        let fileSize = dataSize &+ 36
+        header.append(contentsOf: "RIFF".utf8)
+        header.append(uint32LE(fileSize))
+        header.append(contentsOf: "WAVE".utf8)
+        header.append(contentsOf: "fmt ".utf8)
+        header.append(uint32LE(16))
+        header.append(uint16LE(isFloat ? 3 : 1)) // 1 = PCM int, 3 = IEEE float
+        header.append(uint16LE(channels))
+        header.append(uint32LE(sampleRate))
+        header.append(uint32LE(byteRate))
+        header.append(uint16LE(blockAlign))
+        header.append(uint16LE(bitsPerSample))
+        header.append(contentsOf: "data".utf8)
+        header.append(uint32LE(dataSize))
+        return header
+    }
+
+    private static func uint32LE(_ v: UInt32) -> Data {
+        var le = v.littleEndian
+        return Data(bytes: &le, count: 4)
+    }
+    private static func uint16LE(_ v: UInt16) -> Data {
+        var le = v.littleEndian
+        return Data(bytes: &le, count: 2)
     }
 
     public func playTranslated(_ frames: AsyncStream<AudioFrame>) async {
@@ -121,6 +229,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
 
     public func stop() {
         pacing?.stop()
+        closePlaybackDumpIfNeeded()
         translatedPlayer.stop()
         originalPlayer.stop()
         engine.stop()

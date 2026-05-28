@@ -9,8 +9,30 @@ struct ArrivalRecord {
     let t: TimeInterval
     /// Decoded PCM byte count (24kHz int16 → 2 bytes per sample).
     let bytes: Int
+    /// Decoded int16 PCM data (24kHz mono). Stored so we can compute
+    /// RMS per chunk and assemble a WAV of the model's raw output for
+    /// listening / offline analysis. ~10 KB per 400 ms chunk; total
+    /// ~500 KB - 1 MB per 20 s session.
+    let pcm: Data
     /// Audio duration this chunk represents.
     var audioDurationSec: Double { Double(bytes) / 2.0 / 24_000.0 }
+
+    /// Root-mean-square amplitude in `[0, 1]`. int16 normalised to ±1
+    /// then RMS computed over the samples. The single most useful
+    /// signal for "is the model getting quieter mid-session".
+    var rms: Float {
+        guard pcm.count >= 2 else { return 0 }
+        let sampleCount = pcm.count / 2
+        var sumSq: Double = 0
+        pcm.withUnsafeBytes { raw in
+            let p = raw.bindMemory(to: Int16.self).baseAddress!
+            for i in 0..<sampleCount {
+                let s = Double(p[i]) / 32_767.0
+                sumSq += s * s
+            }
+        }
+        return Float((sumSq / Double(sampleCount)).squareRoot())
+    }
 }
 
 /// Runs one end-to-end Realtime Translate session: streams the input
@@ -64,12 +86,18 @@ struct Session {
         let t0 = Date()
         let arrivalsBox = ArrivalsBox()
 
-        // Receive task — records every output delta with its arrival time.
+        // Receive task — records every output delta with its arrival
+        // time AND the decoded int16 PCM so we can analyse amplitude
+        // over time and reassemble the model's raw output as a WAV.
         let outputStream = await stream.output
         let receiveTask = Task {
             for await frame in outputStream {
                 let t = Date().timeIntervalSince(t0)
-                await arrivalsBox.append(ArrivalRecord(t: t, bytes: frame.pcm.count))
+                await arrivalsBox.append(ArrivalRecord(
+                    t: t,
+                    bytes: frame.pcm.count,
+                    pcm: frame.pcm
+                ))
             }
         }
 
