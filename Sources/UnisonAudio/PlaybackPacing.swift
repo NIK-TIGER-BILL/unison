@@ -88,6 +88,16 @@ public final class PlaybackPacing: @unchecked Sendable {
         return RateState(target: target, p: p, d: d)
     }
 
+    /// One-tick smoothing step. Pulls `currentRate` toward `target`
+    /// using `attackFactor` when ramping up (we want to catch bursts
+    /// quickly) and `releaseFactor` when ramping down (we want to
+    /// hold the elevated rate briefly so any residual buffered audio
+    /// finishes draining before we let off).
+    static func smoothed(currentRate: Double, target: Double) -> Double {
+        let factor = target > currentRate ? attackFactor : releaseFactor
+        return currentRate + (target - currentRate) * factor
+    }
+
     private let lock = NSLock()
     private var scheduledSamples: AVAudioFramePosition = 0
     private var ticker: Task<Void, Never>?

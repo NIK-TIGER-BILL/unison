@@ -61,3 +61,22 @@ import Testing
     #expect(abs(r.target - 1.75) < 0.0001)
     #expect(r.d == 0.5)
 }
+
+@Test func pacing_attack_movesSeventyPercentTowardTarget() {
+    // currentRate=1.0, target=2.5 → next = 1.0 + (2.5-1.0)*0.7 = 2.05
+    let next = PlaybackPacing.smoothed(currentRate: 1.0, target: 2.5)
+    #expect(abs(next - 2.05) < 0.0001)
+}
+
+@Test func pacing_release_movesFifteenPercentTowardTarget() {
+    // currentRate=2.5, target=1.0 → next = 2.5 + (1.0-2.5)*0.15 = 2.275
+    let next = PlaybackPacing.smoothed(currentRate: 2.5, target: 1.0)
+    #expect(abs(next - 2.275) < 0.0001)
+}
+
+@Test func pacing_atTarget_smoothingIsIdentity() {
+    // No change requested — output equals input regardless of which
+    // factor would have applied.
+    let next = PlaybackPacing.smoothed(currentRate: 1.5, target: 1.5)
+    #expect(next == 1.5)
+}
