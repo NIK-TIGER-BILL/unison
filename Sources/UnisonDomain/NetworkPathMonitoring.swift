@@ -35,28 +35,58 @@ public protocol NetworkPathMonitoring: AnyObject, Sendable {
 /// alongside the protocol so unit tests in `UnisonDomain` can drive
 /// orchestrator pause/resume transitions without importing
 /// `UnisonSystem`.
+///
+/// **Multi-subscriber semantics.** Each `statusStream` access returns
+/// a fresh stream, mirroring the real `NetworkMonitor`. This is what
+/// makes orchestrator stop/start cycles testable — the second
+/// session subscribes again and gets the current status as its first
+/// yield instead of an already-consumed iterator (review
+/// finding #4).
 public final class MockNetworkPathMonitor: NetworkPathMonitoring, @unchecked Sendable {
-    public let statusStream: AsyncStream<NetworkPathStatus>
-    private let continuation: AsyncStream<NetworkPathStatus>.Continuation
+    private let lock = NSLock()
     private var _currentStatus: NetworkPathStatus
-    public var currentStatus: NetworkPathStatus { _currentStatus }
+    private var subscribers: [UUID: AsyncStream<NetworkPathStatus>.Continuation] = [:]
+
+    public var currentStatus: NetworkPathStatus {
+        lock.lock()
+        defer { lock.unlock() }
+        return _currentStatus
+    }
+
+    public var statusStream: AsyncStream<NetworkPathStatus> {
+        AsyncStream { continuation in
+            let id = UUID()
+            self.lock.lock()
+            self.subscribers[id] = continuation
+            let initial = self._currentStatus
+            self.lock.unlock()
+            continuation.yield(initial)
+            continuation.onTermination = { [weak self] _ in
+                guard let self else { return }
+                self.lock.lock()
+                self.subscribers[id] = nil
+                self.lock.unlock()
+            }
+        }
+    }
 
     public init(initial: NetworkPathStatus) {
-        var continuation: AsyncStream<NetworkPathStatus>.Continuation!
-        self.statusStream = AsyncStream { continuation = $0 }
-        self.continuation = continuation
         self._currentStatus = initial
-        // First yield is the initial status so subscribers don't
-        // have to read `currentStatus` separately on attach.
-        continuation.yield(initial)
     }
 
     public func simulate(_ status: NetworkPathStatus) {
+        lock.lock()
         _currentStatus = status
-        continuation.yield(status)
+        let conts = Array(subscribers.values)
+        lock.unlock()
+        for c in conts { c.yield(status) }
     }
 
     public func finish() {
-        continuation.finish()
+        lock.lock()
+        let conts = Array(subscribers.values)
+        subscribers.removeAll()
+        lock.unlock()
+        for c in conts { c.finish() }
     }
 }

@@ -99,14 +99,20 @@ public final class TranscriptViewModel {
         )
     }
 
-    /// Seconds since the orchestrator transitioned to `.translating`. Zero
-    /// while idle / connecting / errored. In snapshot/preview mode the VM
-    /// is constructed without an orchestrator; callers can set
-    /// `previewElapsedSeconds` to drive the pill timer artificially.
+    /// Seconds since the orchestrator first entered `.translating`. The
+    /// timer keeps ticking across `.paused` and `.reconnecting` because
+    /// the orchestrator preserves `sessionStartedAt` across those
+    /// transitions on purpose — snapping to 00:00 on every WS flap
+    /// looks like the session got dropped (review finding #6 — the
+    /// pill timer contradicted the popover header's running counter).
+    /// Zero while idle / connecting / errored. In snapshot/preview
+    /// mode the VM is constructed without an orchestrator; callers
+    /// can set `previewElapsedSeconds` to drive the pill timer
+    /// artificially.
     public var elapsedSeconds: TimeInterval {
         if let override = previewElapsedSeconds { return override }
         guard let orch = orchestrator,
-              case .translating(_, let startedAt) = orch.state else {
+              let startedAt = orch.state.sessionStartedAt else {
             return 0
         }
         return nowProvider().timeIntervalSince(startedAt)

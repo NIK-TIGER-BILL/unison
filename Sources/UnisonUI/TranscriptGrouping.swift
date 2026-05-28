@@ -90,11 +90,20 @@ enum TranscriptGrouping {
         let primaryParts = splitOnSentence(primaryRaw, threshold: splitThreshold)
         let secondaryParts = splitOnSentence(secondaryRaw, threshold: splitThreshold)
         let n = max(primaryParts.count, secondaryParts.count, 1)
-        // The "translation lost" placeholder belongs at the tail of the
-        // broken phrase, not interleaved into earlier-rendered fragments
-        // — so we apply the flag only to the LAST bubble of this entry's
-        // split.
         let translationLost = entry.translationAtRisk && entry.translatedText.isEmpty
+        // For peer entries where the translation never arrived, the
+        // primary slot is empty on EVERY split bubble (peer's primary
+        // is `translatedText`). The previous behaviour put the
+        // placeholder only on the tail bubble, which left bubbles
+        // 0..N-2 rendering an empty Text('') above their secondary
+        // (the original) with no indicator that a translation was
+        // expected. For peer entries we propagate the flag to all
+        // bubbles so the placeholder appears wherever primary would
+        // otherwise be blank. For `.me` entries the original behaviour
+        // (tail-only) is still correct because the primary slot is
+        // `originalText`, which is non-empty per-bubble (review
+        // finding #12).
+        let propagateToAll = translationLost && entry.speaker == .peer
         var out: [BubbleViewModel] = []
         out.reserveCapacity(n)
         for i in 0..<n {
@@ -103,6 +112,7 @@ enum TranscriptGrouping {
             // Stable derivative id so SwiftUI diffing works across re-groups.
             let bubbleId = derive(entry.id, suffix: i)
             let isLastOfSplit = (i == n - 1)
+            let bubbleLost = propagateToAll || (translationLost && isLastOfSplit)
             out.append(
                 BubbleViewModel(
                     id: bubbleId,
@@ -112,7 +122,7 @@ enum TranscriptGrouping {
                     isFirstInGroup: false,
                     isLastInGroup: false,
                     isLive: false,
-                    translationLost: translationLost && isLastOfSplit
+                    translationLost: bubbleLost
                 )
             )
         }

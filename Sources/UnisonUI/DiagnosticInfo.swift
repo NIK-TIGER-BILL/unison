@@ -84,13 +84,36 @@ public struct DiagnosticInfo: Sendable, Equatable {
     /// projection of properties — `DiagnosticSheet` renders these
     /// without any further translation.
     public var statusLines: [String] {
-        [
+        var lines = [
             "Сессия: \(sessionState)",
             "Микрофон: \(micDevice ?? "по умолчанию")",
             "Аудио-выход: \(speakerDevice ?? "по умолчанию")",
             "BlackHole 2ch: \(blackHole2ch)",
-            "OpenAI ключ: \(openAIKeyStatus)"
+            "OpenAI ключ: \(openAIKeyStatus)",
+            "Связь: \(healthLabel(connectivityHealth))"
         ]
+        // Per-stream health is the diagnostic surface for the
+        // asymmetric-failure story this PR added — include it in
+        // statusLines so it lands in both the sheet AND the
+        // copy-to-clipboard plaintext (review finding #11).
+        if let me = meStreamHealth {
+            lines.append("  • Моя речь: \(healthLabel(me))")
+        }
+        if let peer = peerStreamHealth {
+            lines.append("  • Собеседник: \(healthLabel(peer))")
+        }
+        return lines
+    }
+
+    /// Russian label for a ConnectivityHealth value. Mirrors the
+    /// popover wording so the diagnostic text matches what the user
+    /// saw before they opened the sheet.
+    private func healthLabel(_ h: ConnectivityHealth) -> String {
+        switch h {
+        case .healthy: return "норма"
+        case .slow: return "медленная"
+        case .recovering: return "восстанавливается"
+        }
     }
 
     /// Russian-language one-liners for the "Система" section.

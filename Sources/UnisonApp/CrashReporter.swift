@@ -148,17 +148,39 @@ public enum CrashReporter {
             return nil
         }
         let raw = (try? String(contentsOf: markerURL, encoding: .utf8)) ?? ""
-        // Always delete the marker even if parsing fails — leaving a
-        // malformed marker would re-trigger the alert on every launch.
+        let lines = raw.split(separator: "\n", omittingEmptySubsequences: true)
+        // Parse before deleting. If the marker is malformed (zero-byte
+        // from an interrupted write, partially-flushed during the
+        // crash), we still want to surface a crash report — just
+        // without the precise pid/timestamp. Synthesise sensible
+        // defaults rather than swallowing the signal entirely
+        // (review finding #15: previous version silently dropped
+        // any marker it couldn't parse).
+        let pid: Int
+        let startedAt: Date
+        if lines.count >= 2,
+           let parsedPID = Int(lines[0]),
+           let parsedTS = TimeInterval(lines[1]) {
+            pid = parsedPID
+            startedAt = Date(timeIntervalSince1970: parsedTS)
+        } else {
+            // Marker exists but is unreadable. We still know a crash
+            // happened (else `applicationWillTerminate` would have
+            // removed the marker), so report it with a best-effort
+            // timestamp = file mtime, pid = 0 sentinel.
+            let attrs = try? FileManager.default.attributesOfItem(atPath: markerURL.path)
+            startedAt = (attrs?[.modificationDate] as? Date) ?? Date()
+            pid = 0
+            FileLogStore.shared.write(
+                category: "CrashReporter",
+                level: "error",
+                message: "marker file malformed (length \(raw.count)) — surfacing crash with best-effort metadata"
+            )
+        }
+        // Delete only after successful read so a sporadic IO error
+        // doesn't lose the signal.
         try? FileManager.default.removeItem(at: markerURL)
 
-        let lines = raw.split(separator: "\n", omittingEmptySubsequences: true)
-        guard lines.count >= 2,
-              let pid = Int(lines[0]),
-              let ts = TimeInterval(lines[1]) else {
-            return nil
-        }
-        let startedAt = Date(timeIntervalSince1970: ts)
         let logTail = readUnisonLogTail(lineCount: 80)
         let ipsPath = findLatestIPSFile(notOlderThan: startedAt)
         return CrashReport(
