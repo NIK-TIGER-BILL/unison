@@ -79,9 +79,6 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// (how fast the queue is growing or draining), clamps the result
     /// into `[1.0, maxRate]`. Returns the raw unsmoothed target — the
     /// caller applies asymmetric smoothing (via `attackFactor`/`releaseFactor` — added in Task 3).
-    ///
-    /// At this task's checkpoint the D-term is hardcoded to 0; Task 2
-    /// fills it in.
     static func computeRate(depth: Double, velocity: Double) -> RateState {
         let pNum = max(0.0, depth - targetQueueSec)
         let p = min(1.0, pNum / (panicQueueSec - targetQueueSec))
