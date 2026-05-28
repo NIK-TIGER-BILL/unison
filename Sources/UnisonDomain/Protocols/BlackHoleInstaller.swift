@@ -1,20 +1,18 @@
 public protocol BlackHoleInstaller: Sendable {
     func is2chInstalled() -> Bool
-    func is16chInstalled() -> Bool
     /// Fetches the latest BlackHole release from GitHub, downloads the
-    /// 2ch + 16ch `.pkg` payloads, and runs the system installer under a
-    /// single admin-auth prompt. The method name is historical — nothing
+    /// 2ch `.pkg` payload, and runs the system installer under an
+    /// admin-auth prompt. The method name is historical — nothing
     /// is bundled in the `.app` anymore; the download happens at install
     /// time when the user clicks "Установить" in onboarding.
     ///
     /// Implementations MUST perform a post-install verification step:
-    /// after `installer(8)` exits, re-check `is2chInstalled()` /
-    /// `is16chInstalled()` (which read CoreAudio's device list) and
-    /// throw `BlackHoleInstallError.verificationFailed` if the devices
-    /// did not appear. Without this contract, a silent install failure
-    /// would surface as a status-flip back to `.pending` in the
-    /// onboarding UI — exactly the bug that motivated splitting this
-    /// error out.
+    /// after `installer(8)` exits, re-check `is2chInstalled()`
+    /// (which reads CoreAudio's device list) and throw
+    /// `BlackHoleInstallError.verificationFailed` if the device did not
+    /// appear. Without this contract, a silent install failure would
+    /// surface as a status-flip back to `.pending` in the onboarding UI
+    /// — exactly the bug that motivated splitting this error out.
     func runBundledInstaller() async throws
 }
 
@@ -27,9 +25,9 @@ public enum BlackHoleInstallError: Error, Equatable {
     /// associated value is the HTTP status when available, `-1`
     /// otherwise.
     case releaseFetchFailed(Int)
-    /// The latest release does not expose a 2ch + 16ch `.pkg` pair.
-    /// Upstream has been known to remove `.pkg` assets from GitHub
-    /// releases (https://existential.audio/blackhole/).
+    /// The latest release tag could not be used to construct a valid
+    /// download URL for the 2ch `.pkg`. Upstream has been known to
+    /// change URL patterns (https://existential.audio/blackhole/).
     case assetsNotFound
     /// Downloading one of the `.pkg` files failed.
     case downloadFailed

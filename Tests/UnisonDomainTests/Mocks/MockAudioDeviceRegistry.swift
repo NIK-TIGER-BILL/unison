@@ -5,7 +5,6 @@ public final class MockAudioDeviceRegistry: AudioDeviceRegistry, @unchecked Send
     public var inputs: [AudioDevice] = []
     public var outputs: [AudioDevice] = []
     public var bh2ch: AudioDevice?
-    public var bh16ch: AudioDevice?
     private var changesContinuation: AsyncStream<Void>.Continuation?
     public let deviceChanges: AsyncStream<Void>
 
@@ -17,6 +16,5 @@ public final class MockAudioDeviceRegistry: AudioDeviceRegistry, @unchecked Send
     public func availableInputDevices() -> [AudioDevice] { inputs }
     public func availableOutputDevices() -> [AudioDevice] { outputs }
     public func findBlackHole2ch() -> AudioDevice? { bh2ch }
-    public func findBlackHole16ch() -> AudioDevice? { bh16ch }
     public func notifyDeviceChange() { changesContinuation?.yield() }
 }

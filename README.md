@@ -31,21 +31,19 @@ swift test
 RECORD_SNAPSHOTS=1 ./scripts/test.sh --filter UnisonUITests
 ```
 
-### Running without a real BlackHole install
+### Running in dev mode (mocked Process Tap)
 
-The bundled `.pkg` resources under `Resources/blackhole/` are not in the
-repo. To exercise the onboarding / settings flows end-to-end without
-prompting for the admin password (and without an actual driver
-install), set `UNISON_DEV_MODE=1`:
+Process Tap audio capture requires TCC permissions that may prompt for auth.
+To exercise the onboarding / settings flows end-to-end without these prompts,
+set `UNISON_DEV_MODE=1`:
 
 ```bash
 UNISON_DEV_MODE=1 swift run Unison
 ```
 
-In dev mode the `BundledBlackHoleInstaller` is replaced by an
-in-process mock that "installs" after a ~1.5s delay — both `is2chInstalled()`
-and `is16chInstalled()` then report `true`, so the onboarding flow
-advances and you can sanity-check the rest of the app.
+In dev mode the `ProcessTapCapture` is replaced by a synthetic audio source
+that plays predefined sine-wave test signals. The onboarding flow advances
+normally, and you can sanity-check the rest of the app.
 
 See `docs/superpowers/specs/2026-05-19-unison-design.md` for the design doc and
 `docs/superpowers/plans/2026-05-19-unison.md` for the implementation plan.

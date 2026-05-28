@@ -60,7 +60,6 @@ public final class SettingsViewModel {
     /// Current BlackHole install state, derived from `deviceRegistry`
     /// but overridden during a re-install to show the warn pulse.
     public var blackHole2chStatus: BlackHoleStatus = .ready
-    public var blackHole16chStatus: BlackHoleStatus = .ready
 
     /// Stored mirrors of the input / output device lists. These were
     /// previously *computed* properties that called into the registry
@@ -121,7 +120,6 @@ public final class SettingsViewModel {
 
         // Seed BlackHole status from the registry.
         self.blackHole2chStatus = (deviceRegistry.findBlackHole2ch() != nil) ? .ready : .error
-        self.blackHole16chStatus = (deviceRegistry.findBlackHole16ch() != nil) ? .ready : .error
 
         // Seed device lists. Composition rewires `onDeviceListChanged`
         // immediately after construction to keep them fresh while the
@@ -168,6 +166,11 @@ public final class SettingsViewModel {
 
     public func setOriginalMixVolume(_ v: Float) {
         settings.originalMixVolume = v
+        emitChange()
+    }
+
+    public func setExcludedTapBundleIDs(_ ids: [String]) {
+        settings.excludedTapBundleIDs = ids
         emitChange()
     }
 
@@ -244,7 +247,6 @@ public final class SettingsViewModel {
             // Nothing wired — still fake a UI tick so tests can observe.
             isReinstallingBlackHole = true
             blackHole2chStatus = .warn
-            blackHole16chStatus = .warn
             isReinstallingBlackHole = false
             refreshBlackHoleStatus()
             bumpSavedTimestamp()
@@ -252,7 +254,6 @@ public final class SettingsViewModel {
         }
         isReinstallingBlackHole = true
         blackHole2chStatus = .warn
-        blackHole16chStatus = .warn
         do {
             try await installer.runBundledInstaller()
         } catch {
@@ -264,12 +265,11 @@ public final class SettingsViewModel {
         bumpSavedTimestamp()
     }
 
-    /// Re-reads BlackHole presence from the device registry and
-    /// updates `blackHoleNchStatus`. Public so AppDelegate can call
+    /// Re-reads BlackHole 2ch presence from the device registry and
+    /// updates `blackHole2chStatus`. Public so AppDelegate can call
     /// after a hot-plug event.
     public func refreshBlackHoleStatus() {
         blackHole2chStatus = (deviceRegistry.findBlackHole2ch() != nil) ? .ready : .error
-        blackHole16chStatus = (deviceRegistry.findBlackHole16ch() != nil) ? .ready : .error
     }
 
     // MARK: - Private

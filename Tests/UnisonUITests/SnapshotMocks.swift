@@ -20,9 +20,7 @@ final class PreviewPermissions: PermissionsService, @unchecked Sendable {
 
 final class PreviewInstaller: BlackHoleInstaller, @unchecked Sendable {
     var installed2ch = true
-    var installed16ch = true
     func is2chInstalled() -> Bool { installed2ch }
-    func is16chInstalled() -> Bool { installed16ch }
     func runBundledInstaller() async throws {}
 }
 
@@ -37,7 +35,6 @@ final class PreviewDeviceRegistry: AudioDeviceRegistry, @unchecked Sendable {
     var inputs: [AudioDevice] = []
     var outputs: [AudioDevice] = []
     var bh2ch: AudioDevice? = AudioDevice(uid: "BlackHole2ch", name: "BlackHole 2ch", kind: .input)
-    var bh16ch: AudioDevice? = AudioDevice(uid: "BlackHole16ch", name: "BlackHole 16ch", kind: .input)
     let deviceChanges: AsyncStream<Void>
 
     init() {
@@ -49,5 +46,4 @@ final class PreviewDeviceRegistry: AudioDeviceRegistry, @unchecked Sendable {
     func availableInputDevices() -> [AudioDevice] { inputs }
     func availableOutputDevices() -> [AudioDevice] { outputs }
     func findBlackHole2ch() -> AudioDevice? { bh2ch }
-    func findBlackHole16ch() -> AudioDevice? { bh16ch }
 }

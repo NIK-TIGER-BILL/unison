@@ -3,10 +3,9 @@ import CoreAudio
 import UnisonDomain
 
 /// Installer that fetches the **latest** BlackHole release from GitHub
-/// at runtime, downloads the `2ch` and `16ch` `.pkg` payloads into the
-/// temporary directory, verifies their signatures via `pkgutil`, and
-/// invokes the system installer under a single `osascript` admin-auth
-/// prompt.
+/// at runtime, downloads the `2ch` `.pkg` payload into the temporary
+/// directory, verifies its signature via `pkgutil`, and invokes the
+/// system installer under an `osascript` admin-auth prompt.
 ///
 /// The name is kept for backwards compatibility (call sites, tests, and
 /// the `BlackHoleInstaller` protocol's `runBundledInstaller()` method
@@ -118,7 +117,6 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
     }
 
     public func is2chInstalled() -> Bool { hasDevice(named: "BlackHole 2ch") }
-    public func is16chInstalled() -> Bool { hasDevice(named: "BlackHole 16ch") }
 
     public func runBundledInstaller() async throws {
         Self.log.info("runBundledInstaller — start")
@@ -141,7 +139,7 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
             throw BlackHoleInstallError.releaseFetchFailed(-1)
         }
 
-        // 2. Build download URLs from the release tag.
+        // 2. Build download URL from the release tag.
         //
         // BlackHole upstream stopped attaching .pkg files to GitHub releases
         // since v0.6.0 — `release.assets` is empty. Instead, the maintainer
@@ -149,36 +147,27 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
         // URL pattern (the same one Homebrew Cask uses):
         //
         //   https://existential.audio/downloads/BlackHole2ch-{version}.pkg
-        //   https://existential.audio/downloads/BlackHole16ch-{version}.pkg
         //
         // We read `tag_name` from the GitHub API ("v0.6.1") and strip the
         // "v" prefix to build the version segment.
         let version = Self.normalizeVersion(release.tagName)
         guard
-            let url2ch = URL(string: "https://existential.audio/downloads/BlackHole2ch-\(version).pkg"),
-            let url16ch = URL(string: "https://existential.audio/downloads/BlackHole16ch-\(version).pkg")
+            let url2ch = URL(string: "https://existential.audio/downloads/BlackHole2ch-\(version).pkg")
         else {
-            Self.log.error("Failed to construct download URLs for version \(version)")
+            Self.log.error("Failed to construct download URL for version \(version)")
             throw BlackHoleInstallError.assetsNotFound
         }
         Self.log.info("Download URL 2ch: \(url2ch.absoluteString)")
-        Self.log.info("Download URL 16ch: \(url16ch.absoluteString)")
 
-        // 3. Download both to temp.
+        // 3. Download to temp.
         let tmp = FileManager.default.temporaryDirectory
         let pkg2chURL = tmp.appendingPathComponent("Unison-BlackHole2ch.pkg")
-        let pkg16chURL = tmp.appendingPathComponent("Unison-BlackHole16ch.pkg")
 
         do {
             Self.log.info("Downloading 2ch pkg to \(pkg2chURL.path)")
             try await downloadFile(url2ch, pkg2chURL)
             let size2ch = (try? FileManager.default.attributesOfItem(atPath: pkg2chURL.path)[.size] as? Int) ?? -1
             Self.log.info("2ch pkg downloaded: \(size2ch) bytes")
-
-            Self.log.info("Downloading 16ch pkg to \(pkg16chURL.path)")
-            try await downloadFile(url16ch, pkg16chURL)
-            let size16ch = (try? FileManager.default.attributesOfItem(atPath: pkg16chURL.path)[.size] as? Int) ?? -1
-            Self.log.info("16ch pkg downloaded: \(size16ch) bytes")
         } catch let error as BlackHoleInstallError {
             Self.log.error("Download failed: \(String(describing: error))")
             throw error
@@ -187,28 +176,24 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
             throw BlackHoleInstallError.downloadFailed
         }
 
-        // 4. Verify signatures.
+        // 4. Verify signature.
         Self.log.info("Verifying 2ch pkg signature")
         try verifySignature(at: pkg2chURL)
-        Self.log.info("Verifying 16ch pkg signature")
-        try verifySignature(at: pkg16chURL)
 
-        // 5. Install both under one admin prompt.
+        // 5. Install under one admin prompt.
         do {
             Self.log.info("Invoking installer under osascript admin prompt")
-            try runInstaller(pkgs: [pkg2chURL, pkg16chURL])
+            try runInstaller(pkgs: [pkg2chURL])
             Self.log.info("osascript installer call returned success")
         } catch {
             Self.log.error("Installer invocation failed: \(String(describing: error))")
             // Cleanup even on failure so we don't litter temp.
             try? FileManager.default.removeItem(at: pkg2chURL)
-            try? FileManager.default.removeItem(at: pkg16chURL)
             throw error
         }
 
         // 6. Cleanup.
         try? FileManager.default.removeItem(at: pkg2chURL)
-        try? FileManager.default.removeItem(at: pkg16chURL)
 
         // 7. Post-install verification.
         //
@@ -238,7 +223,7 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
             Self.log.error("Post-install verification FAILED — BlackHole devices not in CoreAudio enumeration")
             throw BlackHoleInstallError.verificationFailed
         }
-        Self.log.info("Post-install verification OK — BlackHole 2ch + 16ch present")
+        Self.log.info("Post-install verification OK — BlackHole 2ch present")
     }
 
     // MARK: - Asset selection
@@ -385,22 +370,22 @@ public final class BundledBlackHoleInstaller: BlackHoleInstaller, @unchecked Sen
 
     // MARK: - CoreAudio device check
 
-    /// Poll CoreAudio until both BlackHole devices appear, or give up.
+    /// Poll CoreAudio until the BlackHole 2ch device appears, or give up.
     /// CoreAudio's device list doesn't refresh synchronously when
     /// `installer(8)` finishes loading the kext, so we re-check a few
     /// times with a small sleep between attempts.
     ///
     /// When a `verifyInstalled` override is wired (test seam), the
-    /// override fully replaces the per-device CoreAudio probe — useful
-    /// for hermetic unit tests that don't want to depend on the host
-    /// machine's audio device list.
+    /// override fully replaces the CoreAudio probe — useful for hermetic
+    /// unit tests that don't want to depend on the host machine's audio
+    /// device list.
     private func verifyDevicesAppeared(maxAttempts: Int, delayMs: UInt64) async -> Bool {
         for attempt in 1...maxAttempts {
             let installed: Bool
             if let override = verifyInstalledOverride {
                 installed = override()
             } else {
-                installed = is2chInstalled() && is16chInstalled()
+                installed = is2chInstalled()
             }
             Self.log.info("Verification attempt \(attempt)/\(maxAttempts): installed=\(installed)")
             if installed {

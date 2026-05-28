@@ -43,7 +43,6 @@ public final class DiagnosticCollector {
         let speakerDevice = Self.deviceName(uid: popVM.settings.outputDeviceUID,
                                             candidates: registry.availableOutputDevices())
         let bh2 = registry.findBlackHole2ch() != nil ? "present" : "missing"
-        let bh16 = registry.findBlackHole16ch() != nil ? "present" : "missing"
 
         // Presence + length only — never the key itself.
         let openAIKeyStatus: String = {
@@ -64,7 +63,6 @@ public final class DiagnosticCollector {
             micDevice: micDevice,
             speakerDevice: speakerDevice,
             blackHole2ch: bh2,
-            blackHole16ch: bh16,
             openAIKeyStatus: openAIKeyStatus,
             recentErrors: Array(recentErrors),
             recentLogLines: allLines,

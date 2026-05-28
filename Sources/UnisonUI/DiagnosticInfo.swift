@@ -26,8 +26,6 @@ public struct DiagnosticInfo: Sendable, Equatable {
     public let speakerDevice: String?
     /// `"present"` or `"missing"`.
     public let blackHole2ch: String
-    /// `"present"` or `"missing"`.
-    public let blackHole16ch: String
     /// e.g. `"present (length 51)"` or `"empty"` — never the key value.
     public let openAIKeyStatus: String
     /// Most-recent few `SessionState` error transitions, with timestamps.
@@ -47,7 +45,6 @@ public struct DiagnosticInfo: Sendable, Equatable {
         micDevice: String? = nil,
         speakerDevice: String? = nil,
         blackHole2ch: String,
-        blackHole16ch: String,
         openAIKeyStatus: String,
         recentErrors: [String] = [],
         recentLogLines: [String] = [],
@@ -60,7 +57,6 @@ public struct DiagnosticInfo: Sendable, Equatable {
         self.micDevice = micDevice
         self.speakerDevice = speakerDevice
         self.blackHole2ch = blackHole2ch
-        self.blackHole16ch = blackHole16ch
         self.openAIKeyStatus = openAIKeyStatus
         self.recentErrors = recentErrors
         self.recentLogLines = recentLogLines
@@ -78,7 +74,6 @@ public struct DiagnosticInfo: Sendable, Equatable {
             "Микрофон: \(micDevice ?? "по умолчанию")",
             "Аудио-выход: \(speakerDevice ?? "по умолчанию")",
             "BlackHole 2ch: \(blackHole2ch)",
-            "BlackHole 16ch: \(blackHole16ch)",
             "OpenAI ключ: \(openAIKeyStatus)"
         ]
     }

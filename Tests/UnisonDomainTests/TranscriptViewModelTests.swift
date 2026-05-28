@@ -8,7 +8,6 @@ import Testing
 private func makeOrchestrator(mixer: MockAudioOutputMixer = .init()) -> TranslationOrchestrator {
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     let perms = MockPermissionsService()
     perms.statuses[.microphone] = .granted
     return TranslationOrchestrator(
@@ -88,11 +87,11 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     let vm = TranscriptViewModel(store: TranscriptStore())
     vm.updateSizeIndex(2.8)
     #expect(vm.sizeIndex == 2.8)
-    #expect(vm.sizeLabel == "L") // round(2.8) → 3 → "L"
+    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: vm.sizeIndex) == "L") // round(2.8) → 3 → "L"
     // Out-of-range
     vm.updateSizeIndex(10)
     #expect(vm.sizeIndex == 4)
-    #expect(vm.sizeLabel == "XL")
+    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: vm.sizeIndex) == "XL")
     vm.updateSizeIndex(-5)
     #expect(vm.sizeIndex == 0)
     #expect(vm.bubbleScale == 0.75)

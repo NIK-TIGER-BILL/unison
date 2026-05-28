@@ -39,11 +39,6 @@ public final class CoreAudioDeviceRegistry: AudioDeviceRegistry, @unchecked Send
             .map { AudioDevice(uid: $0.uid, name: $0.name, kind: .output) }
     }
 
-    public func findBlackHole16ch() -> AudioDevice? {
-        allDevices().first { $0.name.lowercased().contains("blackhole 16ch") }
-            .map { AudioDevice(uid: $0.uid, name: $0.name, kind: .input) }
-    }
-
     public func defaultOutputDeviceUID() -> String? {
         var addr = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultOutputDevice,

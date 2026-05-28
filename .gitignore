@@ -18,6 +18,15 @@ Resources/blackhole/*.pkg
 # Tart VM screenshot harness output
 vm-screenshots/
 
+# Tart VM tap-benchmark harness output (run logs + results JSON)
+vm-tap-benchmark/run-*.log
+vm-tap-benchmark/results-*.json
+vm-tap-benchmark/.vm.log
+vm-tap-benchmark/.vm.pid
+
+# pacing-eval CLI output (CSVs, dumped WAVs, etc.)
+pacing-eval-out/
+
 # VM integration test artifacts (kept locally for debugging — never committed)
 vm-integration-test.log
 vm-integration-test-output.wav

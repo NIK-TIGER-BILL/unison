@@ -5,7 +5,6 @@ import UnisonDomain
 public enum StartBlockedReason: Equatable, Sendable {
     case micPermissionRequired
     case blackHole2chMissing
-    case blackHole16chMissing
 }
 
 /// Tiny enum for the popover's primary button icon. Mapped at the view
@@ -205,14 +204,6 @@ public final class PopoverViewModel {
         if mode == .call, deviceRegistry.findBlackHole2ch() == nil {
             return .blackHole2chMissing
         }
-        // BlackHole 16ch required by `.call` + `.listen` (system audio
-        // capture). `.test` doesn't touch BH at all — pre-flight should
-        // not gate on it, otherwise the user can't run the self-test
-        // before installing BlackHole.
-        if mode == .call || mode == .listen,
-           deviceRegistry.findBlackHole16ch() == nil {
-            return .blackHole16chMissing
-        }
         return nil
     }
 
@@ -226,10 +217,9 @@ public final class PopoverViewModel {
         let blocked = String(describing: startBlockedReason)
         let micStatus = String(describing: permissions.currentStatus(.microphone))
         let bh2 = deviceRegistry.findBlackHole2ch() != nil
-        let bh16 = deviceRegistry.findBlackHole16ch() != nil
         let preState = String(describing: state)
         Self.log.info("start() called — mode=\(mode.rawValue), pair=\(mineCode)→\(peerCode)")
-        Self.log.info("start() pre-flight — blockedReason=\(blocked), mic=\(micStatus), BH2ch=\(bh2 ? "present" : "missing"), BH16ch=\(bh16 ? "present" : "missing"), state=\(preState)")
+        Self.log.info("start() pre-flight — blockedReason=\(blocked), mic=\(micStatus), BH2ch=\(bh2 ? "present" : "missing"), state=\(preState)")
 
         if orchestrator == nil {
             Self.log.error("start() — orchestrator is nil (preview VM); skipping")
@@ -303,8 +293,6 @@ public final class PopoverViewModel {
             return "Нет доступа к микрофону. Откройте Настройки → Privacy & Security → Microphone."
         case .blackHole2chMissing:
             return "BlackHole 2ch не найден. Установите драйвер в Onboarding."
-        case .blackHole16chMissing:
-            return "BlackHole 16ch не найден. Установите драйвер в Onboarding."
         case .networkLost:
             return "Нет связи с серверами OpenAI. Проверьте интернет."
         case .apiKeyInvalid:
@@ -329,6 +317,8 @@ public final class PopoverViewModel {
             // unplugged). Server-side stalls would surface via the
             // reconnect path with .networkLost.
             return "Микрофон не подаёт сигнал. Проверьте, что выбрано правильное устройство в Настройках, и попробуйте снова."
+        case .audioCaptureDenied:
+            return "Нет доступа к захвату системного звука. Откройте Настройки → Конфиденциальность и безопасность → Запись экрана и системного звука → Только запись системного звука."
         }
     }
 }

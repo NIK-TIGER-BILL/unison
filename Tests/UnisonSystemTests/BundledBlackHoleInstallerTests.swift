@@ -90,14 +90,13 @@ func install_happyPath_invokesPkgutilAndInstaller() async throws {
     try await installer.runBundledInstaller()
 
     let calls = processCalls.withLock { $0 }
-    #expect(calls.count == 3) // 2× pkgutil + 1× osascript
+    #expect(calls.count == 2) // 1× pkgutil + 1× osascript
     #expect(calls[0].0 == "/usr/sbin/pkgutil")
     #expect(calls[0].1.first == "--check-signature")
-    #expect(calls[1].0 == "/usr/sbin/pkgutil")
-    #expect(calls[2].0 == "/usr/bin/osascript")
-    // The osascript invocation must chain both installer commands with
-    // a single `do shell script ... with administrator privileges`.
-    let script = calls[2].1.last ?? ""
+    #expect(calls[1].0 == "/usr/bin/osascript")
+    // The osascript invocation installs the 2ch pkg under administrator
+    // privileges.
+    let script = calls[1].1.last ?? ""
     #expect(script.contains("with administrator privileges"))
     #expect(script.contains("&&"))
     #expect(script.contains("installer -pkg"))
@@ -112,7 +111,6 @@ func install_happyPath_invokesPkgutilAndInstaller() async throws {
     let urls = downloadedURLs.withLock { $0 }
     #expect(urls == [
         "https://existential.audio/downloads/BlackHole2ch-0.6.1.pkg",
-        "https://existential.audio/downloads/BlackHole16ch-0.6.1.pkg",
     ])
 }
 

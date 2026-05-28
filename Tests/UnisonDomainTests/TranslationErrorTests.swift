@@ -14,9 +14,10 @@ import Testing
 
 @Test func translationError_userFacingMessage_isShort() {
     let allCases: [TranslationError] = [
-        .permissionDenied(.microphone), .blackHole2chMissing, .blackHole16chMissing,
+        .permissionDenied(.microphone), .blackHole2chMissing,
         .apiKeyInvalid, .rateLimited(retryAfter: 5), .insufficientCredits,
-        .networkLost, .inputDeviceUnavailable, .outputDeviceUnavailable
+        .networkLost, .inputDeviceUnavailable, .outputDeviceUnavailable,
+        .audioCaptureDenied
     ]
     for err in allCases {
         #expect(err.shortMessage.count < 60, "Message too long: \(err.shortMessage)")

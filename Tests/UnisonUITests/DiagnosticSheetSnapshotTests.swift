@@ -16,7 +16,6 @@ struct DiagnosticSheetSnapshotTests {
             micDevice: "AirPods Pro Max",
             speakerDevice: "AirPods Pro Max",
             blackHole2ch: "present",
-            blackHole16ch: "present",
             openAIKeyStatus: "present (length 51)",
             recentErrors: [
                 "12:37:27.708  [Orchestrator] handleStreamFailure speaker=peer error=networkLost",
@@ -66,7 +65,6 @@ struct DiagnosticSheetSnapshotTests {
             micDevice: nil,
             speakerDevice: nil,
             blackHole2ch: "present",
-            blackHole16ch: "present",
             openAIKeyStatus: "empty",
             recentErrors: [],
             recentLogLines: [],
@@ -91,7 +89,6 @@ struct DiagnosticInfoTests {
             micDevice: "AirPods",
             speakerDevice: "MacBook Pro Speakers",
             blackHole2ch: "present",
-            blackHole16ch: "missing",
             openAIKeyStatus: "present (length 51)",
             recentErrors: ["12:37:27 boom"],
             recentLogLines: ["12:37:27 hello"]
@@ -101,7 +98,7 @@ struct DiagnosticInfoTests {
         #expect(txt.contains("MacBookPro18,3"))
         #expect(txt.contains("error(.apiKeyInvalid)"))
         #expect(txt.contains("AirPods"))
-        #expect(txt.contains("BlackHole 16ch: missing"))
+        #expect(txt.contains("BlackHole 2ch: present"))
         #expect(txt.contains("present (length 51)"))
         #expect(txt.contains("12:37:27 boom"))
         #expect(txt.contains("12:37:27 hello"))
@@ -114,7 +111,6 @@ struct DiagnosticInfoTests {
             device: "Mac",
             sessionState: "idle",
             blackHole2ch: "present",
-            blackHole16ch: "present",
             openAIKeyStatus: "present (length 51)"
         )
         let txt = info.asPlainText
@@ -131,7 +127,6 @@ struct DiagnosticInfoTests {
             device: "Mac",
             sessionState: "idle",
             blackHole2ch: "present",
-            blackHole16ch: "present",
             openAIKeyStatus: "empty",
             recentLogLines: []
         )

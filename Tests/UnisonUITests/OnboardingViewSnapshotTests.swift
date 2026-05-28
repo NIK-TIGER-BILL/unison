@@ -32,7 +32,6 @@ struct OnboardingViewSnapshotTests {
     @Test func onboarding_initialPending() throws {
         let installer = PreviewInstaller()
         installer.installed2ch = false
-        installer.installed16ch = false
         let perms = PreviewPermissions()
         perms.statuses[.microphone] = .notDetermined
         let vm = makeVM(installer: installer, permissions: perms)
@@ -42,7 +41,6 @@ struct OnboardingViewSnapshotTests {
     @Test func onboarding_blackHoleInstalling() throws {
         let installer = PreviewInstaller()
         installer.installed2ch = false
-        installer.installed16ch = false
         let perms = PreviewPermissions()
         perms.statuses[.microphone] = .notDetermined
         let vm = makeVM(installer: installer, permissions: perms)
@@ -53,7 +51,6 @@ struct OnboardingViewSnapshotTests {
     @Test func onboarding_microphoneError() throws {
         let installer = PreviewInstaller()
         installer.installed2ch = true
-        installer.installed16ch = true
         let perms = PreviewPermissions()
         perms.statuses[.microphone] = .denied
         let vm = makeVM(installer: installer, permissions: perms)
@@ -64,7 +61,6 @@ struct OnboardingViewSnapshotTests {
     @Test func onboarding_allDone() throws {
         let installer = PreviewInstaller()
         installer.installed2ch = true
-        installer.installed16ch = true
         let perms = PreviewPermissions()
         perms.statuses[.microphone] = .granted
         let kc = PreviewKeychain()

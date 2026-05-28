@@ -5,10 +5,15 @@ import Testing
 // Mock helpers
 final class MockInstaller: BlackHoleInstaller, @unchecked Sendable {
     var installed2ch = true
-    var installed16ch = true
+    var _runBundledInstaller: (() async throws -> Void)?
     func is2chInstalled() -> Bool { installed2ch }
-    func is16chInstalled() -> Bool { installed16ch }
-    func runBundledInstaller() async throws { installed2ch = true; installed16ch = true }
+    func runBundledInstaller() async throws {
+        if let action = _runBundledInstaller {
+            try await action()
+        } else {
+            installed2ch = true
+        }
+    }
 }
 
 final class MockKeychain: KeychainService, @unchecked Sendable {
@@ -33,18 +38,19 @@ final class MockKeychain: KeychainService, @unchecked Sendable {
 @Test func onboarding_markBlackHoleInstalled_advancesStep() async {
     let installer = MockInstaller()
     installer.installed2ch = false
-    installer.installed16ch = false
     let vm = OnboardingViewModel(
         permissions: MockPermissionsService(),
         installer: installer,
         keychain: MockKeychain()
     )
-    #expect(vm.steps.first { $0.kind == .blackHole }?.isDone == false)
+    #expect(vm.blackHoleInstallStatus == .pending)
 
     installer.installed2ch = true
-    installer.installed16ch = true
     vm.refresh()
-    #expect(vm.steps.first { $0.kind == .blackHole }?.isDone == true)
+    // Install sub-task is now done (2ch appeared in CoreAudio).
+    // Overall .blackHole step still requires audio capture grant.
+    #expect(vm.blackHoleInstallStatus == .done)
+    #expect(vm.steps.first { $0.kind == .blackHole }?.isDone == false)
 }
 
 @MainActor
@@ -152,15 +158,15 @@ func onboarding_clearError_dropsErrorState() {
 func onboarding_installBlackHole_succeedsTransitionsToDone() async {
     let installer = MockInstaller()
     installer.installed2ch = false
-    installer.installed16ch = false
     let vm = OnboardingViewModel(
         permissions: MockPermissionsService(),
         installer: installer,
         keychain: MockKeychain()
     )
     await vm.installBlackHole()
-    #expect(vm.status[.blackHole] == .done)
-    #expect(vm.steps.first { $0.kind == .blackHole }?.isDone == true)
+    // Install sub-task done. Overall .blackHole still requires audio capture.
+    #expect(vm.blackHoleInstallStatus == .done)
+    #expect(vm.steps.first { $0.kind == .blackHole }?.isDone == false)
 }
 
 @MainActor
@@ -169,7 +175,6 @@ func onboarding_installBlackHole_failureSetsErrorStatus() async {
     final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
         struct InstallError: Error {}
         func is2chInstalled() -> Bool { false }
-        func is16chInstalled() -> Bool { false }
         func runBundledInstaller() async throws { throw InstallError() }
     }
     let vm = OnboardingViewModel(
@@ -198,7 +203,6 @@ func onboarding_installBlackHole_verificationFailedShowsExplicitError() async {
     // anything went wrong.
     final class VerificationFailingInstaller: BlackHoleInstaller, @unchecked Sendable {
         func is2chInstalled() -> Bool { false }
-        func is16chInstalled() -> Bool { false }
         func runBundledInstaller() async throws {
             throw BlackHoleInstallError.verificationFailed
         }
@@ -227,7 +231,6 @@ func onboarding_installBlackHole_userCanceledAuthShowsCancelError() async {
     // generic "see Console.app" copy.
     final class CancelingInstaller: BlackHoleInstaller, @unchecked Sendable {
         func is2chInstalled() -> Bool { false }
-        func is16chInstalled() -> Bool { false }
         func runBundledInstaller() async throws {
             throw BlackHoleInstallError.installFailed("0:0: execution error: User canceled. (-128)")
         }
@@ -248,23 +251,19 @@ func onboarding_installBlackHole_userCanceledAuthShowsCancelError() async {
 @MainActor
 @Test
 func onboarding_installBlackHole_successKeepsStatusDoneAfterRefresh() async {
-    // The original bug had the VM blindly set `.done`, then the
-    // `refresh()` call at the end of `installBlackHole()` would see
-    // `is2chInstalled() == false` and overwrite back to `.pending`.
-    // With the installer now responsible for post-install
-    // verification, success means the devices ARE installed — so
-    // refresh() should leave the status at `.done`.
+    // The install sub-task must stay `.done` after a subsequent
+    // `refresh()` call, so the UI doesn't regress to `.pending`.
     let installer = MockInstaller()
     installer.installed2ch = false
-    installer.installed16ch = false
     let vm = OnboardingViewModel(
         permissions: MockPermissionsService(),
         installer: installer,
         keychain: MockKeychain()
     )
     await vm.installBlackHole()
-    #expect(vm.status[.blackHole] == .done)
-    #expect(vm.steps.first { $0.kind == .blackHole }?.isDone == true)
+    #expect(vm.blackHoleInstallStatus == .done)
+    // Overall step still requires audio capture grant.
+    #expect(vm.steps.first { $0.kind == .blackHole }?.isDone == false)
 }
 
 @MainActor
@@ -300,7 +299,6 @@ func onboarding_requestMicPermission_deniedSetsError() async {
 func onboarding_progressLabel_countsDoneSteps() {
     let installer = MockInstaller()
     installer.installed2ch = false
-    installer.installed16ch = false
     let vm = OnboardingViewModel(
         permissions: MockPermissionsService(),
         installer: installer,
@@ -308,19 +306,20 @@ func onboarding_progressLabel_countsDoneSteps() {
     )
     #expect(vm.progressLabel == "0 / 3 готово")
     installer.installed2ch = true
-    installer.installed16ch = true
     vm.refresh()
-    // BlackHole now done; mic & key still pending.
-    #expect(vm.progressLabel == "1 / 3 готово")
+    // BlackHole install sub-task is done, but audio capture still pending
+    // → overall .blackHole step not done yet → still 0 / 3.
+    #expect(vm.progressLabel == "0 / 3 готово")
 }
 
 @MainActor
 @Test
-func onboarding_onCompleted_firesExactlyOnce() {
+func onboarding_onCompleted_firesExactlyOnce() async {
     let perms = MockPermissionsService()
     perms.statuses[.microphone] = .granted
     let kc = MockKeychain()
     try? kc.saveAPIKey("sk-proj-1234567890abcdef")
+    // 2ch installed by default in MockInstaller.
     let vm = OnboardingViewModel(
         permissions: perms,
         installer: MockInstaller(),
@@ -328,8 +327,8 @@ func onboarding_onCompleted_firesExactlyOnce() {
     )
     var fired = 0
     vm.onCompleted = { fired += 1 }
-    // Already-complete VM should not back-fire because we set the
-    // callback after init. Trigger a manual refresh to observe.
+    // Audio capture is still pending — allDone is false. Complete it.
+    await vm.requestAudioCapturePermission()
     vm.refresh()
     #expect(fired == 1)
     vm.refresh()
@@ -347,4 +346,53 @@ func onboarding_systemSettingsURL_microphoneOnly() {
     #expect(OnboardingViewModel.systemSettingsURL(for: .microphone) != nil)
     #expect(OnboardingViewModel.systemSettingsURL(for: .blackHole) == nil)
     #expect(OnboardingViewModel.systemSettingsURL(for: .apiKey) == nil)
+}
+
+// MARK: - Task 5: Audio setup sub-tasks
+
+@MainActor
+@Test func onboarding_audioSetup_requiresBothSubTasks() async {
+    // Both sub-tasks must be done for overall .blackHole status.
+    let installer = MockInstaller()
+    installer.installed2ch = true
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: installer,
+        keychain: MockKeychain()
+    )
+    vm.refresh()
+    // 2ch is installed → install sub-task is done. Audio capture pending → overall pending.
+    #expect(vm.blackHoleInstallStatus == .done)
+    #expect(vm.audioCaptureStatus == .pending)
+    #expect(vm.status[.blackHole] == .pending)
+}
+
+@MainActor
+@Test func onboarding_audioSetup_bothSubTasksDone_overallDone() async {
+    let installer = MockInstaller()
+    installer.installed2ch = true
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: installer,
+        keychain: MockKeychain()
+    )
+    vm.refresh()
+    await vm.requestAudioCapturePermission()
+    #expect(vm.audioCaptureStatus == .done)
+    #expect(vm.status[.blackHole] == .done)
+}
+
+@MainActor
+@Test func onboarding_audioSetup_installError_propagatesToOverall() async {
+    let installer = MockInstaller()
+    installer.installed2ch = false
+    installer._runBundledInstaller = { throw BlackHoleInstallError.downloadFailed }
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: installer,
+        keychain: MockKeychain()
+    )
+    await vm.installBlackHole()
+    #expect(vm.blackHoleInstallStatus.errorMessage != nil)
+    #expect(vm.status[.blackHole]?.errorMessage != nil)
 }

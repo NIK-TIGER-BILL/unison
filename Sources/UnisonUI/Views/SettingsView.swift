@@ -1,4 +1,5 @@
 import SwiftUI
+import UnisonAudio
 import UnisonDomain
 
 /// Settings window — single-column scrolling list of section cards.
@@ -45,6 +46,7 @@ public struct SettingsView: View {
             // Lazy layout resized the scrollbar thumb mid-scroll.
             VStack(alignment: .leading, spacing: 18) {
                 audioSection
+                excludedAppsSection
                 languagesSection
                 openAISection
                 hotkeysSection
@@ -154,7 +156,7 @@ public struct SettingsView: View {
                     .labelsHidden()
                 }
 
-                Text("Куда играть перевод. Системный output должен быть «BlackHole 16ch».")
+                Text("Куда играть перевод.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -184,6 +186,19 @@ public struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    // MARK: - Section: Excluded apps
+
+    private var excludedAppsSection: some View {
+        card(title: "Исключения") {
+            ExcludedAppsSection(
+                excludedBundleIDs: Binding(
+                    get: { vm.settings.excludedTapBundleIDs },
+                    set: { vm.setExcludedTapBundleIDs($0) }
+                )
+            )
         }
     }
 
@@ -306,9 +321,6 @@ public struct SettingsView: View {
         card(title: "BlackHole") {
             LabeledContent("BlackHole 2ch") {
                 blackHoleStatusRow(status: vm.blackHole2chStatus)
-            }
-            LabeledContent("BlackHole 16ch") {
-                blackHoleStatusRow(status: vm.blackHole16chStatus)
             }
             LabeledContent {
                 InlineButton(
