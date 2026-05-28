@@ -175,8 +175,15 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
 
     private func closePlaybackDumpIfNeeded() {
         guard let handle = dumpHandle else { return }
+        // Stop the tap FIRST and then read `dumpedByteCount`. The tap
+        // callback runs on a CoreAudio render thread; `removeTap`
+        // drains any pending callbacks before returning, so the read
+        // below sees a stable value. We snapshot into a local both
+        // to make the data-race-free intent explicit and to avoid
+        // re-reading the property during the seek+write below if a
+        // late callback ever sneaks in.
         timePitch.removeTap(onBus: 0)
-        let dataSize = dumpedByteCount
+        let dataSize: UInt32 = dumpedByteCount
         let fileSize = dataSize &+ 36
         try? handle.seek(toOffset: 4)
         handle.write(Self.uint32LE(fileSize))

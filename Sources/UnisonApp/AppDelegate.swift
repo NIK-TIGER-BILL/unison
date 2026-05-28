@@ -277,6 +277,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // main while the Task waits for main to free up.
         composition.virtualMicPlayer.stop()
         composition.outputMixer.stop()
+        // The orchestrator-side WireDumpers (UNISON_DUMP_WIRE_WAV /
+        // UNISON_DUMP_SENT_WAV) are closed by `orchestrator.stop()`,
+        // but we skip that here for the deadlock reason above. Close
+        // them directly so quit-during-session leaves the WAV header
+        // patched (data chunk size at 0xFFFF_FFFF wraps badly in some
+        // players). No-op when env vars aren't set.
+        WireDumper.shared.close()
+        WireDumper.sent.close()
     }
 
     /// Routes SIGINT / SIGTERM through `NSApp.terminate(_:)` so the full

@@ -745,10 +745,14 @@ public final class TranslationOrchestrator {
             }
             let pump = Task {
                 for await wireFrame in stream.output {
-                    // Diagnostic dump of the raw model output for the
-                    // me-stream (used in `.call` and `.test` modes).
-                    // Same env var as the peer-stream dump; if user
-                    // is in test mode, all dump bytes come from here.
+                    // Diagnostic dump of the raw model output. Both
+                    // the me-stream pump (this site, used in `.call`
+                    // and `.test`) AND the peer-stream pump (the
+                    // wireIncomingPipeline equivalent below) write to
+                    // the shared `WireDumper.shared`. In `.call` mode
+                    // the resulting WAV interleaves both directions
+                    // — interpret per arrival timestamps if you need
+                    // to separate them.
                     WireDumper.shared.write(wireFrame.pcm)
                     // First audio delta from the server — disarm the
                     // no-data watchdog. `markFirstDataReceived` is
