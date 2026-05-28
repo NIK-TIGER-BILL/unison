@@ -642,10 +642,19 @@ public final class TranslationOrchestrator {
 
     // MARK: - Pipelines
 
-    // Bound buffer size for splitter/resampled streams. At ~100ms per frame,
-    // 50 frames ≈ 5 seconds of audio — enough to ride out brief network
-    // stalls while preventing unbounded memory growth on prolonged stalls.
-    private static let pipelineFrameBuffer = 50
+    // Splitter / resampled streams now use `.unbounded` buffering. We
+    // previously used `.bufferingNewest(50)` to cap memory at ~5 s of
+    // audio, but that policy DROPS OLDER frames when the buffer is
+    // full — which is exactly the wrong direction for an in-flight
+    // translation: silently dropping audio mid-utterance is what the
+    // user perceives as "chunk cut off before it finished". For now we
+    // accept unbounded growth under contention (memory is fine in
+    // typical sessions; ~10 KB/frame × 50 frames = ~0.5 MB even at the
+    // old cap). If sustained slow-consumer scenarios show up in
+    // practice we'll switch to `bufferingOldest(N)` so any drops fall
+    // on the FRESHEST frames (= imperceptible tail jitter, not a hole
+    // mid-word) — but that's a future call.
+    private static let pipelineFrameBuffer = 50  // kept for log heuristics only
 
     /// Quick RMS over the PCM samples in a frame, normalized to
     /// [0, 1]. Used by the mic-level diagnostic so support can tell
@@ -719,7 +728,7 @@ public final class TranslationOrchestrator {
         // translated-player for test-mode local playback.
         let task2 = Task { [virtualMicPlayer, outputMixer, stream, transformer, weak self] in
             var resampledContinuation: AsyncStream<AudioFrame>.Continuation!
-            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
+            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .unbounded) {
                 resampledContinuation = $0
             }
             let pump = Task {
@@ -769,10 +778,10 @@ public final class TranslationOrchestrator {
 
         var translationContinuation: AsyncStream<AudioFrame>.Continuation!
         var passthroughContinuation: AsyncStream<AudioFrame>.Continuation!
-        let translationFrames = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
+        let translationFrames = AsyncStream<AudioFrame>(bufferingPolicy: .unbounded) {
             translationContinuation = $0
         }
-        let passthroughFrames = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
+        let passthroughFrames = AsyncStream<AudioFrame>(bufferingPolicy: .unbounded) {
             passthroughContinuation = $0
         }
 
@@ -815,7 +824,7 @@ public final class TranslationOrchestrator {
         }
         let translatedPlay = Task { [outputMixer, stream, transformer, weak self] in
             var resampledContinuation: AsyncStream<AudioFrame>.Continuation!
-            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
+            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .unbounded) {
                 resampledContinuation = $0
             }
             let pump = Task {

@@ -44,6 +44,15 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// to its own output over long continuous sessions (verified by
     /// harness measurement; tests in CompensatingAGCTests).
     private let agc = CompensatingAGCRunner()
+    /// Diagnostic counters for the "audio chunks cut off mid-play" bug.
+    /// Compare schedule count (each successful scheduleBuffer call) vs
+    /// playback count (from `.dataPlayedBack` completion type). If the
+    /// player ever drops a buffer for whatever reason (engine reset,
+    /// queue overflow, format-renegotiation), the playback counter
+    /// will lag the schedule counter — easy to spot in the periodic log.
+    private let counterLock = NSLock()
+    private var scheduledBufferCount: Int = 0
+    private var playedBackBufferCount: Int = 0
 
     public init() {
         self.playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
@@ -218,9 +227,19 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     public func playTranslated(_ frames: AsyncStream<AudioFrame>) async {
         translatedChunkIndex = 0
         agc.reset()
+        resetPlaybackCounters()
         for await frame in frames {
             scheduleTranslated(frame: frame)
         }
+    }
+
+    /// Sync helper — Swift 6 strict concurrency disallows `NSLock.lock`
+    /// from inside an async function, so the counter reset lives here
+    /// and is called from `playTranslated`.
+    private func resetPlaybackCounters() {
+        counterLock.lock(); defer { counterLock.unlock() }
+        scheduledBufferCount = 0
+        playedBackBufferCount = 0
     }
 
     public func playOriginal(_ frames: AsyncStream<AudioFrame>) async {
@@ -268,12 +287,38 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         }
         translatedChunkIndex += 1
         let frameLength = buf.frameLength
-        // Capture frameLength + a weak pacing ref. Completion fires on a
-        // CoreAudio render thread; PlaybackPacing.didComplete is lock-
-        // protected so the race against tick() is safe.
-        translatedPlayer.scheduleBuffer(buf) { [weak pacing] in
+        // Use the explicit `.dataPlayedBack` callback type so we can
+        // distinguish "buffer was played by hardware" from "buffer was
+        // consumed by the next node" (the default callback). When the
+        // engine is reset / queue overflows / sample-rate is
+        // renegotiated, a buffer can be CONSUMED without being
+        // PLAYED — exactly the scenario we suspect for the "chunk cut
+        // off before finishing" bug. Comparing played vs scheduled
+        // counts in the log will tell us whether that's happening.
+        translatedPlayer.scheduleBuffer(
+            buf,
+            at: nil,
+            completionCallbackType: .dataPlayedBack
+        ) { [weak self, weak pacing] _ in
             pacing?.didComplete(samples: AVAudioFramePosition(frameLength))
+            if let self {
+                self.counterLock.lock()
+                self.playedBackBufferCount += 1
+                let played = self.playedBackBufferCount
+                let scheduled = self.scheduledBufferCount
+                self.counterLock.unlock()
+                // Every 50 buffers (~20 s at 400 ms chunks) emit a
+                // diagnostic comparing scheduled vs played-back. A
+                // sustained gap > a few buffers indicates real drops.
+                if played % 50 == 0 {
+                    let gap = scheduled - played
+                    Self.log.info("[speakers] playback counters: scheduled=\(scheduled) played=\(played) gap=\(gap)")
+                }
+            }
         }
+        counterLock.lock()
+        scheduledBufferCount += 1
+        counterLock.unlock()
         pacing?.didSchedule(samples: AVAudioFramePosition(frameLength))
     }
 
