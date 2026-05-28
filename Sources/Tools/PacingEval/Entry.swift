@@ -127,25 +127,26 @@ struct PacingEvalCLI {
                 // recorded arrival timeline so we can compare them
                 // apples-to-apples (same model behaviour, different
                 // pacing decisions).
-                let variants: [(name: String, preroll: Double)] = [
-                    ("v3-noPreroll",   0.0),
-                    ("preroll-200ms", 0.2),
-                    ("preroll-500ms", 0.5),
-                    ("preroll-800ms", 0.8)
+                let variants: [(name: String, preroll: Double, fixed: Double?)] = [
+                    ("v3-adaptive",     0.0, nil),
+                    ("fixed-1.0",       0.0, 1.0),
+                    ("fixed-1.0-pre200", 0.2, 1.0),
+                    ("fixed-1.0-pre500", 0.5, 1.0)
                 ]
                 for v in variants {
                     var sim = PacingSimulator(arrivals: result.arrivals)
                     sim.prerollSec = v.preroll
+                    sim.rateOverride = v.fixed
                     sim.variantLabel = v.name
                     let (rows, summary) = sim.simulate()
                     try writer.writeTickCSV(rows: rows, filename: "\(runLabel)-\(v.name)-ticks.csv")
                     writer.printSummary(label: "\(runLabel) | \(v.name)",
                                         arrival: arrivalReport,
                                         sim: summary)
-                    // Only push the baseline variant into the aggregate
-                    // so the cross-run summary stays focused on the
+                    // Only push the baseline (v3) variant into the
+                    // cross-run aggregate so the summary represents
                     // production-equivalent behaviour.
-                    if v.name == "v3-noPreroll" {
+                    if v.name == "v3-adaptive" {
                         allRuns.append(AggregateAcrossRuns.RunSummary(
                             runIndex: runIndex,
                             arrival: arrivalReport,

@@ -58,25 +58,32 @@ public final class PlaybackPacing: @unchecked Sendable {
     // controller uses. There's no other reason to expose them and
     // the in-app callers don't reach for them.
 
-    /// Desired steady-state buffer depth in audio-seconds. The player
-    /// aims to hold roughly this much queued audio at all times — large
-    /// enough to absorb chunk-arrival jitter, small enough not to add
-    /// perceptible latency.
-    public static let targetBufferSec: Double = 0.4
-    /// Hard ceiling on `timePitch.rate`. TimePitch supports much higher
-    /// but artefacts (formant smearing, robotic edges) become obvious
-    /// past ≈ 2.5× on speech.
-    public static let maxRate: Double = 2.5
+    /// Desired steady-state buffer depth in audio-seconds. Acts as the
+    /// "we don't care below this" threshold — at the empirically-
+    /// observed average buffer depth (0.08–0.15 s on real OpenAI
+    /// translation sessions), rate stays at 1.0× and the controller
+    /// is a no-op. Pushed up to 1.0 s after harness data showed v3's
+    /// previous 0.4 s threshold triggered mild speedups (rate up to
+    /// 1.18×) that drained the buffer fast enough to create the
+    /// "empty window between chunks" pattern the user reported.
+    public static let targetBufferSec: Double = 1.0
+    /// Hard ceiling on `timePitch.rate`. Capped at 1.5× — TimePitch
+    /// supports much higher, but our policy is "stay close to real-
+    /// time playback unless the model is truly overflowing". 1.5×
+    /// is still audibly natural; higher values introduce noticeable
+    /// time-stretch artefacts.
+    public static let maxRate: Double = 1.5
     /// Hard floor on `timePitch.rate`. Below 1.0 the player falls behind
     /// real-time and the buffer overflows indefinitely; we never go
     /// slower than wall-clock even if the buffer is empty.
     public static let minRate: Double = 1.0
     /// Multiplier on `(depth_smooth - targetBufferSec)` to translate
-    /// buffer error into a rate correction. Tuned so a `panic` depth of
-    /// ≈ 1.5 s (excess = 1.1) hits `maxRate=2.5` from a 1.0 baseline:
-    /// `1.0 + 1.1 × ≈ 1.36 = 2.5`. Round to 1.0 — the slew limiter and
-    /// the EMA filtering make the exact gain non-critical.
-    public static let correctionGain: Double = 1.0
+    /// buffer error into a rate correction. Tuned so a 3 s buffer
+    /// depth (excess = 2.0) lands exactly at `maxRate=1.5` from a 1.0
+    /// baseline: `1.0 + 2.0 × 0.3 = 1.6` → clamps to 1.5. The 0.3
+    /// gain keeps the ramp gentle — the rate changes smoothly across
+    /// several seconds rather than jerking on each depth peak.
+    public static let correctionGain: Double = 0.3
     /// Maximum change in `timePitch.rate` per tick. At a 100 ms tick
     /// interval, 0.05 means the rate can move at most 0.5 per second
     /// — well below the threshold of audible glitching on TimePitch.

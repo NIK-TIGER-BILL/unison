@@ -28,6 +28,12 @@ struct PacingSimulator {
     /// headroom against inter-chunk gaps. 0 = play immediately on first
     /// delta. Default 0 (off) so the baseline matches production v3.
     var prerollSec: Double = 0
+    /// Force-override the controller's output rate. When set, the
+    /// pacing math still runs (we keep the EMA / depth-smooth
+    /// bookkeeping for diagnostics) but `applied_rate` ignores it and
+    /// holds at this value. Used to test "what if pacing didn't
+    /// accelerate at all" against v3's mild ramp-up on depth peaks.
+    var rateOverride: Double? = nil
     /// Variant tag for the report.
     var variantLabel: String = "v3-default"
 
@@ -193,16 +199,22 @@ struct PacingSimulator {
             depthSmooth += (depth - depthSmooth) * depthAlpha
 
             // Compute target via the production controller's pure fn.
+            // Override allows us to A/B the controller against a fixed-
+            // rate baseline (e.g. "what if we just always played at 1.0
+            // and never tried to drain the buffer").
             let state = PlaybackPacing.targetRate(
                 arrivalRateEMA: arrivalEMA,
                 depthSmooth: depthSmooth
             )
-            // Slew applied_rate toward target with the same step limit.
-            appliedRate = PlaybackPacing.slewToward(
-                currentRate: appliedRate,
-                target: state.clampedTarget,
-                maxStep: maxStep
-            )
+            if let forced = rateOverride {
+                appliedRate = forced
+            } else {
+                appliedRate = PlaybackPacing.slewToward(
+                    currentRate: appliedRate,
+                    target: state.clampedTarget,
+                    maxStep: maxStep
+                )
+            }
 
             let t = Double(tick) * tickInterval
             rows.append(TickRow(
