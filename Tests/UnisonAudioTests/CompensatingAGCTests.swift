@@ -52,9 +52,16 @@ import Testing
     #expect(newState.currentGain <= 4.0 + 0.001)
 }
 
-@Test func agc_silence_doesNotBoost_andAccumulatesPauseTime() {
-    // Silence (RMS < floor 0.005) should pass through with unchanged gain
-    // and accumulate silence time toward reset threshold.
+@Test func agc_silence_keepsGainContinuous_andAccumulatesPauseTime() {
+    // Silence (RMS < floor) should still APPLY current gain (so the
+    // envelope stays continuous) but freeze gain/EMA state and tick
+    // the silence accumulator toward reset.
+    //
+    // Why: word tails that briefly dip below the noise floor were
+    // getting their gain abruptly dropped, perceived by users as
+    // "chunks cut off before finishing". Applying gain to silence
+    // gives a smooth envelope; the only cost is slightly louder
+    // ambient noise between phrases.
     let silentFrame: [Float] = .init(repeating: 0.0001, count: 4800)
     var state = AGCState.initial
     state.currentGain = 2.5
@@ -63,14 +70,16 @@ import Testing
     let (newState, out) = CompensatingAGC.processed(
         samples: silentFrame, frameDurationSec: 0.1,
         state: state, config: .default)
-    // Gain unchanged.
+    // Gain unchanged (no controller update during silence).
     #expect(newState.currentGain == 2.5)
-    // Long-term RMS unchanged (don't bias it down during silence).
+    // Long-term RMS unchanged (don't bias it down).
     #expect(newState.longTermRMS == 0.02)
     // Silence accumulator advanced.
     #expect(newState.silenceAccumSec == 0.1)
-    // Samples passed through unchanged (no boost during silence).
-    #expect(out == silentFrame)
+    // Samples now multiplied by current gain — output magnitude
+    // = input × 2.5 = 0.00025 per sample.
+    #expect(abs(out[0] - 0.00025) < 0.00001)
+    #expect(out.count == silentFrame.count)
 }
 
 @Test func agc_longSilence_resetsState() {

@@ -2,6 +2,12 @@
 
 macOS 26 Tahoe-only menubar app. Real-time speech translation for video calls.
 
+## Knowledge base
+
+- **[Audio pipeline](docs/audio-pipeline.md)** — model behavior, our chain,
+  known bugs, AGC, pacing, diagnostic env-vars, pacing-eval harness. Read
+  this before touching anything in `Sources/UnisonAudio/` or `Sources/UnisonTranslation/`.
+
 ## Liquid Glass — two backends behind one API
 
 Every glass surface in the UI is rendered via one of two mechanisms:

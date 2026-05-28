@@ -114,15 +114,27 @@ public enum CompensatingAGC {
         // accumulate silence time; if accumulated silence exceeds
         // reset threshold, snap state back to initial. This mirrors
         // the model's own state-reset behaviour on pause.
+        //
+        // CRITICAL: we still APPLY the current gain to silent frames
+        // (just don't update the EMA / gain controller). Returning
+        // unmodified samples here would create a sudden gain-drop on
+        // word tails that briefly dip below the noise floor — the
+        // user perceived this as "the audio chunk getting cut off
+        // before it finished". Continuous gain envelope > suppressing
+        // ambient noise.
         if frameRMS < config.silenceFloor {
             newState.silenceAccumSec += frameDurationSec
             if newState.silenceAccumSec >= config.resetSilenceSec {
                 newState = .initial
             }
-            // Don't change gain during silence — keep current gain so
-            // when speech resumes within reset window, gain is still
-            // appropriate. Pass samples through unchanged.
-            return (newState, samples)
+            let g = newState.currentGain
+            var out = samples
+            out.withUnsafeMutableBufferPointer { buf in
+                for i in 0..<n {
+                    buf[i] = buf[i] * g
+                }
+            }
+            return (newState, out)
         } else {
             newState.silenceAccumSec = 0
         }
