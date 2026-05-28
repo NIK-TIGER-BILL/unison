@@ -23,6 +23,13 @@ struct PacingSimulator {
     /// we convert to 48 kHz sample count for fidelity with the real
     /// `didSchedule` argument.
     let playerSampleRate: Double = 48_000
+    /// Pre-roll: don't start consuming audio until this many seconds of
+    /// content has been buffered. Cheap one-time latency in exchange for
+    /// headroom against inter-chunk gaps. 0 = play immediately on first
+    /// delta. Default 0 (off) so the baseline matches production v3.
+    var prerollSec: Double = 0
+    /// Variant tag for the report.
+    var variantLabel: String = "v3-default"
 
     /// One row in the per-tick CSV output.
     struct TickRow {
@@ -80,6 +87,12 @@ struct PacingSimulator {
 
         var prevScheduled: Double = 0
         var prevCompleted: Double = 0
+        // Pre-roll gate. We don't start consuming until the player has
+        // either buffered prerollSec audio OR (defensively) the first
+        // arrival is older than 2s — to avoid hanging forever if the
+        // stream is sparse.
+        var playbackStarted = prerollSec <= 0
+        var firstArrivalTick: Int? = nil
 
         var rows: [TickRow] = []
         rows.reserveCapacity(totalTicks)
@@ -102,14 +115,34 @@ struct PacingSimulator {
             let arrivedBytes = bytesPerTick[tick]
             let arrivedPlayerSamples = Double(arrivedBytes) / 2.0 * 2.0
             scheduledSamples += arrivedPlayerSamples
+            if arrivedBytes > 0, firstArrivalTick == nil {
+                firstArrivalTick = tick
+            }
+
+            // Pre-roll gate: hold off consumption until we've buffered
+            // enough audio OR a fallback timeout (2s) elapsed since the
+            // first arrival.
+            if !playbackStarted, let firstTick = firstArrivalTick {
+                let availableSamples = scheduledSamples - completedSamples
+                let availableSec = availableSamples / playerSampleRate
+                let elapsedSinceFirst = Double(tick - firstTick) * tickInterval
+                if availableSec >= prerollSec || elapsedSinceFirst >= 2.0 {
+                    playbackStarted = true
+                }
+            }
 
             // Consume audio from buffer at current applied rate.
             let dtSamples = tickInterval * playerSampleRate
-            let wouldConsume = appliedRate * dtSamples
+            let wouldConsume = playbackStarted ? appliedRate * dtSamples : 0
             let available = scheduledSamples - completedSamples
             let actualConsumed = min(wouldConsume, available)
             completedSamples += actualConsumed
-            let underrun = actualConsumed < wouldConsume - 1e-6 && arrivals.first.map { $0.t < Double(tick) * tickInterval } ?? false
+            // "Underrun" = we wanted to consume more than was available
+            // AND playback has begun AND at least one chunk has arrived.
+            let underrun = playbackStarted
+                && actualConsumed < wouldConsume - 1e-6
+                && firstArrivalTick != nil
+                && firstArrivalTick! < tick
 
             // Compute depth + EMAs (replicating PlaybackPacing.tick exactly).
             let depth = max(0, scheduledSamples - completedSamples) / playerSampleRate

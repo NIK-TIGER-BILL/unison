@@ -111,11 +111,29 @@ struct PacingEvalCLI {
                 arrivals: result.arrivals,
                 inputDurationSec: result.inputDurationSec
             )
-            let (rows, summary) = PacingSimulator(arrivals: result.arrivals).simulate()
+            // Sweep multiple simulator variants against the same recorded
+            // arrival timeline. Each variant differs only in pre-roll
+            // buffer size — controller logic is identical.
+            // The 0-preroll case is the v3 baseline (matches current app).
             let writer = ReportWriter(outputDir: args.outputDir)
             try writer.writeArrivalsCSV(arrivals: result.arrivals, filename: "\(args.label)-arrivals.csv")
-            try writer.writeTickCSV(rows: rows, filename: "\(args.label)-pacing-ticks.csv")
-            writer.printSummary(label: args.label, arrival: arrivalReport, sim: summary)
+            let variants: [(name: String, preroll: Double)] = [
+                ("v3-noPreroll",  0.0),
+                ("preroll-200ms", 0.2),
+                ("preroll-500ms", 0.5),
+                ("preroll-1000ms", 1.0)
+            ]
+            print("\n--- variant sweep on \(args.label) ---")
+            for v in variants {
+                var sim = PacingSimulator(arrivals: result.arrivals)
+                sim.prerollSec = v.preroll
+                sim.variantLabel = v.name
+                let (rows, summary) = sim.simulate()
+                try writer.writeTickCSV(rows: rows, filename: "\(args.label)-\(v.name)-ticks.csv")
+                writer.printSummary(label: "\(args.label) | \(v.name)",
+                                    arrival: arrivalReport,
+                                    sim: summary)
+            }
             print("[pacing-eval] CSVs written to \(args.outputDir.path)")
         } catch {
             FileHandle.standardError.write("error: \(error)\n".data(using: .utf8)!)
