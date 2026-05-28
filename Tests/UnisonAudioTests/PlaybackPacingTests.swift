@@ -14,6 +14,7 @@ import Testing
     let r = PlaybackPacing.computeRate(depth: 0.2, velocity: 0.0)
     #expect(r.target == 1.0)
     #expect(r.p == 0.0)
+    #expect(r.d == 0.0)
 }
 
 @Test func pacing_midRange_targetIsApproxOneAndThreeQuarters() {
@@ -28,4 +29,5 @@ import Testing
     let r = PlaybackPacing.computeRate(depth: 1.5, velocity: 0.0)
     #expect(r.target == 2.5)
     #expect(r.p == 1.0)
+    #expect(r.d == 0.0)
 }

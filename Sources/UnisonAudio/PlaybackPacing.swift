@@ -58,6 +58,11 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// the diagnostic noise bounded.
     static let logHysteresis: Double = 0.03
 
+    // TODO(pacing-v2-task-4): remove these v1 aliases when tick() is rewritten
+    private static let v1TargetQueueSec: Double = 0.4
+    private static let v1PanicQueueSec: Double = 1.0
+    private static let v1MaxRate: Float = 1.15
+
     // TODO(pacing-v2-task-4): remove once tick() is rewritten
     private static let smoothing: Float = 0.5
 
@@ -73,11 +78,12 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// (how far above `targetQueueSec` we are) with a derivative term
     /// (how fast the queue is growing or draining), clamps the result
     /// into `[1.0, maxRate]`. Returns the raw unsmoothed target — the
-    /// caller applies asymmetric smoothing via `smoothed(currentRate:target:)`.
+    /// caller applies asymmetric smoothing (via `attackFactor`/`releaseFactor` — added in Task 3).
     ///
     /// At this task's checkpoint the D-term is hardcoded to 0; Task 2
     /// fills it in.
     static func computeRate(depth: Double, velocity: Double) -> RateState {
+        _ = velocity  // Task 2 wires this into the D-term; currently ignored.
         let pNum = max(0.0, depth - targetQueueSec)
         let p = min(1.0, pNum / (panicQueueSec - targetQueueSec))
         let d = 0.0
@@ -155,13 +161,13 @@ public final class PlaybackPacing: @unchecked Sendable {
         let queueSec = Double(queuedSamples) / sampleRate
 
         let targetRate: Float
-        if queueSec >= Self.panicQueueSec {
-            targetRate = Float(Self.maxRate)
-        } else if queueSec <= Self.targetQueueSec {
+        if queueSec >= Self.v1PanicQueueSec {
+            targetRate = Self.v1MaxRate
+        } else if queueSec <= Self.v1TargetQueueSec {
             targetRate = 1.0
         } else {
-            let t = Float((queueSec - Self.targetQueueSec) / (Self.panicQueueSec - Self.targetQueueSec))
-            targetRate = 1.0 + t * (Float(Self.maxRate) - 1.0)
+            let t = Float((queueSec - Self.v1TargetQueueSec) / (Self.v1PanicQueueSec - Self.v1TargetQueueSec))
+            targetRate = 1.0 + t * (Self.v1MaxRate - 1.0)
         }
 
         let currentRate = timePitch.rate
