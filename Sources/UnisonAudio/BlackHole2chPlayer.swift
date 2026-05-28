@@ -41,6 +41,10 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
     private var loggedFirstFrame = false
     /// Per-`play(_:)` chunk index for periodic RMS sampling.
     private var chunkIndex = 0
+    /// Compensating AGC. Same instance type as the speakers path —
+    /// applied to the translated me-stream that the peer will hear
+    /// through the virtual mic.
+    private let agc = CompensatingAGCRunner()
 
     /// Test-only WAV capture handle. When `UNISON_DUMP_OUTPUT_WAV=path` is
     /// set in the process environment, every scheduled frame's float32 PCM
@@ -74,6 +78,7 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         chunkIndex = 0
         pacing?.reset()
         pacing?.start()
+        agc.reset()
         for await frame in frames {
             schedule(frame)
         }
@@ -159,17 +164,30 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
             }
             return
         }
+        // Compensating AGC for `gpt-realtime-translate`'s amplitude
+        // fade — same controller the speakers path uses. Applied here
+        // so the peer (who hears our translated voice through their
+        // Zoom etc.) gets a stable level just like the local
+        // listener does.
+        let frameDurationSec = Double(frame.sampleCount) / Double(frame.sampleRate)
+        let (boostedPCM, appliedGain) = agc.apply(pcmF32: frame.pcm,
+                                                   frameDurationSec: frameDurationSec)
         let frameCount = AVAudioFrameCount(frame.sampleCount)
         guard frameCount > 0,
               let buf = AVAudioPCMBuffer(pcmFormat: playerFormat, frameCapacity: frameCount) else { return }
         buf.frameLength = frameCount
-        frame.pcm.withUnsafeBytes { raw in
+        boostedPCM.withUnsafeBytes { raw in
             let p = raw.bindMemory(to: Float.self).baseAddress!
-            memcpy(buf.floatChannelData![0], p, frame.pcm.count)
+            memcpy(buf.floatChannelData![0], p, boostedPCM.count)
         }
         if chunkIndex % 10 == 0 {
-            let rms = Self.rms(frame)
-            Self.log.debug("[blackhole2ch] translated chunk \(chunkIndex) rms=\(String(format: "%.5f", rms))")
+            let rmsIn = Self.rms(frame)
+            let boostedFrame = AudioFrame(pcm: boostedPCM,
+                                          sampleRate: frame.sampleRate,
+                                          channels: frame.channels,
+                                          format: frame.format)
+            let rmsOut = Self.rms(boostedFrame)
+            Self.log.debug("[blackhole2ch] translated chunk \(chunkIndex) rms_in=\(String(format: "%.5f", rmsIn)) rms_out=\(String(format: "%.5f", rmsOut)) agc_gain=\(String(format: "%.3f", appliedGain))")
         }
         chunkIndex += 1
         // Hook the completion to drive the pacing controller's

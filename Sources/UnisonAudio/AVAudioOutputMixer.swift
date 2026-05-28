@@ -39,6 +39,11 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// diagnostics can see whether the source audio amplitude itself
     /// is drifting (as opposed to the playback path mangling it).
     private var translatedChunkIndex = 0
+    /// Compensating AGC for translation audio. Counteracts the
+    /// progressive amplitude fade that `gpt-realtime-translate` applies
+    /// to its own output over long continuous sessions (verified by
+    /// harness measurement; tests in CompensatingAGCTests).
+    private let agc = CompensatingAGCRunner()
 
     public init() {
         self.playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
@@ -212,6 +217,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
 
     public func playTranslated(_ frames: AsyncStream<AudioFrame>) async {
         translatedChunkIndex = 0
+        agc.reset()
         for await frame in frames {
             scheduleTranslated(frame: frame)
         }
@@ -242,10 +248,23 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// same instance used to connect the node graph, so a buffer built
     /// from it is guaranteed accepted.
     private func scheduleTranslated(frame: AudioFrame) {
-        guard let buf = makeBuffer(from: frame) else { return }
+        // Apply compensating AGC BEFORE building the AVAudioPCMBuffer
+        // so the gain ends up baked into the samples we schedule. We
+        // chose this over modulating `player.volume` because volume
+        // changes are smoothed by AVAudioPlayerNode in a way we can't
+        // control, whereas per-sample multiplication is deterministic.
+        let frameDurationSec = Double(frame.sampleCount) / Double(frame.sampleRate)
+        let (boostedPCM, appliedGain) = agc.apply(pcmF32: frame.pcm,
+                                                   frameDurationSec: frameDurationSec)
+        let boostedFrame = AudioFrame(pcm: boostedPCM,
+                                      sampleRate: frame.sampleRate,
+                                      channels: frame.channels,
+                                      format: frame.format)
+        guard let buf = makeBuffer(from: boostedFrame) else { return }
         if translatedChunkIndex % 10 == 0 {
-            let rms = Self.rms(frame)
-            Self.log.debug("[speakers] translated chunk \(translatedChunkIndex) rms=\(String(format: "%.5f", rms))")
+            let rmsIn = Self.rms(frame)
+            let rmsOut = Self.rms(boostedFrame)
+            Self.log.debug("[speakers] translated chunk \(translatedChunkIndex) rms_in=\(String(format: "%.5f", rmsIn)) rms_out=\(String(format: "%.5f", rmsOut)) agc_gain=\(String(format: "%.3f", appliedGain)) agc_lt_rms=\(String(format: "%.5f", agc.longTermRMS))")
         }
         translatedChunkIndex += 1
         let frameLength = buf.frameLength

@@ -724,6 +724,11 @@ public final class TranslationOrchestrator {
             }
             let pump = Task {
                 for await wireFrame in stream.output {
+                    // Diagnostic dump of the raw model output for the
+                    // me-stream (used in `.call` and `.test` modes).
+                    // Same env var as the peer-stream dump; if user
+                    // is in test mode, all dump bytes come from here.
+                    WireDumper.shared.write(wireFrame.pcm)
                     // First audio delta from the server — disarm the
                     // no-data watchdog. `markFirstDataReceived` is
                     // @MainActor-isolated; this Task isn't, so hop
@@ -800,6 +805,11 @@ public final class TranslationOrchestrator {
         let sender = Task { [stream] in
             for await frame in translationFrames {
                 let wire = transformer.toWire(frame)
+                // Dump what we sent to OpenAI (24 kHz int16 mono).
+                // Pairs with WireDumper.shared (model output) — if SENT
+                // is amplitude-stable but WIRE fades, the model is the
+                // culprit.
+                WireDumper.sent.write(wire.pcm)
                 await stream.send(wire)
             }
         }
@@ -810,6 +820,13 @@ public final class TranslationOrchestrator {
             }
             let pump = Task {
                 for await wireFrame in stream.output {
+                    // Diagnostic dump of the raw model output (before
+                    // any Resampler / scheduling / playback). Guarded
+                    // by env var; silent no-op otherwise. Pairs with
+                    // UNISON_DUMP_PLAYBACK_WAV (the post-timePitch
+                    // tap) for A/B comparison of what the model
+                    // emits vs what the speakers receive.
+                    WireDumper.shared.write(wireFrame.pcm)
                     await MainActor.run { self?.markFirstDataReceived() }
                     resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
                 }
