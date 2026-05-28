@@ -32,20 +32,59 @@ public final class PlaybackPacing: @unchecked Sendable {
     private let log: UnisonLog
     private let label: String
 
-    /// Below this queue depth the rate stays at 1.0 (no speedup).
-    private static let targetQueueSec: Double = 0.4
-    /// At or above this queue depth the rate clamps to `maxRate`.
-    /// Between target and panic the rate scales linearly.
-    private static let panicQueueSec: Double = 1.0
-    /// Hard ceiling on the rate — above ~1.15 speech starts sounding
-    /// audibly artefacted from time-stretching.
-    private static let maxRate: Float = 1.15
-    /// Smoothing factor on rate updates: each tick moves the rate
-    /// halfway toward the target so changes are gradual, not stepped.
+    /// Below this queue depth the P-term is 0 (no speedup).
+    static let targetQueueSec: Double = 0.2
+    /// At or above this queue depth the P-term saturates to 1.0.
+    static let panicQueueSec: Double = 1.5
+    /// Hard ceiling on `timePitch.rate`. AVAudioUnitTimePitch supports
+    /// much higher but speech becomes unintelligible past ~3x.
+    static let maxRate: Double = 2.5
+    /// Velocity coefficient. `D = clamp(velocity * kDerivative, ±derivativeClamp)`.
+    static let kDerivative: Double = 1.5
+    /// Hard limit on the D-term so a noisy velocity spike doesn't
+    /// whiplash the rate.
+    static let derivativeClamp: Double = 0.5
+    /// Smoothing factor when the new target is higher than current —
+    /// fast attack so bursts get caught quickly.
+    static let attackFactor: Double = 0.7
+    /// Smoothing factor when the new target is lower than current —
+    /// slow release so we keep eating buffered audio before easing off.
+    static let releaseFactor: Double = 0.15
+    /// Polling interval for `tick()`. Velocity is computed as
+    /// `(depth - prevDepth) / tickIntervalSec` assuming the constant
+    /// — Task.sleep jitter (±10ms) is masked by the smoothing pass.
+    static let tickIntervalSec: Double = 0.1
+    /// Re-log when rate or queue has moved beyond this delta. Keeps
+    /// the diagnostic noise bounded.
+    static let logHysteresis: Double = 0.03
+
+    // TODO(pacing-v2-task-4): remove once tick() is rewritten
     private static let smoothing: Float = 0.5
-    /// Re-log the rate when it has moved by at least this much from
-    /// the last logged value, to keep the diagnostic noise bounded.
-    private static let logHysteresis: Float = 0.03
+
+    /// Result of one pacing calculation. Decomposed so the diagnostic
+    /// log can show why the rate is what it is (which term dominated).
+    struct RateState: Equatable {
+        let target: Double
+        let p: Double
+        let d: Double
+    }
+
+    /// Pure rate-target computation. Combines a proportional term
+    /// (how far above `targetQueueSec` we are) with a derivative term
+    /// (how fast the queue is growing or draining), clamps the result
+    /// into `[1.0, maxRate]`. Returns the raw unsmoothed target — the
+    /// caller applies asymmetric smoothing via `smoothed(currentRate:target:)`.
+    ///
+    /// At this task's checkpoint the D-term is hardcoded to 0; Task 2
+    /// fills it in.
+    static func computeRate(depth: Double, velocity: Double) -> RateState {
+        let pNum = max(0.0, depth - targetQueueSec)
+        let p = min(1.0, pNum / (panicQueueSec - targetQueueSec))
+        let d = 0.0
+        let raw = 1.0 + (p + d) * (maxRate - 1.0)
+        let target = min(maxRate, max(1.0, raw))
+        return RateState(target: target, p: p, d: d)
+    }
 
     private let lock = NSLock()
     private var scheduledSamples: AVAudioFramePosition = 0
@@ -117,19 +156,19 @@ public final class PlaybackPacing: @unchecked Sendable {
 
         let targetRate: Float
         if queueSec >= Self.panicQueueSec {
-            targetRate = Self.maxRate
+            targetRate = Float(Self.maxRate)
         } else if queueSec <= Self.targetQueueSec {
             targetRate = 1.0
         } else {
             let t = Float((queueSec - Self.targetQueueSec) / (Self.panicQueueSec - Self.targetQueueSec))
-            targetRate = 1.0 + t * (Self.maxRate - 1.0)
+            targetRate = 1.0 + t * (Float(Self.maxRate) - 1.0)
         }
 
         let currentRate = timePitch.rate
         let smoothed = currentRate + (targetRate - currentRate) * Self.smoothing
         timePitch.rate = smoothed
 
-        if abs(smoothed - lastLoggedRate) >= Self.logHysteresis ||
+        if abs(smoothed - lastLoggedRate) >= Float(Self.logHysteresis) ||
             abs(queueSec - lastLoggedQueueSec) >= 0.5 {
             log.debug("[\(label)] pacing — queue=\(String(format: "%.2fs", queueSec)) rate=\(String(format: "%.3f", smoothed))")
             lastLoggedRate = smoothed
