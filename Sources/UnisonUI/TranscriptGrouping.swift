@@ -90,6 +90,12 @@ enum TranscriptGrouping {
         let primaryParts = splitOnSentence(primaryRaw, threshold: splitThreshold)
         let secondaryParts = splitOnSentence(secondaryRaw, threshold: splitThreshold)
         let n = max(primaryParts.count, secondaryParts.count, 1)
+        // An entry's translation is "lost" when the orchestrator
+        // flagged it at-risk during a pause/reconnect AND no
+        // translation text ever arrived. Matches the store's
+        // `markActiveEntriesAtRisk` flag predicate exactly — a
+        // partial translation keeps its text on screen rather than
+        // being wiped by the placeholder.
         let translationLost = entry.translationAtRisk && entry.translatedText.isEmpty
         // For peer entries where the translation never arrived, the
         // primary slot is empty on EVERY split bubble (peer's primary

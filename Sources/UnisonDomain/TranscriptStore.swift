@@ -59,37 +59,24 @@ public final class TranscriptStore {
 
     public func clear() { entries.removeAll() }
 
-    /// Flag every currently-accumulating entry as "at risk" of
+    /// Flag entries whose translation never arrived as "at risk" of
     /// translation loss. Called by the orchestrator when it transitions
-    /// to `.paused` / `.reconnecting` so the bubble view can later
-    /// render a placeholder for entries that never received their
-    /// translation. A late-arriving NON-empty translation delta
-    /// clears the flag in `apply(_:)`.
+    /// to `.paused` / `.reconnecting`; a late NON-empty translation
+    /// delta clears the flag in `apply(_:)`.
     ///
-    /// "Active" includes both:
-    /// 1. Entries with NO translation text yet (the original case).
-    /// 2. Entries with PARTIAL translation text (some deltas arrived
-    ///    before the WS dropped — e.g. `'Привет, ка'`). On reconnect
-    ///    the next entry uses a fresh `currentEntryId`, so the
-    ///    partial gets orphaned and would otherwise look like a
-    ///    complete-but-truncated translation. Flagging it at-risk
-    ///    lets the view surface a placeholder for the missing tail
-    ///    (review finding #13).
+    /// We only flag entries where `translatedText` is empty — those
+    /// are the unambiguous "nothing arrived" case the placeholder UI
+    /// is built for. Entries with a partial translation (some deltas
+    /// arrived before the drop) keep their partial text on screen
+    /// rather than being wiped out with a placeholder; the partial
+    /// is still useful context for the user even if the tail is
+    /// missing. (Earlier iter-1 fix tried to flag partials too but
+    /// the placeholder UI doesn't have a way to render alongside
+    /// existing text without obscuring it — iter-2 review #3/#9.)
     public func markActiveEntriesAtRisk() {
-        for idx in entries.indices where !isEntryConsideredFinal(entries[idx]) {
+        for idx in entries.indices where entries[idx].translatedText.isEmpty {
             entries[idx].translationAtRisk = true
         }
-    }
-
-    /// An entry is "considered final" when it carries text in BOTH
-    /// the original AND the translation slots — at that point any
-    /// late delta would be additive content, not the missing
-    /// translation we care about. Mid-flight entries have at least
-    /// one slot empty; we treat them as still in progress.
-    private func isEntryConsideredFinal(_ entry: TranscriptEntry) -> Bool {
-        let hasOriginal = !(entry.originalText ?? "").isEmpty
-        let hasTranslation = !entry.translatedText.isEmpty
-        return hasOriginal && hasTranslation
     }
 
     public func exportAsText() -> String {

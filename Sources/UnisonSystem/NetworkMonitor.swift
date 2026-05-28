@@ -35,6 +35,15 @@ public final class NetworkMonitor: NetworkPathMonitoring, @unchecked Sendable {
     /// Active subscriber continuations. Yielded into on every path
     /// update; removed on stream termination.
     private var subscribers: [UUID: AsyncStream<NetworkPathStatus>.Continuation] = [:]
+    /// Flips true on the first real `pathUpdateHandler` invocation.
+    /// Subscribers that attach before this don't get an initial yield
+    /// (we'd be lying — the seeded `.unsatisfied` is a placeholder,
+    /// not an observation). Once the real status is known, subscribers
+    /// attaching after that get the cached value as their first yield
+    /// per the documented protocol contract (iter-2 review finding:
+    /// pre-first-update subscribers would otherwise see a fabricated
+    /// `.unsatisfied` and trigger a spurious pause on healthy launch).
+    private var didReceiveFirstUpdate = false
 
     public var currentStatus: NetworkPathStatus {
         lock.lock()
@@ -58,13 +67,16 @@ public final class NetworkMonitor: NetworkPathMonitoring, @unchecked Sendable {
             let id = UUID()
             self.lock.lock()
             self.subscribers[id] = continuation
-            // Capture the current snapshot under the lock so we can
-            // yield it OUTSIDE the lock (yielding while holding it
-            // would deadlock if a consumer's onCancel handler runs
-            // on the same thread and tries to remove the subscriber).
-            let initial = self._currentStatus
+            // Only yield the initial value if we've actually observed
+            // the network — otherwise the subscriber would receive
+            // the constructor seed (a guess) and act on it before
+            // the real path update fires (often within 50 ms).
+            // Subscribers attaching after the first real update do
+            // get the cached value as their first yield, fulfilling
+            // the protocol contract.
+            let initial: NetworkPathStatus? = self.didReceiveFirstUpdate ? self._currentStatus : nil
             self.lock.unlock()
-            continuation.yield(initial)
+            if let initial { continuation.yield(initial) }
             continuation.onTermination = { [weak self] _ in
                 guard let self else { return }
                 self.lock.lock()
@@ -102,19 +114,20 @@ public final class NetworkMonitor: NetworkPathMonitoring, @unchecked Sendable {
 
             self.lock.lock()
             let previous = self._currentStatus
+            let isFirst = !self.didReceiveFirstUpdate
             self._currentStatus = translated
+            self.didReceiveFirstUpdate = true
             // Snapshot the continuations under the lock then yield
             // OUTSIDE — yielding can synchronously invoke consumer
             // code, which must not re-enter the lock.
             let conts = Array(self.subscribers.values)
             self.lock.unlock()
 
-            // De-dup: only push a yield when the status actually
-            // changed. Subscribers got the initial value from the
-            // constructor seed when they attached; if the first
-            // observation happens to match the seed, suppressing the
-            // duplicate is correct.
-            if previous != translated {
+            // First real update always yields (subscribers attached
+            // before now didn't get an initial value — see
+            // `statusStream`). After that, de-dup: only push a yield
+            // when the status actually changed.
+            if isFirst || previous != translated {
                 for c in conts { c.yield(translated) }
             }
         }

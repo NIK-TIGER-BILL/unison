@@ -59,7 +59,10 @@ public final class TranslationOrchestrator {
 
     private static let slowThresholdSeconds: TimeInterval = 3
     private static let slowCheckIntervalSeconds: TimeInterval = 0.5
-    private static let micAudibleRMSThreshold: Float = 0.001
+    /// Read from non-MainActor pipeline tasks (splitter computes peer
+    /// RMS); `nonisolated` is explicit so a future Swift 6 mode
+    /// migration doesn't break the compile.
+    nonisolated static let micAudibleRMSThreshold: Float = 0.001
     /// How long after the most recent audible mic frame the user is
     /// still considered "speaking" for the purpose of the slow check.
     /// Wider than `slowThresholdSeconds` so the watchdog catches the
@@ -680,9 +683,18 @@ public final class TranslationOrchestrator {
     }
 
     /// Tear down streams + captures and flip to `.paused(.networkLost)`.
-    /// Idempotent — calling while already paused is a no-op.
+    ///
+    /// Idempotent vs. `.paused(.networkLost)` — calling again is a
+    /// no-op. But NOT idempotent vs. `.paused(.awaitingNetwork)`: a
+    /// drop arriving while resume is in flight must transition us
+    /// back to `.networkLost` so the resumeStreams reentrancy guard
+    /// observes a state change and aborts the half-resumed pipeline
+    /// (iter-2 review finding: matching all `.paused` would silently
+    /// swallow a mid-resume drop, then NetworkMonitor's de-dup would
+    /// suppress any later `.unsatisfied`, leaving the orchestrator
+    /// in `.translating` against a dead network).
     private func enterNetworkPause(mode: SessionMode) {
-        if case .paused = state { return }
+        if case .paused(_, _, _, .networkLost) = state { return }
         guard let startedAt = sessionStartedAt else { return }
         Self.log.info("network unsatisfied — entering .paused(.networkLost)")
         // Stamp any in-flight entries (an original chunk arrived but the
@@ -771,7 +783,13 @@ public final class TranslationOrchestrator {
                     Self.log.info("resumeStreams — state changed during me.connect (\(String(describing: self.state))); aborting resume")
                     await me.close()
                     // Tear down the peer side too if we wired it above,
-                    // since resume as a whole is aborted.
+                    // since resume as a whole is aborted. Cancel the
+                    // pipeline tasks BEFORE closing the stream so the
+                    // close()-yielded `.disconnected` event doesn't
+                    // race a still-iterating observer (iter-2 review
+                    // finding: peer-pipeline tasks were leaked here).
+                    for t in pipelineTasksBySpeaker[.peer] ?? [] { t.cancel() }
+                    pipelineTasksBySpeaker[.peer] = []
                     let peerSnapshot = peerStream
                     peerStream = nil
                     await peerSnapshot?.close()
@@ -798,6 +816,16 @@ public final class TranslationOrchestrator {
         // the session forever).
         anyMicFrameThisSession = false
         anyServerDeltaThisSession = false
+        // Drop the pre-pause activity timestamps. Without this, the
+        // slow-detection loop sees `now - lastDeltaAtBySpeaker[.me]`
+        // = (pause duration + post-resume latency) and fires phantom
+        // `.slow` as soon as the recovering-flash window closes —
+        // even though the post-resume pipeline is perfectly healthy
+        // (iter-2 review finding: every recovery flickered `.slow`
+        // 2 s after the green dot returned).
+        lastDeltaAtBySpeaker = [:]
+        lastAudibleMicAt = nil
+        lastAudiblePeerAt = nil
         startSlowDetectionLoop()
         armNoDataWatchdog()
         armRecoveringFlash()
@@ -1194,8 +1222,11 @@ public final class TranslationOrchestrator {
     /// [0, 1]. Used by the mic-level diagnostic so support can tell
     /// "user spoke but app stayed silent" from "user spoke but mic
     /// was muted at the OS level". Returns 0 for empty / malformed
-    /// frames.
-    private static func rms(_ frame: AudioFrame) -> Float {
+    /// frames. `nonisolated` because the peer splitter task (which
+    /// runs off-MainActor) reads this; relying on Swift 5 mode to
+    /// suppress the isolation check would break a future Swift 6
+    /// migration.
+    nonisolated static func rms(_ frame: AudioFrame) -> Float {
         let bytes = frame.pcm
         guard !bytes.isEmpty else { return 0 }
         switch frame.format {

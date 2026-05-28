@@ -76,9 +76,16 @@ public final class MockNetworkPathMonitor: NetworkPathMonitoring, @unchecked Sen
 
     public func simulate(_ status: NetworkPathStatus) {
         lock.lock()
+        let previous = _currentStatus
         _currentStatus = status
         let conts = Array(subscribers.values)
         lock.unlock()
+        // Mirror the production de-dup so tests behave the same as
+        // the live monitor — without this, a regression test that
+        // exercises two consecutive identical statuses would see two
+        // yields in tests and one in production, masking bugs that
+        // depend on the production coalescing (iter-2 review).
+        guard previous != status else { return }
         for c in conts { c.yield(status) }
     }
 
