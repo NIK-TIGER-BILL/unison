@@ -248,14 +248,16 @@ public final class PlaybackPacing: @unchecked Sendable {
 
     /// Reset all counters and EMAs. Call at the start of each `play(_:)`
     /// invocation so a stop-restart cycle doesn't carry stale state.
+    ///
+    /// Holds the full lock — `reset()` is called from the consumer task
+    /// (different thread from the `ticker` Task that runs `tick()`),
+    /// so we need to publish all writes atomically.
     public func reset() {
-        lock.lock()
+        lock.lock(); defer { lock.unlock() }
         scheduledSamples = 0
         completedSamples = 0
         prevScheduledForRate = 0
         prevCompletedForRate = 0
-        lock.unlock()
-        timePitch.rate = 1.0
         appliedRate = 1.0
         lastLoggedRate = 1.0
         lastLoggedQueueSec = 0
@@ -263,13 +265,25 @@ public final class PlaybackPacing: @unchecked Sendable {
         arrivalRateEMA = 1.0
         consumptionRateEMA = 1.0
         depthSmooth = 0
+        // `timePitch.rate` is an `AVAudioUnit` parameter — its setter is
+        // documented thread-safe (atomically published to the render
+        // block). Safe to touch outside the lock, but we're already
+        // holding it so do it here for readability.
+        timePitch.rate = 1.0
     }
 
     // MARK: - Tick
 
     private func tick() {
+        // The entire body runs under the lock — `tick()` fires on the
+        // async ticker Task while `reset()` runs on the consumer Task
+        // and `didSchedule`/`didComplete` run on schedule callers
+        // (including CoreAudio render threads). Bare scalar reads/writes
+        // across these threads would race; the lock is cheap (the body
+        // is a few µs at most) so we hold it for the whole call.
+        lock.lock(); defer { lock.unlock() }
+
         tickCount += 1
-        lock.lock()
         let scheduledSnapshot = scheduledSamples
         let completedSnapshot = completedSamples
         let scheduledDelta = scheduledSnapshot - prevScheduledForRate
@@ -278,7 +292,6 @@ public final class PlaybackPacing: @unchecked Sendable {
         prevCompletedForRate = completedSnapshot
         let queuedSamples = max(0, scheduledSnapshot - completedSnapshot)
         let depth = Double(queuedSamples) / sampleRate
-        lock.unlock()
 
         // Per-tick instantaneous rates as dimensionless ratios
         // (audio-seconds per wall-clock-second).
@@ -286,7 +299,10 @@ public final class PlaybackPacing: @unchecked Sendable {
         let instantArrival = Double(scheduledDelta) / dtSamples
         let instantConsumption = Double(completedDelta) / dtSamples
 
-        // Update EMAs.
+        // Update EMAs. `consumptionRateEMA` is diagnostic-only — it's
+        // logged but doesn't feed the rate decision. Kept here so the
+        // diagnostic dump shows whether the actual consumption rate
+        // (= timePitch.rate × base) matches the arrival rate.
         arrivalRateEMA += (instantArrival - arrivalRateEMA) * Self.arrivalRateAlpha
         consumptionRateEMA += (instantConsumption - consumptionRateEMA) * Self.arrivalRateAlpha
         depthSmooth += (depth - depthSmooth) * Self.depthSmoothAlpha
@@ -298,11 +314,12 @@ public final class PlaybackPacing: @unchecked Sendable {
                                       maxStep: Self.maxRateStepPerTick)
         timePitch.rate = Float(appliedRate)
 
-        // DIAG: log every 10th tick (1 s) at info level so the steady-state
-        // arrival/consumption ratio and the rate's progression are
-        // visible without per-chunk noise.
+        // DIAG: log every 10th tick (1 s) at debug level so the
+        // steady-state arrival/consumption ratio and the rate's
+        // progression are visible without flooding the user-facing
+        // log. Bump to info if actively debugging pacing.
         if tickCount % 10 == 0 {
-            log.info("[\(label)] pacing tick=\(tickCount) depth=\(String(format: "%.3fs", depth)) depth_smooth=\(String(format: "%.3fs", depthSmooth)) arrival_ema=\(String(format: "%.3fx", arrivalRateEMA)) consumption_ema=\(String(format: "%.3fx", consumptionRateEMA)) target=\(String(format: "%.3f", state.clampedTarget)) applied=\(String(format: "%.3f", appliedRate))")
+            log.debug("[\(label)] pacing tick=\(tickCount) depth=\(String(format: "%.3fs", depth)) depth_smooth=\(String(format: "%.3fs", depthSmooth)) arrival_ema=\(String(format: "%.3fx", arrivalRateEMA)) consumption_ema=\(String(format: "%.3fx", consumptionRateEMA)) target=\(String(format: "%.3f", state.clampedTarget)) applied=\(String(format: "%.3f", appliedRate))")
         }
 
         if abs(appliedRate - lastLoggedRate) >= Self.logHysteresis ||

@@ -312,7 +312,11 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
                 // sustained gap > a few buffers indicates real drops.
                 if played % 50 == 0 {
                     let gap = scheduled - played
-                    Self.log.info("[speakers] playback counters: scheduled=\(scheduled) played=\(played) gap=\(gap)")
+                    // Debug-level: this is per-session periodic
+                    // diagnostic; lifecycle (gap suddenly growing
+                    // beyond a threshold) would warrant an info-level
+                    // alert but we don't have one yet.
+                    Self.log.debug("[speakers] playback counters: scheduled=\(scheduled) played=\(played) gap=\(gap)")
                 }
             }
         }

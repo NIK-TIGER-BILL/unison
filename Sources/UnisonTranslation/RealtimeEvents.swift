@@ -83,10 +83,11 @@ public struct SessionUpdatePayload: Sendable {
                 case transcription, noise_reduction
             }
             // Custom encode so a nil `noise_reduction` is sent as explicit
-            // JSON `null` (not omitted). OpenAI's docs example for
-            // disabling NR shows `"noise_reduction": null` — omitting the
-            // field would let the server fall back to the default
-            // `near_field` preset.
+            // JSON `null` (matching the OpenAI docs example for disabling
+            // NR). Empirically we observed the same model behaviour with
+            // explicit-null vs an omitted field, but we keep the explicit
+            // form to match the documented shape exactly — defensible if
+            // the API ever starts caring about the difference.
             func encode(to encoder: Encoder) throws {
                 var c = encoder.container(keyedBy: CodingKeys.self)
                 try c.encode(transcription, forKey: .transcription)

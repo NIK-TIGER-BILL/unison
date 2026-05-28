@@ -126,7 +126,9 @@ Safety net controller для адаптивного TimePitch.rate.
 | `minRate` | 1.0 | НИКОГДА не приглушаем (даже на underrun) |
 | `maxRateStepPerTick` | 0.05 | Slew = 0.5/сек — плавно |
 
-На реальном контенте rate стоит на 1.000 в **95+% ticks**. Срабатывает только при патологическом overflow (depth > 1с sustained, что мы пока ни разу не видели в production).
+На реальном контенте в наших тестовых записях rate **стоит на 1.000 на протяжении всей сессии** — controller вступает только при патологическом overflow (depth > 1s sustained, что мы пока ни разу не видели в production).
+
+**Важно**: `minRate = 1.0` означает что мы **не можем дренировать буфер быстрее реалтайма**. Если модель эмитит < 1.0× wall-clock на длинном отрезке, буфер опустошится → underrun. Это сознательный выбор: без floor=1.0 буфер мог бы overflow indefinitely при > 1.0× эмиссии. Замеренный `arrival_rate_ema ≈ 0.92-0.99x` ниже 1.0 на наших данных, поэтому при текущем `pipelineFrameBuffer=50` и `bufferingOldest` буфер не растёт бесконечно.
 
 ### `CompensatingAGCRunner` (Sources/UnisonAudio/CompensatingAGC.swift)
 Компенсация для model fade (см. выше).

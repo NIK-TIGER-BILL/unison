@@ -634,6 +634,11 @@ public final class TranslationOrchestrator {
         await stopAllStreams()
         consecutiveEmptyCloses = [.me: 0, .peer: 0]
         state = .idle
+        // Finalise any diagnostic dumps so the WAV `data` chunk size
+        // gets patched from `0xFFFF_FFFF` to the actual byte count.
+        // No-op when the env vars aren't set.
+        WireDumper.shared.close()
+        WireDumper.sent.close()
     }
 
     public func updateOriginalMixVolume(_ v: Float) {
@@ -642,19 +647,26 @@ public final class TranslationOrchestrator {
 
     // MARK: - Pipelines
 
-    // Splitter / resampled streams now use `.unbounded` buffering. We
-    // previously used `.bufferingNewest(50)` to cap memory at ~5 s of
-    // audio, but that policy DROPS OLDER frames when the buffer is
-    // full — which is exactly the wrong direction for an in-flight
-    // translation: silently dropping audio mid-utterance is what the
-    // user perceives as "chunk cut off before it finished". For now we
-    // accept unbounded growth under contention (memory is fine in
-    // typical sessions; ~10 KB/frame × 50 frames = ~0.5 MB even at the
-    // old cap). If sustained slow-consumer scenarios show up in
-    // practice we'll switch to `bufferingOldest(N)` so any drops fall
-    // on the FRESHEST frames (= imperceptible tail jitter, not a hole
-    // mid-word) — but that's a future call.
-    private static let pipelineFrameBuffer = 50  // kept for log heuristics only
+    // Splitter / resampled streams use `.bufferingOldest(50)` —
+    // when the buffer fills, the NEWEST (freshest, just-arrived)
+    // frame is dropped instead of the OLDEST (about-to-be-played)
+    // one.
+    //
+    // History:
+    // - `.bufferingNewest(50)` (original): drops OLDEST on overflow
+    //   → audible "chunk cut off mid-utterance" because the audio
+    //   the user is about to hear gets silently discarded.
+    // - `.unbounded` (briefly): no drops → unbounded memory +
+    //   unbounded latency growth if the consumer ever stalls (with
+    //   `PlaybackPacing.minRate=1.0` we cannot drain faster than
+    //   real-time, so a sustained model burst keeps growing the
+    //   buffer indefinitely).
+    // - `.bufferingOldest(50)` (current): caps memory at
+    //   ~5 s × 10 KB = ~0.5 MB per stream, and on overflow drops
+    //   the freshest audio — the user might hear a brief tail
+    //   stutter on the just-arrived burst, but the in-flight audio
+    //   they're currently hearing is never cut off.
+    private static let pipelineFrameBuffer = 50
 
     /// Quick RMS over the PCM samples in a frame, normalized to
     /// [0, 1]. Used by the mic-level diagnostic so support can tell
@@ -728,7 +740,7 @@ public final class TranslationOrchestrator {
         // translated-player for test-mode local playback.
         let task2 = Task { [virtualMicPlayer, outputMixer, stream, transformer, weak self] in
             var resampledContinuation: AsyncStream<AudioFrame>.Continuation!
-            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .unbounded) {
+            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingOldest(Self.pipelineFrameBuffer)) {
                 resampledContinuation = $0
             }
             let pump = Task {
@@ -778,10 +790,10 @@ public final class TranslationOrchestrator {
 
         var translationContinuation: AsyncStream<AudioFrame>.Continuation!
         var passthroughContinuation: AsyncStream<AudioFrame>.Continuation!
-        let translationFrames = AsyncStream<AudioFrame>(bufferingPolicy: .unbounded) {
+        let translationFrames = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingOldest(Self.pipelineFrameBuffer)) {
             translationContinuation = $0
         }
-        let passthroughFrames = AsyncStream<AudioFrame>(bufferingPolicy: .unbounded) {
+        let passthroughFrames = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingOldest(Self.pipelineFrameBuffer)) {
             passthroughContinuation = $0
         }
 
@@ -824,7 +836,7 @@ public final class TranslationOrchestrator {
         }
         let translatedPlay = Task { [outputMixer, stream, transformer, weak self] in
             var resampledContinuation: AsyncStream<AudioFrame>.Continuation!
-            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .unbounded) {
+            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingOldest(Self.pipelineFrameBuffer)) {
                 resampledContinuation = $0
             }
             let pump = Task {

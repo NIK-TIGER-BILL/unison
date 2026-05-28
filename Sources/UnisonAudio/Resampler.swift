@@ -99,6 +99,14 @@ public enum Resampler {
         guard frame.format == .float32 else {
             fatalError("resampleFloat32 expects .float32 input")
         }
+        // Mono load-bearing assumption: we use planar (`interleaved: false`)
+        // AVAudioFormats and a single-channel `memcpy(dstBuf.floatChannelData![0], ...)`.
+        // A multi-channel frame would have its later channels silently dropped
+        // (or worse, corrupt the planar buffer's tail). The whole pipeline —
+        // Process Tap capture, mic capture, OpenAI wire — is mono today; this
+        // precondition makes that invariant load-bearing rather than implicit.
+        precondition(frame.channels == 1,
+                     "Resampler.resampleFloat32 only supports mono frames; got channels=\(frame.channels). Mix down upstream.")
         if frame.sampleRate == targetSampleRate { return frame }
         // Empty frames slip through from AVAudioEngine on cold start of the mic
         // capture (the engine emits a 0-length buffer before the first real

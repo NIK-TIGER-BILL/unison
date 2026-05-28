@@ -294,7 +294,7 @@ public final class OnboardingViewModel {
             }
         }
         try? await Task.sleep(nanoseconds: 100_000_000)
-        AudioCapturePermission.triggerPrompt()
+        await AudioCapturePermission.triggerPrompt()
         Self.log.info("AudioCapturePermission.triggerPrompt() returned")
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         audioCaptureStatus = .done

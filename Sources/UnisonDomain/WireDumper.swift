@@ -86,9 +86,35 @@ public final class WireDumper: @unchecked Sendable {
         handle?.write(pcm)
         writeCount += 1
         bytesWritten &+= UInt64(pcm.count)
+        // Periodic heartbeat — debug-level so the per-session user log
+        // isn't flooded. Lifecycle events (first call, open, close)
+        // stay at info because they're one-shot signals.
         if writeCount % 50 == 0 {
-            log.info("\(category) — \(writeCount) frames dumped (\(bytesWritten) bytes)")
+            log.debug("\(category) — \(writeCount) frames dumped (\(bytesWritten) bytes)")
         }
+    }
+
+    /// Close the dump file. Patches the WAV `data` chunk size from the
+    /// `0xFFFF_FFFF` sentinel to the actual byte count so `ffprobe` and
+    /// strict players read the file correctly. Call from the
+    /// orchestrator's `stop()` so a session boundary finalises the
+    /// header. Safe to call when not initialised — silent no-op.
+    public func close() {
+        lock.lock(); defer { lock.unlock() }
+        guard let handle else { return }
+        let dataSize = UInt32(truncatingIfNeeded: bytesWritten)
+        let fileSize = dataSize &+ 36
+        try? handle.seek(toOffset: 4)
+        handle.write(Self.uint32LE(fileSize))
+        try? handle.seek(toOffset: 40)
+        handle.write(Self.uint32LE(dataSize))
+        try? handle.close()
+        self.handle = nil
+        initialised = false
+        writeCount = 0
+        bytesWritten = 0
+        firstCallSeen = false
+        log.info("\(category) — closed (\(dataSize) bytes)")
     }
 
     private static func buildWAVHeader(sampleRate: UInt32,
