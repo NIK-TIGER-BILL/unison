@@ -100,13 +100,75 @@ struct ReportWriter {
         print(String(format: "Inter-arrival p99    : %.3fs", arrival.gapP99Sec))
         print(String(format: "Inter-arrival max    : %.3fs", arrival.gapMaxSec))
         print("--- pacing simulation ---")
-        print(String(format: "Underrun ticks       : %d / %d (%.1f%%)",
-                     sim.underrunTicks, sim.totalTicks, sim.underrunPercent))
+        print(String(format: "Underrun ticks       : %d / %d active (%.1f%%)",
+                     sim.underrunTicks, sim.activeTicks, sim.underrunPercent))
         print(String(format: "Depth mean           : %.3fs (min %.3f, max %.3f)",
                      sim.depthMeanWhenSpeaking, sim.depthMin, sim.depthMax))
         print(String(format: "Applied rate mean    : %.3f (min %.3f, max %.3f)",
                      sim.rateMean, sim.rateMin, sim.rateMax))
         print(String(format: "Arrival EMA mean     : %.3f", sim.arrivalRateMean))
+        // User-facing latency: when does the last audio sample leave
+        // the player. This is what the user actually perceives — they
+        // keep hearing translation until this moment.
+        let perceivedLatencyPastInput = sim.playbackFinishedAtSec - arrival.inputDurationSec
+        print(String(format: "Playback finished at : %.2fs", sim.playbackFinishedAtSec))
+        print(String(format: "  ↳ past input end   : +%.2fs (this is the user-perceived tail)",
+                     perceivedLatencyPastInput))
         print("")
+    }
+}
+
+// MARK: - Cross-run aggregate
+
+/// Collected per-run summaries for a single audio fixture. Used to tell
+/// "the model behaves like this consistently" from "the network just
+/// hiccuped once". Print after every fixture's runs complete.
+struct AggregateAcrossRuns {
+    struct RunSummary {
+        let runIndex: Int
+        let arrival: ArrivalReport
+        let sim: PacingSimulator.Summary
+    }
+    let label: String
+    let runs: [RunSummary]
+
+    func printReport() {
+        guard !runs.isEmpty else { return }
+        print("\n===== AGGREGATE: \(label) across \(runs.count) runs =====")
+        // Inter-run variability of the metrics that matter for UX.
+        let underrunPercents = runs.map { $0.sim.underrunPercent }
+        let maxGaps = runs.map { $0.arrival.gapMaxSec }
+        let perceivedTails = runs.map { $0.sim.playbackFinishedAtSec - $0.arrival.inputDurationSec }
+        let arrivalRates = runs.map { $0.arrival.arrivalRateRatio }
+        let depthMaxes = runs.map { $0.sim.depthMax }
+        printStat("Underrun %",    underrunPercents, suffix: "%")
+        printStat("Max gap",       maxGaps,           suffix: "s")
+        printStat("Perceived tail (post-input)", perceivedTails, suffix: "s")
+        printStat("Arrival rate",  arrivalRates,     suffix: "x")
+        printStat("Depth max",     depthMaxes,       suffix: "s")
+        // Per-run timeline of max gaps — shows whether the "big gap"
+        // moves around (network) or sticks (model).
+        print("Per-run max-gap timeline:")
+        for r in runs {
+            print(String(format: "  run %d: max gap %.2fs at last-arrival t=%.2fs",
+                         r.runIndex, r.arrival.gapMaxSec, r.arrival.lastArrivalSec ?? 0))
+        }
+        print("")
+    }
+
+    private func printStat(_ name: String, _ values: [Double], suffix: String) {
+        guard !values.isEmpty else { return }
+        let sorted = values.sorted()
+        let mean = values.reduce(0, +) / Double(values.count)
+        let mn = sorted.first ?? 0
+        let mx = sorted.last ?? 0
+        // String.init(format:) does NOT support %s for Swift String
+        // (it'd read garbage; segfaults inside strlen). Interpolate the
+        // name + suffix into Swift's String first, then use %f-only
+        // format strings.
+        let padded = name.padding(toLength: 30, withPad: " ", startingAt: 0)
+        let nums = String(format: "mean=%.2f  min=%.2f  max=%.2f",
+                          mean, mn, mx)
+        print("\(padded)\(nums)\(suffix.isEmpty ? "" : " (\(suffix))")")
     }
 }

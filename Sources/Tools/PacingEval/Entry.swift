@@ -8,6 +8,7 @@ struct CLIArgs {
     let targetLang: Language
     let outputDir: URL
     let label: String
+    let runs: Int
 
     static func parse() throws -> CLIArgs {
         let args = CommandLine.arguments
@@ -15,6 +16,7 @@ struct CLIArgs {
         var target: String = "en"
         var output: String = "./pacing-eval-out"
         var label: String?
+        var runs: Int = 1
         var i = 1
         while i < args.count {
             switch args[i] {
@@ -26,6 +28,8 @@ struct CLIArgs {
                 i += 1; output = args[i]
             case "--label":
                 i += 1; label = args[i]
+            case "--runs":
+                i += 1; runs = Int(args[i]) ?? 1
             case "--help", "-h":
                 printHelp()
                 exit(0)
@@ -48,7 +52,7 @@ struct CLIArgs {
         let outputURL = URL(fileURLWithPath: output)
         try FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
         let finalLabel = label ?? (audio as NSString).lastPathComponent.replacingOccurrences(of: ".", with: "_")
-        return CLIArgs(audioPath: audio, targetLang: lang, outputDir: outputURL, label: finalLabel)
+        return CLIArgs(audioPath: audio, targetLang: lang, outputDir: outputURL, label: finalLabel, runs: max(1, runs))
     }
 
     static func printHelp() {
@@ -85,7 +89,7 @@ struct PacingEvalCLI {
                 throw PacingEvalError.missingApiKey
             }
 
-            print("[pacing-eval] audio=\(args.audioPath) target=\(args.targetLang.rawValue) out=\(args.outputDir.path)")
+            print("[pacing-eval] audio=\(args.audioPath) target=\(args.targetLang.rawValue) out=\(args.outputDir.path) runs=\(args.runs)")
 
             let reader = AudioReader(url: URL(fileURLWithPath: args.audioPath), chunkMs: 100)
             let decoded = try reader.decode()
@@ -94,46 +98,70 @@ struct PacingEvalCLI {
                          decoded.chunkCount,
                          100))
 
-            let chunks = AudioChunkIterator(decoded: decoded)
-            let session = Session(
-                apiKey: apiKey,
-                targetLang: args.targetLang,
-                chunks: chunks,
-                chunkInterval: 0.1,
-                drainTimeoutSec: 5.0
-            )
-            let result = try await session.run()
-            print(String(format: "[pacing-eval] received %d output deltas over %.2fs wall-clock",
-                         result.arrivals.count,
-                         result.totalElapsedSec))
-
-            let arrivalReport = ArrivalReport.compute(
-                arrivals: result.arrivals,
-                inputDurationSec: result.inputDurationSec
-            )
-            // Sweep multiple simulator variants against the same recorded
-            // arrival timeline. Each variant differs only in pre-roll
-            // buffer size — controller logic is identical.
-            // The 0-preroll case is the v3 baseline (matches current app).
             let writer = ReportWriter(outputDir: args.outputDir)
-            try writer.writeArrivalsCSV(arrivals: result.arrivals, filename: "\(args.label)-arrivals.csv")
-            let variants: [(name: String, preroll: Double)] = [
-                ("v3-noPreroll",  0.0),
-                ("preroll-200ms", 0.2),
-                ("preroll-500ms", 0.5),
-                ("preroll-1000ms", 1.0)
-            ]
-            print("\n--- variant sweep on \(args.label) ---")
-            for v in variants {
-                var sim = PacingSimulator(arrivals: result.arrivals)
-                sim.prerollSec = v.preroll
-                sim.variantLabel = v.name
-                let (rows, summary) = sim.simulate()
-                try writer.writeTickCSV(rows: rows, filename: "\(args.label)-\(v.name)-ticks.csv")
-                writer.printSummary(label: "\(args.label) | \(v.name)",
-                                    arrival: arrivalReport,
-                                    sim: summary)
+            var allRuns: [AggregateAcrossRuns.RunSummary] = []
+
+            for runIndex in 1...args.runs {
+                print("\n========== run \(runIndex) / \(args.runs) ==========")
+                let chunks = AudioChunkIterator(decoded: decoded)
+                let session = Session(
+                    apiKey: apiKey,
+                    targetLang: args.targetLang,
+                    chunks: chunks,
+                    chunkInterval: 0.1,
+                    drainTimeoutSec: 5.0
+                )
+                let result = try await session.run()
+                print(String(format: "[pacing-eval] received %d output deltas over %.2fs wall-clock",
+                             result.arrivals.count,
+                             result.totalElapsedSec))
+
+                let arrivalReport = ArrivalReport.compute(
+                    arrivals: result.arrivals,
+                    inputDurationSec: result.inputDurationSec
+                )
+                let runLabel = "\(args.label)-run\(runIndex)"
+                try writer.writeArrivalsCSV(arrivals: result.arrivals, filename: "\(runLabel)-arrivals.csv")
+
+                // Per-run: sweep pre-roll variants against the SAME
+                // recorded arrival timeline so we can compare them
+                // apples-to-apples (same model behaviour, different
+                // pacing decisions).
+                let variants: [(name: String, preroll: Double)] = [
+                    ("v3-noPreroll",   0.0),
+                    ("preroll-200ms", 0.2),
+                    ("preroll-500ms", 0.5),
+                    ("preroll-800ms", 0.8)
+                ]
+                for v in variants {
+                    var sim = PacingSimulator(arrivals: result.arrivals)
+                    sim.prerollSec = v.preroll
+                    sim.variantLabel = v.name
+                    let (rows, summary) = sim.simulate()
+                    try writer.writeTickCSV(rows: rows, filename: "\(runLabel)-\(v.name)-ticks.csv")
+                    writer.printSummary(label: "\(runLabel) | \(v.name)",
+                                        arrival: arrivalReport,
+                                        sim: summary)
+                    // Only push the baseline variant into the aggregate
+                    // so the cross-run summary stays focused on the
+                    // production-equivalent behaviour.
+                    if v.name == "v3-noPreroll" {
+                        allRuns.append(AggregateAcrossRuns.RunSummary(
+                            runIndex: runIndex,
+                            arrival: arrivalReport,
+                            sim: summary
+                        ))
+                    }
+                }
+
+                // Brief cool-down between runs so we don't slam the API.
+                if runIndex < args.runs {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                }
             }
+
+            // Aggregate variability — tells us model vs network behaviour.
+            AggregateAcrossRuns(label: args.label, runs: allRuns).printReport()
             print("[pacing-eval] CSVs written to \(args.outputDir.path)")
         } catch {
             FileHandle.standardError.write("error: \(error)\n".data(using: .utf8)!)

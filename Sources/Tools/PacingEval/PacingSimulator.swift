@@ -46,8 +46,14 @@ struct PacingSimulator {
 
     struct Summary {
         let totalTicks: Int
+        /// Ticks during which audio was *expected* to play — i.e. from
+        /// the first arrival through the last arrival's audio duration.
+        /// Underrun percentage is normalised to this window only,
+        /// because counting silence after the model finished
+        /// translating would inflate the figure for no good reason.
+        let activeTicks: Int
         let underrunTicks: Int
-        var underrunPercent: Double { Double(underrunTicks) / Double(max(1, totalTicks)) * 100.0 }
+        var underrunPercent: Double { Double(underrunTicks) / Double(max(1, activeTicks)) * 100.0 }
         let depthMin: Double
         let depthMax: Double
         let depthMeanWhenSpeaking: Double
@@ -55,6 +61,13 @@ struct PacingSimulator {
         let rateMax: Double
         let rateMean: Double
         let arrivalRateMean: Double
+        /// Wall-clock second at which the last scheduled sample left the
+        /// player. This is the user-perceived end of playback — what we
+        /// care about for "how much delay did the user actually hear".
+        /// = `last_arrival_t + audio_duration_of_last_chunk` if the
+        /// player kept pace at rate=1, slightly different if the rate
+        /// drifted via the controller.
+        let playbackFinishedAtSec: Double
     }
 
     func simulate() -> (rows: [TickRow], summary: Summary) {
@@ -62,7 +75,12 @@ struct PacingSimulator {
         // For each arrival t, we add bytes to the queue at the matching
         // tick = floor(t / tickInterval).
         let lastT = arrivals.last?.t ?? 0
-        let totalTicks = Int(ceil((lastT + 2.0) / tickInterval))  // 2s drain pad
+        // Extend simulation past the last arrival by enough to drain
+        // the buffer at rate=1 even with all audio still queued. The
+        // upper bound is `last_arrival_t + total_audio_seconds` (worst
+        // case: buffer holds everything at last arrival, plays at 1x).
+        let totalAudioSec = arrivals.reduce(0.0) { $0 + $1.audioDurationSec }
+        let totalTicks = Int(ceil((lastT + totalAudioSec + 1.0) / tickInterval))
         var bytesPerTick = [Int](repeating: 0, count: totalTicks + 1)
         for a in arrivals {
             let i = max(0, min(bytesPerTick.count - 1, Int(a.t / tickInterval)))
@@ -107,6 +125,11 @@ struct PacingSimulator {
         var rateSum: Double = 0
         var arrivalSum: Double = 0
         var underrunTicks: Int = 0
+        /// Track the wall-clock at which the player most recently
+        /// consumed actual audio. When the buffer drains and stays
+        /// empty thereafter (no more arrivals), the last such tick
+        /// marks `playbackFinishedAt`.
+        var lastConsumeTick: Int = 0
 
         for tick in 0..<totalTicks {
             // Schedule arrivals for this tick. Bytes are 24kHz int16 →
@@ -138,11 +161,23 @@ struct PacingSimulator {
             let actualConsumed = min(wouldConsume, available)
             completedSamples += actualConsumed
             // "Underrun" = we wanted to consume more than was available
-            // AND playback has begun AND at least one chunk has arrived.
+            // AND playback has begun AND we're still in the window where
+            // more audio is expected. Post-last-arrival silence isn't
+            // underrun — it's the natural end of playback (the user
+            // doesn't hear anything because there's nothing left to
+            // translate, not because we glitched).
+            //
+            // Window: from `firstArrivalTick` up to and including
+            // `Int(lastT / tickInterval) + audio_duration_of_last_chunk
+            // / tickInterval` — i.e. through the playback of the last
+            // arrived chunk. Beyond that, silence is expected.
+            let currentTimeSec = Double(tick) * tickInterval
+            let expectedAudioPresent = currentTimeSec <= lastT + 0.5
             let underrun = playbackStarted
                 && actualConsumed < wouldConsume - 1e-6
                 && firstArrivalTick != nil
                 && firstArrivalTick! < tick
+                && expectedAudioPresent
 
             // Compute depth + EMAs (replicating PlaybackPacing.tick exactly).
             let depth = max(0, scheduledSamples - completedSamples) / playerSampleRate
@@ -193,12 +228,21 @@ struct PacingSimulator {
             rateSum += appliedRate
             arrivalSum += arrivalEMA
             if underrun { underrunTicks += 1 }
+            if actualConsumed > 0 { lastConsumeTick = tick }
 
             _ = targetBuffer; _ = maxRate; _ = minRate  // silence unused warnings, refs documenting which constants matter
         }
 
+        // Active window for underrun normalisation: from the first
+        // arrival's tick through Int(lastT/tickInterval) + a small
+        // padding for the last chunk's duration.
+        let firstTick = firstArrivalTick ?? 0
+        let lastActiveTick = Int(lastT / tickInterval) + 5  // ~500ms padding
+        let activeTicks = max(1, lastActiveTick - firstTick + 1)
+
         let summary = Summary(
             totalTicks: totalTicks,
+            activeTicks: activeTicks,
             underrunTicks: underrunTicks,
             depthMin: depthMin == .infinity ? 0 : depthMin,
             depthMax: depthMax,
@@ -206,7 +250,8 @@ struct PacingSimulator {
             rateMin: rateMin == .infinity ? 1.0 : rateMin,
             rateMax: rateMax,
             rateMean: rateSum / Double(totalTicks),
-            arrivalRateMean: arrivalSum / Double(totalTicks)
+            arrivalRateMean: arrivalSum / Double(totalTicks),
+            playbackFinishedAtSec: Double(lastConsumeTick + 1) * tickInterval
         )
 
         return (rows, summary)
