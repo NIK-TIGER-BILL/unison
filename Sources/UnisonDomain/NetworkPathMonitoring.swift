@@ -55,6 +55,12 @@ public final class MockNetworkPathMonitor: NetworkPathMonitoring, @unchecked Sen
     private var _currentStatus: NetworkPathStatus
     private var subscribers: [UUID: AsyncStream<NetworkPathStatus>.Continuation] = [:]
     private var yieldInitial: Bool
+    /// Flips true on the first `simulate(_:)`. Used to force a yield
+    /// on the first update even if its status matches the seed —
+    /// mirrors production NetworkMonitor's `didReceiveFirstUpdate`
+    /// flag (iter-4 review finding: without this, a test driving the
+    /// initial-offline-network case would silently miss a yield).
+    private var didReceiveFirstSimulate: Bool = false
 
     public var currentStatus: NetworkPathStatus {
         lock.lock()
@@ -87,19 +93,28 @@ public final class MockNetworkPathMonitor: NetworkPathMonitoring, @unchecked Sen
     public func simulate(_ status: NetworkPathStatus) {
         lock.lock()
         let previous = _currentStatus
+        // `isFirst` tracks the FIRST `simulate(_:)` call exactly the
+        // way production's `NetworkMonitor` tracks `didReceiveFirstUpdate`
+        // (NetworkMonitor.swift first-update branch). The first
+        // simulate must always yield even if its status matches the
+        // seed — otherwise a test that constructs
+        // `init(initial: .unsatisfied, yieldInitial: false)` and then
+        // simulates `.unsatisfied` (genuinely-offline launch) would
+        // see no yield, whereas production would yield (iter-4
+        // review finding).
+        let isFirst = !didReceiveFirstSimulate
         _currentStatus = status
+        didReceiveFirstSimulate = true
         // After the first simulate, subscribers attaching later
         // should see the new value as their initial yield — mirror
         // the production `didReceiveFirstUpdate` semantic.
         self.yieldInitial = true
         let conts = Array(subscribers.values)
         lock.unlock()
-        // Mirror the production de-dup so tests behave the same as
-        // the live monitor — without this, a regression test that
-        // exercises two consecutive identical statuses would see two
-        // yields in tests and one in production, masking bugs that
-        // depend on the production coalescing (iter-2 review).
-        guard previous != status else { return }
+        // First update always yields. Subsequent updates de-dup on
+        // equality so a regression test driving two consecutive
+        // identical statuses sees one yield (mirror production).
+        if !isFirst, previous == status { return }
         for c in conts { c.yield(status) }
     }
 
