@@ -2,6 +2,12 @@
 
 macOS 26 Tahoe-only menubar app. Real-time speech translation for video calls.
 
+## Knowledge base
+
+- **[Audio pipeline](docs/audio-pipeline.md)** — model behavior, our chain,
+  known bugs, AGC, pacing, diagnostic env-vars, pacing-eval harness. Read
+  this before touching anything in `Sources/UnisonAudio/` or `Sources/UnisonTranslation/`.
+
 ## Liquid Glass — two backends behind one API
 
 Every glass surface in the UI is rendered via one of two mechanisms:
@@ -75,8 +81,8 @@ panel is hit-test transparent
 
 `UNISON_FORCE_STATE` (parsed once at launch by `Composition`):
 
-- `onboarding-done` / `transcript-demo` — preinstalled BlackHole,
-  preseeded keychain, mocked permissions
+- `onboarding-done` / `transcript-demo` — Process Tap audio capture
+  preseeded, keychain preseeded, mocked permissions
 - `popover-open` — opens the popover at launch and disables
   auto-dismiss; used by the Tart screenshot harness
 - `start-translation` / `start-stop-start` — drives integration tests

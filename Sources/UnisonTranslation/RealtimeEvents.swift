@@ -55,21 +55,58 @@ public struct SessionUpdatePayload: Sendable {
     public let targetLanguage: String
     public init(targetLanguage: String) { self.targetLanguage = targetLanguage }
 
+    /// Resolves the noise-reduction preset for the session from
+    /// `UNISON_NOISE_REDUCTION`:
+    ///   - unset             → default `"near_field"` (cookbook recommendation)
+    ///   - `"off" | "none"`  → field omitted from the payload entirely
+    ///   - any other string  → sent verbatim (e.g. `"far_field"`)
+    /// Investigating whether near_field's AGC component degrades amplitude
+    /// over long sessions on system-audio (non-mic) input — flip via env
+    /// var to A/B without a rebuild.
+    private static func resolveNoiseReductionType() -> String? {
+        let raw = ProcessInfo.processInfo.environment["UNISON_NOISE_REDUCTION"]
+        guard let raw else { return "near_field" }
+        let v = raw.lowercased()
+        if v.isEmpty || v == "off" || v == "none" { return nil }
+        return raw
+    }
+
     func encodeWrapped(to encoder: Encoder, type: String) throws {
         struct Output: Encodable { let language: String }
         struct TranscriptionModel: Encodable { let model: String }
         struct NoiseReduction: Encodable { let type: String }
         struct Input: Encodable {
             let transcription: TranscriptionModel
-            let noise_reduction: NoiseReduction
+            let noise_reduction: NoiseReduction?
+
+            enum CodingKeys: String, CodingKey {
+                case transcription, noise_reduction
+            }
+            // Custom encode so a nil `noise_reduction` is sent as explicit
+            // JSON `null` (matching the OpenAI docs example for disabling
+            // NR). Empirically we observed the same model behaviour with
+            // explicit-null vs an omitted field, but we keep the explicit
+            // form to match the documented shape exactly — defensible if
+            // the API ever starts caring about the difference.
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(transcription, forKey: .transcription)
+                if let nr = noise_reduction {
+                    try c.encode(nr, forKey: .noise_reduction)
+                } else {
+                    try c.encodeNil(forKey: .noise_reduction)
+                }
+            }
         }
         struct Audio: Encodable { let input: Input; let output: Output }
         struct Session: Encodable { let audio: Audio }
         struct Envelope: Encodable { let type: String; let session: Session }
+
+        let nr: NoiseReduction? = Self.resolveNoiseReductionType().map(NoiseReduction.init(type:))
         let session = Session(audio: Audio(
             input: Input(
                 transcription: .init(model: "gpt-realtime-whisper"),
-                noise_reduction: .init(type: "near_field")
+                noise_reduction: nr
             ),
             output: .init(language: targetLanguage)
         ))

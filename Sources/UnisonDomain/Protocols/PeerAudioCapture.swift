@@ -1,5 +1,5 @@
 public protocol PeerAudioCapture: Sendable {
-    /// Reads from BlackHole 16ch (fixed device).
+    /// Starts audio capture and returns frames via `AsyncStream`.
     func start() -> AsyncStream<AudioFrame>
     func stop()
 }

@@ -3,6 +3,7 @@ public struct Settings: Equatable, Codable, Sendable {
     public var languagePair: LanguagePair
     public var inputDeviceUID: String?
     public var outputDeviceUID: String?
+    public var excludedTapBundleIDs: [String]
     private var _originalMixVolume: Float
 
     public var originalMixVolume: Float {
@@ -15,12 +16,14 @@ public struct Settings: Equatable, Codable, Sendable {
         languagePair: LanguagePair = .default,
         inputDeviceUID: String? = nil,
         outputDeviceUID: String? = nil,
+        excludedTapBundleIDs: [String] = [],
         originalMixVolume: Float = 0.2
     ) {
         self.sessionMode = sessionMode
         self.languagePair = languagePair
         self.inputDeviceUID = inputDeviceUID
         self.outputDeviceUID = outputDeviceUID
+        self.excludedTapBundleIDs = excludedTapBundleIDs
         self._originalMixVolume = min(max(originalMixVolume, 0.0), 1.0)
     }
 
@@ -28,6 +31,19 @@ public struct Settings: Equatable, Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case sessionMode, languagePair, inputDeviceUID, outputDeviceUID
+        case excludedTapBundleIDs
         case _originalMixVolume = "originalMixVolume"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.sessionMode = try c.decode(SessionMode.self, forKey: .sessionMode)
+        self.languagePair = try c.decode(LanguagePair.self, forKey: .languagePair)
+        self.inputDeviceUID = try c.decodeIfPresent(String.self, forKey: .inputDeviceUID)
+        self.outputDeviceUID = try c.decodeIfPresent(String.self, forKey: .outputDeviceUID)
+        self.excludedTapBundleIDs = try c.decodeIfPresent([String].self,
+                                                          forKey: .excludedTapBundleIDs) ?? []
+        let raw = try c.decode(Float.self, forKey: ._originalMixVolume)
+        self._originalMixVolume = min(max(raw, 0.0), 1.0)
     }
 }

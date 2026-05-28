@@ -40,7 +40,9 @@ let package = Package(
         .library(name: "UnisonAudio", targets: ["UnisonAudio"]),
         .library(name: "UnisonSystem", targets: ["UnisonSystem"]),
         .library(name: "UnisonUI", targets: ["UnisonUI"]),
-        .executable(name: "Unison", targets: ["UnisonApp"])
+        .executable(name: "Unison", targets: ["UnisonApp"]),
+        .executable(name: "tap-benchmark", targets: ["TapBenchmark"]),
+        .executable(name: "pacing-eval", targets: ["PacingEval"])
     ],
     // Note: swift-snapshot-testing requires XCTest, which is not
     // available on Command Line Tools-only setups. We ship our own
@@ -51,12 +53,25 @@ let package = Package(
         .target(name: "UnisonTranslation", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
         .target(name: "UnisonAudio", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
         .target(name: "UnisonSystem", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
-        .target(name: "UnisonUI", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
+        .target(name: "UnisonUI", dependencies: ["UnisonDomain", "UnisonAudio"], swiftSettings: langModeV5),
         .executableTarget(name: "UnisonApp", dependencies: [
             "UnisonDomain", "UnisonTranslation", "UnisonAudio",
             "UnisonSystem", "UnisonUI"
         ], swiftSettings: langModeV5),
-        .testTarget(name: "UnisonDomainTests", dependencies: ["UnisonDomain", "UnisonUI"], swiftSettings: langModeV5),
+        .executableTarget(
+            name: "TapBenchmark",
+            dependencies: ["UnisonAudio", "UnisonDomain"],
+            path: "Sources/Tools/TapBenchmark",
+            exclude: ["Info.plist", "tap-benchmark.entitlements"],
+            swiftSettings: langModeV5
+        ),
+        .executableTarget(
+            name: "PacingEval",
+            dependencies: ["UnisonAudio", "UnisonTranslation", "UnisonDomain"],
+            path: "Sources/Tools/PacingEval",
+            swiftSettings: langModeV5
+        ),
+        .testTarget(name: "UnisonDomainTests", dependencies: ["UnisonDomain", "UnisonUI", "UnisonAudio"], swiftSettings: langModeV5),
         .testTarget(name: "UnisonTranslationTests", dependencies: ["UnisonTranslation"], swiftSettings: langModeV5),
         .testTarget(name: "UnisonAudioTests", dependencies: ["UnisonAudio"],
                     resources: [.copy("Fixtures")], swiftSettings: langModeV5),
@@ -74,6 +89,11 @@ let package = Package(
             // "unhandled file" warning per snapshot. Explicit exclude
             // mutes the warning and keeps the test binary small.
             exclude: ["__Snapshots__"],
+            swiftSettings: langModeV5
+        ),
+        .testTarget(
+            name: "TapBenchmarkTests",
+            dependencies: ["TapBenchmark"],
             swiftSettings: langModeV5
         )
     ]

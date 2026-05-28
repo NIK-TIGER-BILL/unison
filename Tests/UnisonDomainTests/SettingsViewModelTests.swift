@@ -28,7 +28,6 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
     var shouldFail = false
     var installed = true
     func is2chInstalled() -> Bool { installed }
-    func is16chInstalled() -> Bool { installed }
     func runBundledInstaller() async throws {
         calls += 1
         if shouldFail { throw InstallError() }
@@ -251,34 +250,30 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
 @Test func settingsVM_blackHoleStatus_readyWhenRegistryReports() {
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     let vm = SettingsViewModel(
         initial: .default,
         deviceRegistry: registry,
         onChange: { _ in }
     )
     #expect(vm.blackHole2chStatus == .ready)
-    #expect(vm.blackHole16chStatus == .ready)
 }
 
 @MainActor
 @Test func settingsVM_blackHoleStatus_errorWhenMissing() {
     let registry = MockAudioDeviceRegistry()
-    // No bh2 or bh16 set on the mock.
+    // No bh2ch set on the mock.
     let vm = SettingsViewModel(
         initial: .default,
         deviceRegistry: registry,
         onChange: { _ in }
     )
     #expect(vm.blackHole2chStatus == .error)
-    #expect(vm.blackHole16chStatus == .error)
 }
 
 @MainActor
 @Test func settingsVM_reinstallBlackHole_callsInstaller() async {
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     let installer = FailingInstaller()
     let vm = SettingsViewModel(
         initial: .default,
@@ -293,14 +288,13 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
     #expect(vm.lastSavedAt != nil)
     // After install: registry still reports installed → status .ready.
     #expect(vm.blackHole2chStatus == .ready)
-    #expect(vm.blackHole16chStatus == .ready)
 }
 
 @MainActor
 @Test func settingsVM_reinstallBlackHole_failureLeavesErrorStatus() async {
     let registry = MockAudioDeviceRegistry()
-    // No bh2/bh16: device registry will still report missing after the
-    // installer "runs" — so blackHole statuses settle to `.error`.
+    // No bh2ch: device registry will still report missing after the
+    // installer "runs" — so blackHole status settles to `.error`.
     let installer = FailingInstaller()
     installer.shouldFail = true
     let vm = SettingsViewModel(
@@ -313,7 +307,6 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
     #expect(installer.calls == 1)
     #expect(vm.isReinstallingBlackHole == false)
     #expect(vm.blackHole2chStatus == .error)
-    #expect(vm.blackHole16chStatus == .error)
 }
 
 @MainActor
@@ -326,12 +319,10 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
         onChange: { _ in }
     )
     #expect(vm.blackHole2chStatus == .error)
-    // Devices appear → manual refresh reflects it.
+    // Device appears → manual refresh reflects it.
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     vm.refreshBlackHoleStatus()
     #expect(vm.blackHole2chStatus == .ready)
-    #expect(vm.blackHole16chStatus == .ready)
 }
 
 @MainActor

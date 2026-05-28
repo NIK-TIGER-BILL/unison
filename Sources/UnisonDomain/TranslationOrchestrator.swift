@@ -92,6 +92,7 @@ public final class TranslationOrchestrator {
 
     private var meStream: (any TranslationStream)?
     private var peerStream: (any TranslationStream)?
+    private var silentFrameWatchdog: SilentFrameWatchdog?
     // Pipeline tasks bucketed per speaker so a reconnect cancels exactly the
     // tasks bound to the failed stream and leaves the healthy side untouched.
     private var pipelineTasksBySpeaker: [Speaker: [Task<Void, Never>]] = [:]
@@ -212,7 +213,7 @@ public final class TranslationOrchestrator {
 
         // Permission gates. Mic permission is required by both `.call`
         // and `.test` (anything that captures from the mic). `.listen`
-        // only consumes BlackHole 16ch, no mic permission needed.
+        // only consumes Process Tap audio, no mic permission needed.
         if mode.requiresMicrophone {
             let status = permissions.currentStatus(.microphone)
             Self.log.info("start() — microphone permission currentStatus=\(String(describing: status))")
@@ -224,9 +225,8 @@ public final class TranslationOrchestrator {
                 return
             }
         }
-        // BlackHole device gates. Only required by modes that touch
-        // BlackHole — `.call` writes to BH 2ch (virtual mic) and reads
-        // BH 16ch (system audio). `.listen` only reads BH 16ch.
+        // BlackHole 2ch gate. Only `.call` writes to BH 2ch (virtual mic).
+        // `.listen` uses Process Tap only — no BH 2ch needed.
         // `.test` doesn't touch BlackHole at all — that's the whole
         // point of the mode (verify translation without needing the
         // driver installed or a real call active).
@@ -234,13 +234,6 @@ public final class TranslationOrchestrator {
             guard deviceRegistry.findBlackHole2ch() != nil else {
                 Self.log.error("start() guard failed: BlackHole 2ch not found → .error(.blackHole2chMissing)")
                 state = .error(.blackHole2chMissing)
-                return
-            }
-        }
-        if mode == .call || mode == .listen {
-            guard deviceRegistry.findBlackHole16ch() != nil else {
-                Self.log.error("start() guard failed: BlackHole 16ch not found → .error(.blackHole16chMissing)")
-                state = .error(.blackHole16chMissing)
                 return
             }
         }
@@ -517,15 +510,6 @@ public final class TranslationOrchestrator {
     private func handleDeviceChange() {
         guard case .translating(let mode, _) = state else { return }
 
-        // BlackHole 16ch is required in both modes — losing it is fatal.
-        if deviceRegistry.findBlackHole16ch() == nil {
-            Self.log.error("handleDeviceChange — BlackHole 16ch disappeared mid-session → stop + .error(.blackHole16chMissing)")
-            Task { @MainActor in
-                await self.stop()
-                self.state = .error(.blackHole16chMissing)
-            }
-            return
-        }
         // BlackHole 2ch is required only in Call mode — losing it is fatal there.
         if mode == .call, deviceRegistry.findBlackHole2ch() == nil {
             Self.log.error("handleDeviceChange — BlackHole 2ch disappeared mid-call → stop + .error(.blackHole2chMissing)")
@@ -1012,6 +996,8 @@ public final class TranslationOrchestrator {
         lastDeltaAtBySpeaker = [:]
         lastAudibleMicAt = nil
         connectivityHealth = .healthy
+        silentFrameWatchdog?.stop()
+        silentFrameWatchdog = nil
         for t in globalTasks { t.cancel() }
         for (_, tasks) in pipelineTasksBySpeaker {
             for t in tasks { t.cancel() }
@@ -1039,6 +1025,11 @@ public final class TranslationOrchestrator {
         await stopAllStreams()
         consecutiveEmptyCloses = [.me: 0, .peer: 0]
         state = .idle
+        // Finalise any diagnostic dumps so the WAV `data` chunk size
+        // gets patched from `0xFFFF_FFFF` to the actual byte count.
+        // No-op when the env vars aren't set.
+        WireDumper.shared.close()
+        WireDumper.sent.close()
     }
 
     public func updateOriginalMixVolume(_ v: Float) {
@@ -1053,9 +1044,25 @@ public final class TranslationOrchestrator {
 
     // MARK: - Pipelines
 
-    // Bound buffer size for splitter/resampled streams. At ~100ms per frame,
-    // 50 frames ≈ 5 seconds of audio — enough to ride out brief network
-    // stalls while preventing unbounded memory growth on prolonged stalls.
+    // Splitter / resampled streams use `.bufferingOldest(50)` —
+    // when the buffer fills, the NEWEST (freshest, just-arrived)
+    // frame is dropped instead of the OLDEST (about-to-be-played)
+    // one.
+    //
+    // History:
+    // - `.bufferingNewest(50)` (original): drops OLDEST on overflow
+    //   → audible "chunk cut off mid-utterance" because the audio
+    //   the user is about to hear gets silently discarded.
+    // - `.unbounded` (briefly): no drops → unbounded memory +
+    //   unbounded latency growth if the consumer ever stalls (with
+    //   `PlaybackPacing.minRate=1.0` we cannot drain faster than
+    //   real-time, so a sustained model burst keeps growing the
+    //   buffer indefinitely).
+    // - `.bufferingOldest(50)` (current): caps memory at
+    //   ~5 s × 10 KB = ~0.5 MB per stream, and on overflow drops
+    //   the freshest audio — the user might hear a brief tail
+    //   stutter on the just-arrived burst, but the in-flight audio
+    //   they're currently hearing is never cut off.
     private static let pipelineFrameBuffer = 50
 
     /// Quick RMS over the PCM samples in a frame, normalized to
@@ -1125,12 +1132,12 @@ public final class TranslationOrchestrator {
                 // orchestrator drains the buffer onto the fresh stream
                 // so a brief WS flap doesn't drop the user's in-flight
                 // phrase. `AudioRingBuffer.append` is lock-guarded
-                // and safe to call off the main actor; we still hop
-                // to MainActor.run for symmetry with the other
-                // orchestrator mutations in this task.
-                await MainActor.run { [weak self] in
-                    self?.audioBufferBySpeaker[.me]?.append(wire)
-                }
+                // and safe to call off the main actor — we deliberately
+                // skip the MainActor hop here so audio frame dispatch
+                // doesn't queue behind UI work. The dictionary read is
+                // captured into a local under main once (above) and the
+                // buffer instance itself is internally synchronised.
+                self?.audioBufferBySpeaker[.me]?.append(wire)
                 await stream.send(wire)
                 frameIndex += 1
             }
@@ -1141,11 +1148,20 @@ public final class TranslationOrchestrator {
         // translated-player for test-mode local playback.
         let task2 = Task { [virtualMicPlayer, outputMixer, stream, transformer, weak self] in
             var resampledContinuation: AsyncStream<AudioFrame>.Continuation!
-            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
+            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingOldest(Self.pipelineFrameBuffer)) {
                 resampledContinuation = $0
             }
             let pump = Task {
                 for await wireFrame in stream.output {
+                    // Diagnostic dump of the raw model output. Both
+                    // the me-stream pump (this site, used in `.call`
+                    // and `.test`) AND the peer-stream pump (the
+                    // wireIncomingPipeline equivalent below) write to
+                    // the shared `WireDumper.shared`. In `.call` mode
+                    // the resulting WAV interleaves both directions
+                    // — interpret per arrival timestamps if you need
+                    // to separate them.
+                    WireDumper.shared.write(wireFrame.pcm)
                     // First audio delta from the server — disarm the
                     // no-data watchdog. `markFirstDataReceived` is
                     // @MainActor-isolated; this Task isn't, so hop
@@ -1190,15 +1206,33 @@ public final class TranslationOrchestrator {
 
         var translationContinuation: AsyncStream<AudioFrame>.Continuation!
         var passthroughContinuation: AsyncStream<AudioFrame>.Continuation!
-        let translationFrames = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
+        let translationFrames = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingOldest(Self.pipelineFrameBuffer)) {
             translationContinuation = $0
         }
-        let passthroughFrames = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
+        let passthroughFrames = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingOldest(Self.pipelineFrameBuffer)) {
             passthroughContinuation = $0
         }
 
+        // Silent-frame heuristic — informational only. It cannot distinguish
+        // "TCC denied capture" from "nothing is playing right now": both
+        // produce all-zero samples from Process Tap. We saw the false-positive
+        // when TCC log explicitly returned `Auth Right: Allowed (User Consent)`
+        // for kTCCServiceAudioCapture but the user wasn't playing any audio
+        // when they clicked Start. Hard-erroring the session in that case is
+        // wrong UX. We keep the watchdog at a longer threshold and use it for
+        // diagnostics only — don't punish a quiet meeting start.
+        let watchdog = SilentFrameWatchdog(thresholdSeconds: 30) { [weak self] in
+            Task { @MainActor [weak self] in
+                Self.log.info("Silent-frame watchdog — 30s of zero amplitude; either TCC denied capture or no app is producing audio right now")
+                _ = self  // intentionally not flipping state to .error
+            }
+        }
+        watchdog.start()
+        self.silentFrameWatchdog = watchdog
+
         let splitter = Task {
             for await frame in peerFrames {
+                watchdog.observe(frame.pcm)
                 translationContinuation.yield(frame)
                 passthroughContinuation.yield(frame)
             }
@@ -1208,16 +1242,28 @@ public final class TranslationOrchestrator {
         let sender = Task { [stream] in
             for await frame in translationFrames {
                 let wire = transformer.toWire(frame)
+                // Dump what we sent to OpenAI (24 kHz int16 mono).
+                // Pairs with WireDumper.shared (model output) — if SENT
+                // is amplitude-stable but WIRE fades, the model is the
+                // culprit.
+                WireDumper.sent.write(wire.pcm)
                 await stream.send(wire)
             }
         }
         let translatedPlay = Task { [outputMixer, stream, transformer, weak self] in
             var resampledContinuation: AsyncStream<AudioFrame>.Continuation!
-            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingNewest(Self.pipelineFrameBuffer)) {
+            let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingOldest(Self.pipelineFrameBuffer)) {
                 resampledContinuation = $0
             }
             let pump = Task {
                 for await wireFrame in stream.output {
+                    // Diagnostic dump of the raw model output (before
+                    // any Resampler / scheduling / playback). Guarded
+                    // by env var; silent no-op otherwise. Pairs with
+                    // UNISON_DUMP_PLAYBACK_WAV (the post-timePitch
+                    // tap) for A/B comparison of what the model
+                    // emits vs what the speakers receive.
+                    WireDumper.shared.write(wireFrame.pcm)
                     await MainActor.run { [weak self] in
                         self?.recordDeltaArrival(speaker: .peer)
                         self?.markFirstDataReceived()

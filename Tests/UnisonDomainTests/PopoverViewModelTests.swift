@@ -8,7 +8,6 @@ private func makeOrchestratorForVM(perms: MockPermissionsService = .init()) -> T
     if perms.statuses[.microphone] == nil { perms.statuses[.microphone] = .granted }
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     return TranslationOrchestrator(
         micCapture: MockMicrophoneCapture(),
         peerCapture: MockPeerAudioCapture(),
@@ -32,7 +31,6 @@ private func makeReadyVM(
     let orch = makeOrchestratorForVM(perms: perms)
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     return PopoverViewModel(
         orchestrator: orch,
         permissions: perms,
@@ -47,7 +45,6 @@ private func makeReadyVM(
     let orch = makeOrchestratorForVM(perms: perms)
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     perms.statuses[.microphone] = .granted
     let vm = PopoverViewModel(orchestrator: orch, permissions: perms, deviceRegistry: registry, settings: .default)
     #expect(vm.canStart)
@@ -61,7 +58,6 @@ private func makeReadyVM(
     let orch = makeOrchestratorForVM(perms: perms)
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     var settings = Settings.default
     settings.sessionMode = .call
     let vm = PopoverViewModel(orchestrator: orch, permissions: perms, deviceRegistry: registry, settings: settings)
@@ -75,7 +71,6 @@ private func makeReadyVM(
     perms.statuses[.microphone] = .denied
     let orch = makeOrchestratorForVM(perms: perms)
     let registry = MockAudioDeviceRegistry()
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     var settings = Settings.default
     settings.sessionMode = .listen
     let vm = PopoverViewModel(orchestrator: orch, permissions: perms, deviceRegistry: registry, settings: settings)
@@ -89,7 +84,6 @@ private func makeReadyVM(
     let orch = makeOrchestratorForVM(perms: perms)
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     let vm = PopoverViewModel(
         orchestrator: orch,
         permissions: perms,
@@ -197,7 +191,6 @@ func popoverVM_userMessage_mapsEveryTranslationError() {
     let cases: [TranslationError] = [
         .permissionDenied(.microphone),
         .blackHole2chMissing,
-        .blackHole16chMissing,
         .apiKeyInvalid,
         .rateLimited(retryAfter: 1),
         .insufficientCredits,
@@ -244,7 +237,6 @@ func popoverVM_elapsedSecondsString_keepsCountingDuringReconnecting() {
     perms.statuses[.microphone] = .granted
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     let started = nowOffset(-60)
     let vm = PopoverViewModel.previewing(
         state: .reconnecting(mode: .call, since: nowDate(), startedAt: started),
@@ -264,7 +256,6 @@ func popoverVM_isReconnecting_trueOnlyDuringReconnecting() {
     perms.statuses[.microphone] = .granted
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     let start = nowDate()
 
     let idle = PopoverViewModel.previewing(state: .idle, permissions: perms, deviceRegistry: registry)
@@ -294,7 +285,6 @@ func popoverVM_isReconnecting_trueOnlyDuringReconnecting() {
     perms.statuses[.microphone] = .granted
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     let started = nowDate()
     let preview = PopoverViewModel.previewing(
         settings: .default,
@@ -312,7 +302,6 @@ func popoverVM_isReconnecting_trueOnlyDuringReconnecting() {
     perms.statuses[.microphone] = .granted
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     let started = nowDate()
     let preview = PopoverViewModel.previewing(
         settings: .default,
@@ -331,7 +320,6 @@ func popoverVM_isReconnecting_trueOnlyDuringReconnecting() {
     perms.statuses[.microphone] = .granted
     let registry = MockAudioDeviceRegistry()
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    registry.bh16ch = AudioDevice(uid: "bh16", name: "BlackHole 16ch", kind: .input)
     let started = nowDate()
     let preview = PopoverViewModel.previewing(
         settings: .default,
