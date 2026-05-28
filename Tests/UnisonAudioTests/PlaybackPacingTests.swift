@@ -31,3 +31,33 @@ import Testing
     #expect(r.p == 1.0)
     #expect(r.d == 0.0)
 }
+
+@Test func pacing_anticipatesGrowth_targetRisesEvenAtShallowQueue() {
+    // depth=0.3 → P=(0.3-0.2)/1.3 ≈ 0.0769
+    // velocity=+0.5 → D = clamp(0.5*1.5, ±0.5) = 0.5 (clamped)
+    // target = 1.0 + (0.0769 + 0.5) * 1.5 ≈ 1.865
+    let r = PlaybackPacing.computeRate(depth: 0.3, velocity: 0.5)
+    #expect(r.target > 1.5)
+    #expect(r.target < 2.0)
+    #expect(r.d == 0.5)
+}
+
+@Test func pacing_drainingQueue_reducesTargetBelowPureProportional() {
+    // depth=1.0, velocity=-0.5
+    // P=(1.0-0.2)/1.3 ≈ 0.615
+    // D = clamp(-0.5*1.5, ±0.5) = -0.5
+    // target = 1.0 + (0.615 - 0.5) * 1.5 ≈ 1.173
+    let withDrain = PlaybackPacing.computeRate(depth: 1.0, velocity: -0.5)
+    let noDrain = PlaybackPacing.computeRate(depth: 1.0, velocity: 0.0)
+    #expect(withDrain.target < noDrain.target)
+    #expect(abs(withDrain.target - 1.173) < 0.01)
+    #expect(withDrain.d == -0.5)
+}
+
+@Test func pacing_derivativeIsClamped_extremeVelocityDoesNotExplodeRate() {
+    // velocity=10 is absurd. D should clamp to 0.5 not 15.
+    // depth=0.2 (P=0). target = 1.0 + 0.5 * 1.5 = 1.75
+    let r = PlaybackPacing.computeRate(depth: 0.2, velocity: 10.0)
+    #expect(abs(r.target - 1.75) < 0.0001)
+    #expect(r.d == 0.5)
+}

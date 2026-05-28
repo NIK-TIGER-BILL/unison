@@ -83,10 +83,9 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// At this task's checkpoint the D-term is hardcoded to 0; Task 2
     /// fills it in.
     static func computeRate(depth: Double, velocity: Double) -> RateState {
-        _ = velocity  // Task 2 wires this into the D-term; currently ignored.
         let pNum = max(0.0, depth - targetQueueSec)
         let p = min(1.0, pNum / (panicQueueSec - targetQueueSec))
-        let d = 0.0
+        let d = max(-derivativeClamp, min(derivativeClamp, velocity * kDerivative))
         let raw = 1.0 + (p + d) * (maxRate - 1.0)
         let target = min(maxRate, max(1.0, raw))
         return RateState(target: target, p: p, d: d)
