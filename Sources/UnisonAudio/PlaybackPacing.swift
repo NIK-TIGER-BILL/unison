@@ -51,68 +51,81 @@ public final class PlaybackPacing: @unchecked Sendable {
     private let label: String
 
     // MARK: - Constants
+    //
+    // These constants are `public` so the offline simulator
+    // (`pacing-eval` CLI in Sources/Tools/PacingEval) can drive a
+    // headless replay through the same numbers the production
+    // controller uses. There's no other reason to expose them and
+    // the in-app callers don't reach for them.
 
     /// Desired steady-state buffer depth in audio-seconds. The player
     /// aims to hold roughly this much queued audio at all times — large
     /// enough to absorb chunk-arrival jitter, small enough not to add
     /// perceptible latency.
-    static let targetBufferSec: Double = 0.4
+    public static let targetBufferSec: Double = 0.4
     /// Hard ceiling on `timePitch.rate`. TimePitch supports much higher
     /// but artefacts (formant smearing, robotic edges) become obvious
     /// past ≈ 2.5× on speech.
-    static let maxRate: Double = 2.5
+    public static let maxRate: Double = 2.5
     /// Hard floor on `timePitch.rate`. Below 1.0 the player falls behind
     /// real-time and the buffer overflows indefinitely; we never go
     /// slower than wall-clock even if the buffer is empty.
-    static let minRate: Double = 1.0
+    public static let minRate: Double = 1.0
     /// Multiplier on `(depth_smooth - targetBufferSec)` to translate
     /// buffer error into a rate correction. Tuned so a `panic` depth of
     /// ≈ 1.5 s (excess = 1.1) hits `maxRate=2.5` from a 1.0 baseline:
     /// `1.0 + 1.1 × ≈ 1.36 = 2.5`. Round to 1.0 — the slew limiter and
     /// the EMA filtering make the exact gain non-critical.
-    static let correctionGain: Double = 1.0
+    public static let correctionGain: Double = 1.0
     /// Maximum change in `timePitch.rate` per tick. At a 100 ms tick
     /// interval, 0.05 means the rate can move at most 0.5 per second
     /// — well below the threshold of audible glitching on TimePitch.
-    static let maxRateStepPerTick: Double = 0.05
+    public static let maxRateStepPerTick: Double = 0.05
     /// EMA coefficient for the depth smoother. With `dt=0.1s` this is
     /// `1 - exp(-dt/τ)` for τ ≈ 2 s, i.e. ≈ 0.05. Long enough to filter
     /// per-chunk 0 ↔ 0.4 oscillation, short enough to respond to a
     /// genuine clause-burst within a couple of seconds.
-    static let depthSmoothAlpha: Double = 0.05
+    public static let depthSmoothAlpha: Double = 0.05
     /// EMA coefficient for the arrival-rate tracker. τ ≈ 5 s — long
     /// enough to track a steady speaker pace, short enough to adapt
     /// when the speaker changes cadence.
-    static let arrivalRateAlpha: Double = 0.02
+    public static let arrivalRateAlpha: Double = 0.02
     /// Polling interval for `tick()`.
-    static let tickIntervalSec: Double = 0.1
+    public static let tickIntervalSec: Double = 0.1
     /// Re-log only when the rate or buffer has moved beyond these
     /// deltas, to keep diagnostic noise bounded.
-    static let logHysteresis: Double = 0.03
+    public static let logHysteresis: Double = 0.03
 
     // MARK: - Pure rate computation
 
     /// Decomposed snapshot of one pacing tick. Returned by `targetRate`
     /// and consumed by the diagnostic log and the slew step.
-    struct RateState: Equatable {
+    public struct RateState: Equatable {
         /// Buffer-depth error: `depth_smooth - targetBufferSec`. Positive
         /// means "buffer too full → speed up"; negative means "buffer
         /// too empty → slow down toward floor".
-        let bufferError: Double
+        public let bufferError: Double
         /// Rate correction proportional to buffer error.
-        let correction: Double
+        public let correction: Double
         /// Raw target before clamping: `arrival + correction`.
-        let unboundedTarget: Double
+        public let unboundedTarget: Double
         /// Final target after clamping to `[minRate, maxRate]`. The
         /// slew step pulls `applied_rate` toward this value.
-        let clampedTarget: Double
+        public let clampedTarget: Double
+
+        public init(bufferError: Double, correction: Double, unboundedTarget: Double, clampedTarget: Double) {
+            self.bufferError = bufferError
+            self.correction = correction
+            self.unboundedTarget = unboundedTarget
+            self.clampedTarget = clampedTarget
+        }
     }
 
     /// Pure rate-target computation. Combines a long-run arrival-rate
     /// estimate with a buffer-error correction, then clamps the result
     /// to `[minRate, maxRate]`. The caller applies the slew-rate limit
     /// via `slewToward(currentRate:target:maxStep:)`.
-    static func targetRate(arrivalRateEMA: Double, depthSmooth: Double) -> RateState {
+    public static func targetRate(arrivalRateEMA: Double, depthSmooth: Double) -> RateState {
         let bufferError = depthSmooth - targetBufferSec
         let correction = bufferError * correctionGain
         let unbounded = arrivalRateEMA + correction
@@ -130,7 +143,7 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// imperceptibly gradual: at the default `maxRateStepPerTick=0.05`
     /// and `tickIntervalSec=0.1`, the rate can move at most 0.5 per
     /// second.
-    static func slewToward(currentRate: Double, target: Double, maxStep: Double) -> Double {
+    public static func slewToward(currentRate: Double, target: Double, maxStep: Double) -> Double {
         let delta = target - currentRate
         let clampedDelta = max(-maxStep, min(maxStep, delta))
         return currentRate + clampedDelta

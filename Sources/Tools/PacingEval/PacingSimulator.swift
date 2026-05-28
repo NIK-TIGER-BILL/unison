@@ -1,0 +1,181 @@
+import Foundation
+import UnisonAudio
+
+/// Headless replay of `PlaybackPacing` against a recorded arrival
+/// timeline. Reconstructs what the production controller would do if
+/// the deltas had arrived at exactly the recorded timestamps and the
+/// player had drained samples at the controller-dictated rate.
+///
+/// Why "simulator": building a real `AVAudioPlayerNode` per session is
+/// expensive and brings TimePitch artefacts into the picture we don't
+/// want here. The pacing controller is a pure-function-plus-state
+/// system — we can drive it from the arrival timeline directly. The
+/// completion handler is replaced by a virtual player that subtracts
+/// `consumed_per_tick = rate × dt × sampleRate` from the queue each
+/// tick.
+struct PacingSimulator {
+    let arrivals: [ArrivalRecord]
+    /// Tick interval matching the production controller (100 ms).
+    let tickInterval: TimeInterval = 0.1
+    /// Sample rate of the player-side PCM. Production uses 48 kHz F32
+    /// after the inbound Resampler upsampled 24 kHz → 48 kHz.
+    /// The arrival samples are in 24 kHz int16 (2 bytes per sample), so
+    /// we convert to 48 kHz sample count for fidelity with the real
+    /// `didSchedule` argument.
+    let playerSampleRate: Double = 48_000
+
+    /// One row in the per-tick CSV output.
+    struct TickRow {
+        let t: TimeInterval
+        let depth: Double            // raw depth (audio-seconds)
+        let depthSmooth: Double
+        let arrivalRateEMA: Double
+        let consumptionRateEMA: Double
+        let appliedRate: Double
+        let targetRate: Double
+        let bufferError: Double
+        let underrun: Bool           // true if this tick we ran out of audio
+    }
+
+    struct Summary {
+        let totalTicks: Int
+        let underrunTicks: Int
+        var underrunPercent: Double { Double(underrunTicks) / Double(max(1, totalTicks)) * 100.0 }
+        let depthMin: Double
+        let depthMax: Double
+        let depthMeanWhenSpeaking: Double
+        let rateMin: Double
+        let rateMax: Double
+        let rateMean: Double
+        let arrivalRateMean: Double
+    }
+
+    func simulate() -> (rows: [TickRow], summary: Summary) {
+        // Convert arrivals to a tick-indexed schedule of bytes-to-add.
+        // For each arrival t, we add bytes to the queue at the matching
+        // tick = floor(t / tickInterval).
+        let lastT = arrivals.last?.t ?? 0
+        let totalTicks = Int(ceil((lastT + 2.0) / tickInterval))  // 2s drain pad
+        var bytesPerTick = [Int](repeating: 0, count: totalTicks + 1)
+        for a in arrivals {
+            let i = max(0, min(bytesPerTick.count - 1, Int(a.t / tickInterval)))
+            bytesPerTick[i] += a.bytes
+        }
+
+        // Pacing state (replicated from PlaybackPacing — kept in sync
+        // with that file's `static let` constants).
+        let targetBuffer = PlaybackPacing.targetBufferSec
+        let maxRate = PlaybackPacing.maxRate
+        let minRate = PlaybackPacing.minRate
+        let depthAlpha = PlaybackPacing.depthSmoothAlpha
+        let arrivalAlpha = PlaybackPacing.arrivalRateAlpha
+        let maxStep = PlaybackPacing.maxRateStepPerTick
+
+        var scheduledSamples: Double = 0   // in player samples (48 kHz)
+        var completedSamples: Double = 0
+        var depthSmooth: Double = 0
+        var arrivalEMA: Double = 1.0
+        var consumptionEMA: Double = 1.0
+        var appliedRate: Double = 1.0
+
+        var prevScheduled: Double = 0
+        var prevCompleted: Double = 0
+
+        var rows: [TickRow] = []
+        rows.reserveCapacity(totalTicks)
+
+        // Stats accumulators
+        var depthMin: Double = .infinity
+        var depthMax: Double = 0
+        var depthSumWhenSpeaking: Double = 0
+        var depthSpeakingCount: Int = 0
+        var rateMin: Double = .infinity
+        var rateMax: Double = 0
+        var rateSum: Double = 0
+        var arrivalSum: Double = 0
+        var underrunTicks: Int = 0
+
+        for tick in 0..<totalTicks {
+            // Schedule arrivals for this tick. Bytes are 24kHz int16 →
+            // samples = bytes / 2. Convert to player (48kHz) sample count
+            // = double, matching how Resampler.fromOpenAIWire upsamples.
+            let arrivedBytes = bytesPerTick[tick]
+            let arrivedPlayerSamples = Double(arrivedBytes) / 2.0 * 2.0
+            scheduledSamples += arrivedPlayerSamples
+
+            // Consume audio from buffer at current applied rate.
+            let dtSamples = tickInterval * playerSampleRate
+            let wouldConsume = appliedRate * dtSamples
+            let available = scheduledSamples - completedSamples
+            let actualConsumed = min(wouldConsume, available)
+            completedSamples += actualConsumed
+            let underrun = actualConsumed < wouldConsume - 1e-6 && arrivals.first.map { $0.t < Double(tick) * tickInterval } ?? false
+
+            // Compute depth + EMAs (replicating PlaybackPacing.tick exactly).
+            let depth = max(0, scheduledSamples - completedSamples) / playerSampleRate
+            let scheduledDelta = scheduledSamples - prevScheduled
+            let completedDelta = completedSamples - prevCompleted
+            prevScheduled = scheduledSamples
+            prevCompleted = completedSamples
+
+            let instantArrival = scheduledDelta / dtSamples
+            let instantConsumption = completedDelta / dtSamples
+            arrivalEMA += (instantArrival - arrivalEMA) * arrivalAlpha
+            consumptionEMA += (instantConsumption - consumptionEMA) * arrivalAlpha
+            depthSmooth += (depth - depthSmooth) * depthAlpha
+
+            // Compute target via the production controller's pure fn.
+            let state = PlaybackPacing.targetRate(
+                arrivalRateEMA: arrivalEMA,
+                depthSmooth: depthSmooth
+            )
+            // Slew applied_rate toward target with the same step limit.
+            appliedRate = PlaybackPacing.slewToward(
+                currentRate: appliedRate,
+                target: state.clampedTarget,
+                maxStep: maxStep
+            )
+
+            let t = Double(tick) * tickInterval
+            rows.append(TickRow(
+                t: t,
+                depth: depth,
+                depthSmooth: depthSmooth,
+                arrivalRateEMA: arrivalEMA,
+                consumptionRateEMA: consumptionEMA,
+                appliedRate: appliedRate,
+                targetRate: state.clampedTarget,
+                bufferError: state.bufferError,
+                underrun: underrun
+            ))
+
+            depthMin = min(depthMin, depth)
+            depthMax = max(depthMax, depth)
+            if scheduledSamples > 0 {  // only count once first audio arrived
+                depthSumWhenSpeaking += depth
+                depthSpeakingCount += 1
+            }
+            rateMin = min(rateMin, appliedRate)
+            rateMax = max(rateMax, appliedRate)
+            rateSum += appliedRate
+            arrivalSum += arrivalEMA
+            if underrun { underrunTicks += 1 }
+
+            _ = targetBuffer; _ = maxRate; _ = minRate  // silence unused warnings, refs documenting which constants matter
+        }
+
+        let summary = Summary(
+            totalTicks: totalTicks,
+            underrunTicks: underrunTicks,
+            depthMin: depthMin == .infinity ? 0 : depthMin,
+            depthMax: depthMax,
+            depthMeanWhenSpeaking: depthSpeakingCount > 0 ? depthSumWhenSpeaking / Double(depthSpeakingCount) : 0,
+            rateMin: rateMin == .infinity ? 1.0 : rateMin,
+            rateMax: rateMax,
+            rateMean: rateSum / Double(totalTicks),
+            arrivalRateMean: arrivalSum / Double(totalTicks)
+        )
+
+        return (rows, summary)
+    }
+}

@@ -172,7 +172,12 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
             Self.log.debug("[blackhole2ch] translated chunk \(chunkIndex) rms=\(String(format: "%.5f", rms))")
         }
         chunkIndex += 1
-        player.scheduleBuffer(buf, completionHandler: nil)
+        // Hook the completion to drive the pacing controller's
+        // "consumed" counter. Fires on a CoreAudio render thread —
+        // PlaybackPacing.didComplete is lock-protected.
+        player.scheduleBuffer(buf) { [weak pacing, frameCount] in
+            pacing?.didComplete(samples: AVAudioFramePosition(frameCount))
+        }
         pacing?.didSchedule(samples: AVAudioFramePosition(frameCount))
         appendFrameToDumpIfNeeded(frame)
         if !loggedFirstFrame {

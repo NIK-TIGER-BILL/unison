@@ -14,7 +14,8 @@ let package = Package(
         .library(name: "UnisonSystem", targets: ["UnisonSystem"]),
         .library(name: "UnisonUI", targets: ["UnisonUI"]),
         .executable(name: "Unison", targets: ["UnisonApp"]),
-        .executable(name: "tap-benchmark", targets: ["TapBenchmark"])
+        .executable(name: "tap-benchmark", targets: ["TapBenchmark"]),
+        .executable(name: "pacing-eval", targets: ["PacingEval"])
     ],
     // Note: swift-snapshot-testing requires XCTest, which is not
     // available on Command Line Tools-only setups. We ship our own
@@ -35,6 +36,11 @@ let package = Package(
             dependencies: ["UnisonAudio", "UnisonDomain"],
             path: "Sources/Tools/TapBenchmark",
             exclude: ["Info.plist", "tap-benchmark.entitlements"]
+        ),
+        .executableTarget(
+            name: "PacingEval",
+            dependencies: ["UnisonAudio", "UnisonTranslation", "UnisonDomain"],
+            path: "Sources/Tools/PacingEval"
         ),
         .testTarget(name: "UnisonDomainTests", dependencies: ["UnisonDomain", "UnisonUI", "UnisonAudio"]),
         .testTarget(name: "UnisonTranslationTests", dependencies: ["UnisonTranslation"]),

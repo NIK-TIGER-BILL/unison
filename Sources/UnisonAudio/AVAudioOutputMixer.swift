@@ -139,8 +139,14 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
             Self.log.debug("[speakers] translated chunk \(translatedChunkIndex) rms=\(String(format: "%.5f", rms))")
         }
         translatedChunkIndex += 1
-        translatedPlayer.scheduleBuffer(buf, completionHandler: nil)
-        pacing?.didSchedule(samples: AVAudioFramePosition(buf.frameLength))
+        let frameLength = buf.frameLength
+        // Capture frameLength + a weak pacing ref. Completion fires on a
+        // CoreAudio render thread; PlaybackPacing.didComplete is lock-
+        // protected so the race against tick() is safe.
+        translatedPlayer.scheduleBuffer(buf) { [weak pacing] in
+            pacing?.didComplete(samples: AVAudioFramePosition(frameLength))
+        }
+        pacing?.didSchedule(samples: AVAudioFramePosition(frameLength))
     }
 
     private func schedule(frame: AudioFrame, on player: AVAudioPlayerNode) {
