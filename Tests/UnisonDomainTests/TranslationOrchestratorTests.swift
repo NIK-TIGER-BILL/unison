@@ -787,15 +787,31 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
 
     // Resume. Right after the resume's `.recovering` window closes,
     // the slow loop must NOT see the 30 s-old pre-pause timestamp
-    // and flip the session to `.slow` (iter-2 finding).
+    // and flip the session to `.slow` (iter-2 finding). To exercise
+    // the bug we must drive userIsSpeaking=true post-resume —
+    // otherwise evaluateSlowDetection's silent-speaker early-return
+    // makes the test vacuous (iter-3 review finding).
     netMon.simulate(.satisfied)
     try? await Task.sleep(nanoseconds: 300_000_000)
     // Advance past the 2 s recovering-flash window.
     clock.advance(by: 3)
     try? await Task.sleep(nanoseconds: 200_000_000)
+    // Emit a fresh post-resume mic frame so the slow loop's
+    // userIsSpeaking gate flips to true on the NEXT tick. Without
+    // this, the loop early-returns and never gets the chance to
+    // observe stale lastDeltaAtBySpeaker.
+    mic.emit(AudioFrame(pcm: pcm, sampleRate: 48_000, channels: 1, format: .float32))
+    try? await Task.sleep(nanoseconds: 200_000_000)
+    // Tick the slow loop once.
+    clock.advance(by: 1)
+    try? await Task.sleep(nanoseconds: 200_000_000)
 
-    // The post-resume pipeline is fresh — `.slow` here would be a
-    // phantom because no NEW mic frame has had time to age past 3 s.
+    // The post-resume pipeline is fresh — without the
+    // lastDeltaAtBySpeaker reset, the loop would see (now -
+    // pre_pause_delta) >> 3 s and fire .slow. WITH the reset,
+    // lastDeltaAtBySpeaker[.me] is nil and the fallback measures
+    // staleness from lastAudibleMicAt (just stamped fresh by the
+    // emit above), so stale=false and health stays .healthy.
     #expect(o.connectivityHealth != .slow, "Post-resume health should not phantom-flash .slow (got \(o.connectivityHealth))")
 }
 

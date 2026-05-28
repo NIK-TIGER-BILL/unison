@@ -64,6 +64,14 @@ public final class TranscriptStore {
     /// to `.paused` / `.reconnecting`; a late NON-empty translation
     /// delta clears the flag in `apply(_:)`.
     ///
+    /// `speaker` scopes the operation: pass `.me` or `.peer` to flag
+    /// only that side's in-flight entries (used by single-stream
+    /// failure paths so a peer-stream WS drop doesn't decorate the
+    /// healthy me-stream's in-flight bubble with a placeholder).
+    /// Pass `nil` to flag every in-flight entry — appropriate for
+    /// global teardowns like network pause where both streams are
+    /// torn down at once (iter-3 review finding).
+    ///
     /// We only flag entries where `translatedText` is empty — those
     /// are the unambiguous "nothing arrived" case the placeholder UI
     /// is built for. Entries with a partial translation (some deltas
@@ -73,8 +81,9 @@ public final class TranscriptStore {
     /// missing. (Earlier iter-1 fix tried to flag partials too but
     /// the placeholder UI doesn't have a way to render alongside
     /// existing text without obscuring it — iter-2 review #3/#9.)
-    public func markActiveEntriesAtRisk() {
+    public func markActiveEntriesAtRisk(speaker: Speaker? = nil) {
         for idx in entries.indices where entries[idx].translatedText.isEmpty {
+            if let speaker, entries[idx].speaker != speaker { continue }
             entries[idx].translationAtRisk = true
         }
     }

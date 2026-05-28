@@ -40,12 +40,21 @@ public protocol NetworkPathMonitoring: AnyObject, Sendable {
 /// a fresh stream, mirroring the real `NetworkMonitor`. This is what
 /// makes orchestrator stop/start cycles testable — the second
 /// session subscribes again and gets the current status as its first
-/// yield instead of an already-consumed iterator (review
-/// finding #4).
+/// yield instead of an already-consumed iterator.
+///
+/// **Initial-value semantics.** `init(initial:)` seeds the cached
+/// status. Tests that want orchestrator subscribers to immediately
+/// see that seed (the common case) construct the mock and start the
+/// session — the `statusStream` getter yields the cached value as
+/// the first iteration. Tests that want to mirror the production
+/// "no initial yield until a real observation" semantic pass
+/// `yieldInitial: false`; subscribers then only get yields from
+/// subsequent `simulate(_:)` calls.
 public final class MockNetworkPathMonitor: NetworkPathMonitoring, @unchecked Sendable {
     private let lock = NSLock()
     private var _currentStatus: NetworkPathStatus
     private var subscribers: [UUID: AsyncStream<NetworkPathStatus>.Continuation] = [:]
+    private var yieldInitial: Bool
 
     public var currentStatus: NetworkPathStatus {
         lock.lock()
@@ -58,9 +67,9 @@ public final class MockNetworkPathMonitor: NetworkPathMonitoring, @unchecked Sen
             let id = UUID()
             self.lock.lock()
             self.subscribers[id] = continuation
-            let initial = self._currentStatus
+            let initial: NetworkPathStatus? = self.yieldInitial ? self._currentStatus : nil
             self.lock.unlock()
-            continuation.yield(initial)
+            if let initial { continuation.yield(initial) }
             continuation.onTermination = { [weak self] _ in
                 guard let self else { return }
                 self.lock.lock()
@@ -70,14 +79,19 @@ public final class MockNetworkPathMonitor: NetworkPathMonitoring, @unchecked Sen
         }
     }
 
-    public init(initial: NetworkPathStatus) {
+    public init(initial: NetworkPathStatus, yieldInitial: Bool = true) {
         self._currentStatus = initial
+        self.yieldInitial = yieldInitial
     }
 
     public func simulate(_ status: NetworkPathStatus) {
         lock.lock()
         let previous = _currentStatus
         _currentStatus = status
+        // After the first simulate, subscribers attaching later
+        // should see the new value as their initial yield — mirror
+        // the production `didReceiveFirstUpdate` semantic.
+        self.yieldInitial = true
         let conts = Array(subscribers.values)
         lock.unlock()
         // Mirror the production de-dup so tests behave the same as

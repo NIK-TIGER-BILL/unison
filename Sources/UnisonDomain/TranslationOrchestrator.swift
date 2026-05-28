@@ -967,11 +967,15 @@ public final class TranslationOrchestrator {
         receivedAnyData: Bool
     ) async {
         Self.log.error("handleStreamFailure — speaker=\(String(describing: speaker)), error=\(String(describing: error)), receivedAnyData=\(receivedAnyData)")
-        // Stamp any in-flight entries (original chunk arrived but the
-        // server hadn't delivered its translation yet) as at-risk so the
-        // bubble view can render the "перевод не получен" placeholder
-        // if no late translation lands during the reconnect cycle.
-        transcript.markActiveEntriesAtRisk()
+        // Stamp this speaker's in-flight entries (original chunk
+        // arrived but the server hadn't delivered its translation
+        // yet) as at-risk so the bubble view can render the
+        // "перевод не получен" placeholder if no late translation
+        // lands during the reconnect cycle. Scoped to the failing
+        // speaker so the healthy stream's bubbles don't get
+        // decorated with the placeholder while their own translation
+        // is still mid-flight (iter-3 review finding).
+        transcript.markActiveEntriesAtRisk(speaker: speaker)
         // Don't try to recover from terminal errors
         switch error {
         case .apiKeyInvalid, .insufficientCredits, .permissionDenied:
@@ -1116,6 +1120,17 @@ public final class TranslationOrchestrator {
                 // Reconnect succeeded — disarm the watchdog so it
                 // doesn't fire later and tear down a healthy session.
                 cancelReconnectWatchdog()
+                // Drop the pre-failure activity timestamp for this
+                // speaker. Without this, the slow-detection loop
+                // would see `now - lastDelta[speaker]` = (failure
+                // duration + retry backoff + reconnect latency) and
+                // fire phantom `.slow` the moment a post-reconnect
+                // mic frame stamps `lastAudibleMicAt` fresh — same
+                // class of bug iter-2 caught for resumeStreams
+                // (iter-3 review finding).
+                lastDeltaAtBySpeaker[speaker] = nil
+                healthBySpeaker[speaker] = .healthy
+                recomputeAggregateHealth()
                 return
             } catch {
                 // Close the half-connected stream before retrying. Without
