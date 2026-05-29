@@ -37,4 +37,17 @@ public enum ConnectivityHealth: Sendable, Equatable {
     public static func aggregate(_ a: ConnectivityHealth) -> ConnectivityHealth {
         a
     }
+
+    /// Russian label for the diagnostic surfaces. Single source of
+    /// truth so the on-screen sheet (`DiagnosticSheet`) and the
+    /// copy-to-clipboard plaintext (`DiagnosticInfo.asPlainText`)
+    /// never drift apart — they previously had two hand-written
+    /// mappings that disagreed ("медленная" vs "медленно").
+    public var ruLabel: String {
+        switch self {
+        case .healthy: return "норма"
+        case .slow: return "медленно"
+        case .recovering: return "восстановление"
+        }
+    }
 }

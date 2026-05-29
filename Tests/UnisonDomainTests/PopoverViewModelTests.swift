@@ -136,20 +136,20 @@ func popoverVM_isLanguagePairValid_trueWhenDifferent() {
 
 @MainActor
 @Test
-func popoverVM_statusKind_readyWhenIdleAndValid() {
+func popoverVM_statusDot_readyWhenIdleAndValid() {
     let vm = makeReadyVM(
         settings: Settings(languagePair: LanguagePair(mine: .ru, peer: .en))
     )
-    #expect(vm.statusKind == .ready)
+    #expect(vm.statusDotState == .ready)
 }
 
 @MainActor
 @Test
-func popoverVM_statusKind_warnWhenSameLanguage() {
+func popoverVM_statusDot_warnWhenSameLanguage() {
     let vm = makeReadyVM(
         settings: Settings(languagePair: LanguagePair(mine: .ja, peer: .ja))
     )
-    #expect(vm.statusKind == .warn)
+    #expect(vm.statusDotState == .warn)
 }
 
 @MainActor
@@ -330,4 +330,77 @@ func popoverVM_isReconnecting_trueOnlyDuringReconnecting() {
     )
     #expect(preview.statusText == "")
     #expect(preview.statusDotState == .active)
+}
+
+// The dot mapping for the remaining spec rows. These lock the
+// final-review fix that re-pointed the popover header dot from the
+// old 4-state projection (which collapsed paused / slow / recovering
+// all to cyan and showed error as red only) to the spec table.
+
+@MainActor
+@Test func popoverVM_pausedAwaitingNetwork_dotIsActive() {
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    let preview = PopoverViewModel.previewing(
+        settings: .default,
+        state: .paused(mode: .call, since: nowDate(), startedAt: nowDate(), reason: .awaitingNetwork),
+        permissions: perms,
+        deviceRegistry: registry
+    )
+    // Spec: awaiting-network shows cyan ("returning"), NOT the grey
+    // paused dot — distinguishes "we're coming back" from "we're
+    // stuck offline".
+    #expect(preview.statusText == "Возобновляем…")
+    #expect(preview.statusDotState == .active)
+}
+
+@MainActor
+@Test func popoverVM_reconnecting_dotIsWarn() {
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    let preview = PopoverViewModel.previewing(
+        settings: .default,
+        state: .reconnecting(mode: .call, since: nowDate(), startedAt: nowDate()),
+        permissions: perms,
+        deviceRegistry: registry
+    )
+    #expect(preview.statusDotState == .warn)
+}
+
+@MainActor
+@Test func popoverVM_error_dotIsError() {
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    let preview = PopoverViewModel.previewing(
+        settings: .default,
+        state: .error(.networkLost),
+        permissions: perms,
+        deviceRegistry: registry
+    )
+    // Spec: terminal error is RED, not the yellow warn dot. The old
+    // statusDotState mapped .error → .warn — a real regression the
+    // final review caught.
+    #expect(preview.statusDotState == .error)
+}
+
+@MainActor
+@Test func popoverVM_translatingRecovering_dotIsRecovering() {
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    let preview = PopoverViewModel.previewing(
+        settings: .default,
+        state: .translating(mode: .call, startedAt: nowDate()),
+        permissions: perms,
+        deviceRegistry: registry,
+        connectivityHealth: .recovering
+    )
+    #expect(preview.statusDotState == .recovering)
 }

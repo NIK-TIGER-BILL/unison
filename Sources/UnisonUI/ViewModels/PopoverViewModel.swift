@@ -177,27 +177,6 @@ public final class PopoverViewModel {
     /// (`canStart`) with content validation (`isLanguagePairValid`).
     public var canStartStrict: Bool { canStart && isLanguagePairValid }
 
-    /// Visual status for the header dot.
-    /// - `.error` while the orchestrator is in `.error`
-    /// - `.active` while connecting / translating / reconnecting
-    /// - `.warn` when the language pair is invalid
-    /// - `.ready` otherwise
-    public var statusKind: StatusKind {
-        if case .error = state { return .error }
-        if state.isActive { return .active }
-        if !isLanguagePairValid { return .warn }
-        return .ready
-    }
-
-    /// Status-dot kind, decoupled from `StatusDot.State` so consumers
-    /// (and tests) don't pull in SwiftUI.
-    public enum StatusKind: Equatable, Sendable {
-        case ready
-        case active
-        case warn
-        case error
-    }
-
     /// Human-readable status line shown below the timer / primary
     /// button. Empty string means "no secondary line at all" — the row
     /// collapses entirely in that case so we don't reserve vertical
@@ -225,17 +204,45 @@ public final class PopoverViewModel {
         }
     }
 
-    /// `StatusDot.State` derived from `state × connectivityHealth`.
-    /// Decoupled from `statusKind` so the view can drive the secondary
-    /// dot (in the future control pill / banner) without re-deriving
-    /// state on its own.
+    /// The popover header status dot, derived from
+    /// `state × connectivityHealth`. This is the single source of truth
+    /// for the header dot — `PopoverView` binds straight to it. The
+    /// colour mapping mirrors the design spec's status table
+    /// (`docs/superpowers/specs/2026-05-27-network-aware-session-design.md`,
+    /// "Status dot colour" column) exactly:
+    ///
+    /// | state / health                  | dot          |
+    /// | ------------------------------- | ------------ |
+    /// | `.idle` (valid pair)            | `.ready`     |
+    /// | `.idle` (invalid pair)          | `.warn`      |
+    /// | `.connecting`                   | `.active`    |
+    /// | `.translating` + `.healthy`     | `.active`    |
+    /// | `.translating` + `.slow`        | `.warn`      |
+    /// | `.translating` + `.recovering`  | `.recovering`|
+    /// | `.paused(.networkLost)`         | `.paused`    |
+    /// | `.paused(.awaitingNetwork)`     | `.active`    |
+    /// | `.reconnecting`                 | `.warn`      |
+    /// | `.error`                        | `.error`     |
+    ///
+    /// Note `.error` maps to `.error` (red) and `.paused(.awaitingNetwork)`
+    /// to `.active` (cyan, "returning") — getting either wrong was the
+    /// gap the final PR review caught (the header previously routed
+    /// through a 4-state projection that collapsed paused / slow /
+    /// recovering all to cyan).
     public var statusDotState: StatusDot.State {
         switch state {
-        case .idle: return .ready
-        case .connecting: return .active
-        case .reconnecting: return .warn
-        case .paused: return .paused
-        case .error: return .warn
+        case .idle:
+            return isLanguagePairValid ? .ready : .warn
+        case .connecting:
+            return .active
+        case .reconnecting:
+            return .warn
+        case .paused(_, _, _, .networkLost):
+            return .paused
+        case .paused(_, _, _, .awaitingNetwork):
+            return .active
+        case .error:
+            return .error
         case .translating:
             switch connectivityHealth {
             case .slow: return .warn

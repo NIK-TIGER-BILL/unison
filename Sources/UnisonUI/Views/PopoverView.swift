@@ -88,7 +88,7 @@ public struct PopoverView: View {
 
     private var topRow: some View {
         HStack(spacing: 8) {
-            StatusDot(state: vm.statusKind.dotState)
+            StatusDot(state: vm.statusDotState)
             Text("Unison")
                 .font(.system(size: 13, weight: .semibold))
                 .tracking(-0.26)
@@ -300,15 +300,3 @@ private enum PopoverLayout {
     static let width: CGFloat = 340
 }
 
-// MARK: - StatusKind → StatusDot.State
-
-private extension PopoverViewModel.StatusKind {
-    var dotState: StatusDot.State {
-        switch self {
-        case .ready: .ready
-        case .active: .active
-        case .warn:  .warn
-        case .error: .error
-        }
-    }
-}

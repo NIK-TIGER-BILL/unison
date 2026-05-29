@@ -90,30 +90,19 @@ public struct DiagnosticInfo: Sendable, Equatable {
             "Аудио-выход: \(speakerDevice ?? "по умолчанию")",
             "BlackHole 2ch: \(blackHole2ch)",
             "OpenAI ключ: \(openAIKeyStatus)",
-            "Связь: \(healthLabel(connectivityHealth))"
+            "Связь: \(connectivityHealth.ruLabel)"
         ]
         // Per-stream health is the diagnostic surface for the
         // asymmetric-failure story this PR added — include it in
         // statusLines so it lands in both the sheet AND the
         // copy-to-clipboard plaintext (review finding #11).
         if let me = meStreamHealth {
-            lines.append("  • Моя речь: \(healthLabel(me))")
+            lines.append("  • Моя речь: \(me.ruLabel)")
         }
         if let peer = peerStreamHealth {
-            lines.append("  • Собеседник: \(healthLabel(peer))")
+            lines.append("  • Собеседник: \(peer.ruLabel)")
         }
         return lines
-    }
-
-    /// Russian label for a ConnectivityHealth value. Mirrors the
-    /// popover wording so the diagnostic text matches what the user
-    /// saw before they opened the sheet.
-    private func healthLabel(_ h: ConnectivityHealth) -> String {
-        switch h {
-        case .healthy: return "норма"
-        case .slow: return "медленная"
-        case .recovering: return "восстанавливается"
-        }
     }
 
     /// Russian-language one-liners for the "Система" section.

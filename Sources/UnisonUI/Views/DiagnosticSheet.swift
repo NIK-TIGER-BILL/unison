@@ -174,11 +174,7 @@ public struct DiagnosticSheet: View {
     // MARK: - Helpers
 
     private func humanReadable(_ h: ConnectivityHealth) -> String {
-        switch h {
-        case .healthy: return "норма"
-        case .slow: return "медленно"
-        case .recovering: return "восстановление"
-        }
+        h.ruLabel
     }
 }
 
