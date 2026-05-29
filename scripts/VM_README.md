@@ -33,6 +33,11 @@ bash scripts/vm-screenshot.sh popover settings
 
 # Leave the VM running so the next call doesn't pay the boot cost.
 bash scripts/vm-screenshot.sh --keep-running popover
+
+# Add a margin (in points) around each captured window — includes the
+# window's drop shadow + breathing room, nicer for docs/README hero
+# shots. Default 0 = tight to the window bounds. No effect on `menubar`.
+UNISON_SHOT_PADDING=64 bash scripts/vm-screenshot.sh transcript
 ```
 
 Outputs land in `vm-screenshots/<name>.png` (gitignored).

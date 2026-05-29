@@ -22,7 +22,7 @@ set -euo pipefail
 VM_NAME="${VM_NAME:-unison-test}"
 VM_USER="${VM_USER:-admin}"
 VM_PASS="${VM_PASS:-admin}"
-SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR)
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR -o PreferredAuthentications=password -o PubkeyAuthentication=no -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=1)
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PATH="$REPO_DIR/build/Unison.app"
 SHOTS_DIR="$REPO_DIR/vm-screenshots"
@@ -31,6 +31,12 @@ VM_LOG_FILE="$SHOTS_DIR/.vm.log"
 
 ALL_SCREENS=(popover onboarding-pending onboarding-done settings transcript menubar)
 KEEP_RUNNING=0
+
+# Optional margin (in points) added around each captured window so the
+# PNG includes the window's drop shadow plus a little breathing room —
+# nicer for docs/README hero shots. Default 0 keeps the historical
+# tight-to-the-window-bounds behaviour. Has no effect on `menubar`.
+PADDING="${UNISON_SHOT_PADDING:-0}"
 
 log() { printf '\033[1;36m[vm-shot]\033[0m %s\n' "$*" >&2; }
 warn(){ printf '\033[1;33m[vm-shot]\033[0m %s\n' "$*" >&2; }
@@ -142,6 +148,39 @@ scp_from_vm() {
 # target window isn't visible yet — quiet failure is what we want.
 ssh_vm_once() {
   sshpass -p "$VM_PASS" ssh "${SSH_OPTS[@]}" "$VM_USER@$VM_IP" "$@"
+}
+
+# Return the main display size in points as "W H". Prefers the Finder
+# desktop bounds (reliable on Tahoe); falls back to system_profiler and
+# finally a sane default so cropping math never divides by garbage.
+get_screen_size() {
+  local b w h
+  b=$(ssh_vm_once 'osascript -e "tell application \"Finder\" to get bounds of window of desktop"' 2>/dev/null \
+        | tr -d "\r" | tr -d "\n")
+  w=$(printf '%s' "$b" | awk -F", " '{print $3}')
+  h=$(printf '%s' "$b" | awk -F", " '{print $4}')
+  if [[ "$w" =~ ^[0-9]+$ ]] && [[ "$h" =~ ^[0-9]+$ ]] && [ "$w" -gt 0 ] && [ "$h" -gt 0 ]; then
+    echo "$w $h"; return 0
+  fi
+  echo "2560 1440"
+}
+
+# Expand an "x,y,w,h" rect by $PADDING on every side, clamped so it stays
+# fully on-screen. Echoes the padded rect. Pure host-side arithmetic.
+pad_bounds() {
+  local b="$1" x y w h sw sh nx ny nw nh
+  x="${b%%,*}"; b="${b#*,}"
+  y="${b%%,*}"; b="${b#*,}"
+  w="${b%%,*}"; b="${b#*,}"
+  h="$b"
+  read -r sw sh <<< "$(get_screen_size)"
+  nx=$(( x - PADDING )); [ "$nx" -lt 0 ] && nx=0
+  ny=$(( y - PADDING )); [ "$ny" -lt 0 ] && ny=0
+  nw=$(( w + 2 * PADDING ))
+  nh=$(( h + 2 * PADDING ))
+  [ $(( nx + nw )) -gt "$sw" ] && nw=$(( sw - nx ))
+  [ $(( ny + nh )) -gt "$sh" ] && nh=$(( sh - ny ))
+  echo "${nx},${ny},${nw},${nh}"
 }
 
 # Quit any running Unison instance; ignore failures (process may not exist).
@@ -278,6 +317,7 @@ capture_screen() {
     local bounds
     bounds=$(query_unison_window_bounds)
     if [[ "$bounds" =~ ^[0-9]+,[0-9]+,[0-9]+,[0-9]+$ ]]; then
+      if [ "$PADDING" -gt 0 ]; then bounds="$(pad_bounds "$bounds")"; fi
       log "    window region: $bounds"
       ssh_vm "screencapture -x -R '$bounds' -t png '$remote'"
     else
@@ -291,6 +331,7 @@ capture_screen() {
           | tr -d "\r" | tr -d "\n")
       fi
       if [[ "$fallback" =~ ^[0-9]+,[0-9]+,[0-9]+,[0-9]+$ ]]; then
+        if [ "$PADDING" -gt 0 ]; then fallback="$(pad_bounds "$fallback")"; fi
         log "    window region (from log): $fallback"
         ssh_vm "screencapture -x -R '$fallback' -t png '$remote'"
       else
