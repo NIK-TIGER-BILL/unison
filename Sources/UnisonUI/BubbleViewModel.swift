@@ -11,6 +11,12 @@ public struct BubbleViewModel: Identifiable, Equatable, Sendable {
     public let isFirstInGroup: Bool
     public let isLastInGroup: Bool
     public let isLive: Bool
+    /// True when the source-language text exists but the translation
+    /// never arrived AND the orchestrator transitioned through
+    /// pause/reconnect during this entry's lifetime. Drives a grey
+    /// italic placeholder in `Bubble.swift` where the translation
+    /// would normally render.
+    public let translationLost: Bool
 
     public init(
         id: UUID,
@@ -19,7 +25,8 @@ public struct BubbleViewModel: Identifiable, Equatable, Sendable {
         secondaryText: String,
         isFirstInGroup: Bool,
         isLastInGroup: Bool,
-        isLive: Bool
+        isLive: Bool,
+        translationLost: Bool = false
     ) {
         self.id = id
         self.speaker = speaker
@@ -28,6 +35,7 @@ public struct BubbleViewModel: Identifiable, Equatable, Sendable {
         self.isFirstInGroup = isFirstInGroup
         self.isLastInGroup = isLastInGroup
         self.isLive = isLive
+        self.translationLost = translationLost
     }
 }
 

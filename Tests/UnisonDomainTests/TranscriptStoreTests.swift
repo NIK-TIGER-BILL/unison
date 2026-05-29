@@ -60,3 +60,23 @@ import Testing
     #expect(store.entries[1].speaker == .peer)
     #expect(store.entries[1].targetLanguage == .ru)
 }
+
+@MainActor
+@Test func transcriptStore_markEntriesAtRisk_setsFlag() {
+    let store = TranscriptStore()
+    let id = freshUUID()
+    store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .original, text: "Привет", isFinal: false))
+    #expect(store.entries[0].translationAtRisk == false)
+    store.markActiveEntriesAtRisk()
+    #expect(store.entries[0].translationAtRisk == true)
+}
+
+@MainActor
+@Test func transcriptStore_lateTranslationDelta_clearsAtRisk() {
+    let store = TranscriptStore()
+    let id = freshUUID()
+    store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .original, text: "Привет", isFinal: false))
+    store.markActiveEntriesAtRisk()
+    store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .translated, text: "Hi", isFinal: false))
+    #expect(store.entries[0].translationAtRisk == false)
+}

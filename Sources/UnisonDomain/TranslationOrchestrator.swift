@@ -16,6 +16,64 @@ public final class TranslationOrchestrator {
             Self.log.info("state \(String(describing: oldValue)) → \(String(describing: self.state))")
         }
     }
+
+    /// Orthogonal QoS dimension published alongside `state`. UI binds
+    /// to this for the per-stream status indicator (popover dot, pill
+    /// hint, transcript banner). Only meaningful while `state ==
+    /// .translating`; the other states (`.paused`, `.reconnecting`,
+    /// `.error`) already speak for themselves.
+    public private(set) var connectivityHealth: ConnectivityHealth = .healthy {
+        didSet {
+            Self.log.info("connectivityHealth \(String(describing: oldValue)) → \(String(describing: self.connectivityHealth))")
+        }
+    }
+
+    /// Per-stream health. UI reads the aggregate via
+    /// `connectivityHealth`; the diagnostic dialog reads per-speaker for
+    /// asymmetric-failure debugging.
+    private var healthBySpeaker: [Speaker: ConnectivityHealth] = [:]
+
+    /// `clock.now()` of the most recent delta (input / output / audio)
+    /// per speaker. The slow-detection watchdog measures from here.
+    private var lastDeltaAtBySpeaker: [Speaker: Date] = [:]
+    /// `clock.now()` of the most recent mic frame whose RMS was above the
+    /// audible threshold (0.001). Slow only fires when the user is
+    /// actually speaking — pure silence is *not* a network problem.
+    private var lastAudibleMicAt: Date?
+    /// Peer-side analogue of `lastAudibleMicAt`. The Process Tap pipeline
+    /// delivers continuous frames even when nobody on the peer call is
+    /// talking; we stamp this only when an actually-audible frame
+    /// arrives so peer slow-detection isn't gated on the local user's
+    /// mic activity (review finding: peer slow never fired in `.listen`
+    /// mode and during quiet stretches of `.call` mode).
+    private var lastAudiblePeerAt: Date?
+
+    /// Task driving the slow-detection scan. Restarted on every
+    /// session start / reconnect. Cancelled on stop.
+    private var slowDetectionTask: Task<Void, Never>?
+    /// Holds the 2 s post-resume "recovering → healthy" flash. Stored so
+    /// `stopAllStreams()` can cancel it — without that, a stale flash
+    /// from session N can clobber the connectivity health of a fast
+    /// session-N+1 restart (review finding: cross-session bleed).
+    private var recoveringFlashTask: Task<Void, Never>?
+
+    private static let slowThresholdSeconds: TimeInterval = 3
+    private static let slowCheckIntervalSeconds: TimeInterval = 0.5
+    /// Read from non-MainActor pipeline tasks (splitter computes peer
+    /// RMS); `nonisolated` is explicit so a future Swift 6 mode
+    /// migration doesn't break the compile.
+    nonisolated static let micAudibleRMSThreshold: Float = 0.001
+    /// How long after the most recent audible mic frame the user is
+    /// still considered "speaking" for the purpose of the slow check.
+    /// Wider than `slowThresholdSeconds` so the watchdog catches the
+    /// scenario "user said one phrase, then waited 3+ s for the
+    /// translation that never arrived" — in that scenario, by the time
+    /// we mark slow the last audible frame is already 3 s in the past,
+    /// so a 1 s window would never fire. The grace beyond
+    /// `slowThresholdSeconds` keeps us from over-firing in the
+    /// opposite direction (long sessions of pure silence).
+    private static let userSpeakingWindowSeconds: TimeInterval = 4
+
     public let transcript: TranscriptStore
 
     private let micCapture: any MicrophoneCapture
@@ -27,6 +85,25 @@ public final class TranslationOrchestrator {
     private let deviceRegistry: any AudioDeviceRegistry
     private let clock: any Clock
     private let transformer: any AudioFormatTransformer
+    /// System-network path watcher. The orchestrator subscribes to its
+    /// `statusStream` once per session start; an `.unsatisfied` event
+    /// tears down streams + captures and flips to
+    /// `.paused(.networkLost)`, a subsequent `.satisfied` resumes.
+    /// The protocol lives in `UnisonDomain` so the orchestrator can
+    /// depend on it without dragging `Network.framework` into the
+    /// domain layer; production wires the `NWPathMonitor`-backed
+    /// `NetworkMonitor` from `UnisonSystem`.
+    private let networkMonitor: any NetworkPathMonitoring
+    /// Task draining `networkMonitor.statusStream`. Spawned in `start`,
+    /// cancelled in `stopAllStreams` so a stopped orchestrator doesn't
+    /// keep observing the network.
+    private var networkObserverTask: Task<Void, Never>?
+    /// Force terminal `.error(.networkLost)` if pause-recovery hasn't
+    /// succeeded in `pauseRecoveryWatchdogSeconds`. Defense in depth —
+    /// without it a never-returning network would leave the app stuck
+    /// in `.paused` forever.
+    private var pauseRecoveryWatchdogTask: Task<Void, Never>?
+    private static let pauseRecoveryWatchdogSeconds: TimeInterval = 60
 
     private var meStream: (any TranslationStream)?
     private var peerStream: (any TranslationStream)?
@@ -34,6 +111,18 @@ public final class TranslationOrchestrator {
     // Pipeline tasks bucketed per speaker so a reconnect cancels exactly the
     // tasks bound to the failed stream and leaves the healthy side untouched.
     private var pipelineTasksBySpeaker: [Speaker: [Task<Void, Never>]] = [:]
+    /// Per-speaker short-window ring buffer of wire-format outbound
+    /// audio. The mic-frame consumer appends each frame after
+    /// `transformer.toWire(...)`; on reconnect the orchestrator drains
+    /// the buffer onto the fresh stream BEFORE wiring live mic so a
+    /// brief flap doesn't drop the in-flight phrase. Cleared on
+    /// `.paused` (audio captured during a long outage is stale; see
+    /// `docs/superpowers/specs/2026-05-27-network-aware-session-design.md`)
+    /// and removed in `stopAllStreams`.
+    private var audioBufferBySpeaker: [Speaker: AudioRingBuffer] = [:]
+    /// 3 s at ~100 ms frames = 30 frames. Matches the design's
+    /// brief-blip recovery window.
+    private static let audioBufferFrames: Int = 30
     // Tasks not bound to a single stream (device observer, etc).
     private var globalTasks: [Task<Void, Never>] = []
     private var currentLanguages: LanguagePair = .default
@@ -109,7 +198,8 @@ public final class TranslationOrchestrator {
         permissions: any PermissionsService,
         deviceRegistry: any AudioDeviceRegistry,
         clock: any Clock,
-        transformer: any AudioFormatTransformer
+        transformer: any AudioFormatTransformer,
+        networkMonitor: any NetworkPathMonitoring
     ) {
         self.transcript = TranscriptStore()
         self.micCapture = micCapture
@@ -121,6 +211,7 @@ public final class TranslationOrchestrator {
         self.deviceRegistry = deviceRegistry
         self.clock = clock
         self.transformer = transformer
+        self.networkMonitor = networkMonitor
     }
 
     public func start(mode: SessionMode, languages: LanguagePair, settings: Settings = .default) async {
@@ -197,6 +288,9 @@ public final class TranslationOrchestrator {
         //   .call: me-stream output → BlackHole 2ch (peer hears in their Zoom)
         //   .test: me-stream output → speakers (user hears their own translation)
         if mode == .call || mode == .test {
+            // Allocate the outbound audio ring buffer alongside the
+            // me-stream — see `audioBufferBySpeaker` for rationale.
+            audioBufferBySpeaker[.me] = AudioRingBuffer(maxFrames: Self.audioBufferFrames)
             Self.log.info("start() — connecting me stream (target=\(languages.peer.rawValue))")
             let me = translationFactory.make(speaker: .me)
             meStream = me
@@ -223,6 +317,20 @@ public final class TranslationOrchestrator {
         anyMicFrameThisSession = false
         anyServerDeltaThisSession = false
         state = .translating(mode: mode, startedAt: startedAt)
+        // Seed per-stream connectivity health for whichever streams
+        // this mode actually opens. The slow-detection loop iterates
+        // only over speakers that have a live stream, so seeding the
+        // dictionary here also acts as the "is this stream tracked"
+        // gate.
+        healthBySpeaker = [:]
+        if mode == .call || mode == .test { healthBySpeaker[.me] = .healthy }
+        if mode == .call || mode == .listen { healthBySpeaker[.peer] = .healthy }
+        lastDeltaAtBySpeaker = [:]
+        lastAudibleMicAt = nil
+        lastAudiblePeerAt = nil
+        connectivityHealth = .healthy
+        startSlowDetectionLoop()
+        startNetworkObserver(mode: mode, languages: languages)
         observeDeviceChanges()
         armNoDataWatchdog()
         Self.log.info("start() — translating session active")
@@ -275,11 +383,29 @@ public final class TranslationOrchestrator {
     /// this so support can see at a glance whether the mic was
     /// physically picking up sound when the user "spoke".
     func markMicFrameReceived(format: String = "?", sampleRate: Int = 0, rms: Float = 0) {
+        // Slow detection: stamp the most recent audible mic frame so
+        // the watchdog only fires when the user is actually speaking.
+        if rms >= Self.micAudibleRMSThreshold {
+            lastAudibleMicAt = clock.now()
+        }
         guard !anyMicFrameThisSession else { return }
         anyMicFrameThisSession = true
         Self.log.info("first mic frame — format=\(format) sampleRate=\(sampleRate)Hz rms=\(String(format: "%.5f", rms))")
         if rms < 0.0005 {
             Self.log.error("first mic frame — RMS \(String(format: "%.5f", rms)) is near-silent; OpenAI VAD will not trigger. Check the input gain in System Settings → Sound, or pick a different mic in the popover.")
+        }
+    }
+
+    /// Peer-stream analogue of `markMicFrameReceived`. The
+    /// `wireIncomingPipeline` splitter computes RMS over each frame
+    /// from Process Tap; we stamp `lastAudiblePeerAt` only when the
+    /// signal is above the same audibility threshold as the mic side.
+    /// This is the "peer is currently speaking" signal the slow loop
+    /// uses to decide whether peer slow-detection should fire (vs.
+    /// false-positiving during a quiet meeting).
+    func markPeerFrameReceived(rms: Float) {
+        if rms >= Self.micAudibleRMSThreshold {
+            lastAudiblePeerAt = clock.now()
         }
     }
 
@@ -303,6 +429,137 @@ public final class TranslationOrchestrator {
         anyServerDeltaThisSession = true
         cancelNoDataWatchdog()
         Self.log.info("first server delta received — no-data watchdog disarmed")
+    }
+
+    /// Called by every server-delta callsite (audio + transcript on
+    /// both me / peer streams). Records the arrival time and, if the
+    /// speaker was previously `.slow`, flips it back to `.healthy`
+    /// and recomputes the published aggregate. Must be called BEFORE
+    /// `markFirstDataReceived()` so the order matches the test
+    /// expectation that a delta produces `.healthy` immediately.
+    private func recordDeltaArrival(speaker: Speaker) {
+        lastDeltaAtBySpeaker[speaker] = clock.now()
+        if healthBySpeaker[speaker] != .healthy {
+            healthBySpeaker[speaker] = .healthy
+            recomputeAggregateHealth()
+        }
+    }
+
+    private func recomputeAggregateHealth() {
+        let values = Array(healthBySpeaker.values)
+        let aggregate: ConnectivityHealth
+        switch values.count {
+        case 0: aggregate = .healthy
+        case 1: aggregate = ConnectivityHealth.aggregate(values[0])
+        default: aggregate = values.reduce(.healthy, ConnectivityHealth.aggregate)
+        }
+        if aggregate != connectivityHealth {
+            connectivityHealth = aggregate
+        }
+    }
+
+    /// Periodic slow-detection scan. For each speaker with an active
+    /// stream, if the user has been audibly speaking in the recent
+    /// past AND no delta has arrived from that speaker's stream in
+    /// `slowThresholdSeconds`, mark the speaker as `.slow`. The loop
+    /// runs every 0.5 s — finer than the threshold so we catch the
+    /// transition with at most a half-second lag.
+    private func startSlowDetectionLoop() {
+        slowDetectionTask?.cancel()
+        let clock = self.clock
+        slowDetectionTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await clock.sleep(for: Self.slowCheckIntervalSeconds)
+                guard let self else { return }
+                self.evaluateSlowDetection()
+            }
+        }
+    }
+
+    private func stopSlowDetectionLoop() {
+        slowDetectionTask?.cancel()
+        slowDetectionTask = nil
+    }
+
+    private func evaluateSlowDetection() {
+        guard case .translating = state else { return }
+        let now = clock.now()
+
+        // Per-speaker activity gates. Each side has its own audibility
+        // window — gating peer slow-detection on the user's mic was a
+        // review finding (peer-only stalls in .listen mode never fired,
+        // and a quiet stretch on the user's side suppressed peer
+        // diagnostics in .call mode). The audibility-based gate is a
+        // false-positive shield: if nobody is speaking on that side,
+        // we have no reason to expect deltas, so we shouldn't fire
+        // "slow" purely on elapsed time.
+        let userIsSpeaking: Bool = {
+            guard let last = lastAudibleMicAt else { return false }
+            return now.timeIntervalSince(last) < Self.userSpeakingWindowSeconds
+        }()
+        let peerIsSpeaking: Bool = {
+            guard let last = lastAudiblePeerAt else { return false }
+            return now.timeIntervalSince(last) < Self.userSpeakingWindowSeconds
+        }()
+
+        var changed = false
+        for speaker in [Speaker.me, Speaker.peer] {
+            let hasStream: Bool
+            let isSpeaking: Bool
+            let lastAudible: Date?
+            switch speaker {
+            case .me:
+                hasStream = meStream != nil
+                isSpeaking = userIsSpeaking
+                lastAudible = lastAudibleMicAt
+            case .peer:
+                hasStream = peerStream != nil
+                isSpeaking = peerIsSpeaking
+                lastAudible = lastAudiblePeerAt
+            }
+            guard hasStream else { continue }
+
+            // When the speaker is silent: we can't measure staleness
+            // (no traffic to translate is expected). Demote any
+            // sticky `.slow` back to `.healthy` so the popover hint
+            // doesn't get stuck once the trigger condition is gone.
+            // `.recovering` is owned by `armRecoveringFlash` and must
+            // not be clobbered here.
+            guard isSpeaking else {
+                if healthBySpeaker[speaker] == .slow {
+                    healthBySpeaker[speaker] = .healthy
+                    changed = true
+                }
+                continue
+            }
+
+            let lastDelta = lastDeltaAtBySpeaker[speaker]
+            let stale: Bool
+            if let lastDelta {
+                stale = now.timeIntervalSince(lastDelta) >= Self.slowThresholdSeconds
+            } else if let firstAudible = lastAudible {
+                // No delta yet, but the speaker has been audible for
+                // ≥ slowThresholdSeconds without any server response
+                // — that IS slow.
+                stale = now.timeIntervalSince(firstAudible) >= Self.slowThresholdSeconds
+            } else {
+                stale = false
+            }
+
+            let target: ConnectivityHealth = stale ? .slow : .healthy
+            if healthBySpeaker[speaker] == .recovering {
+                // Don't disturb the recovering flash. The flash task
+                // will transition us to .healthy after its window;
+                // letting this loop overwrite would either skip the
+                // UX cue or cause flicker.
+                continue
+            }
+            if healthBySpeaker[speaker] != target {
+                healthBySpeaker[speaker] = target
+                changed = true
+            }
+        }
+        if changed { recomputeAggregateHealth() }
     }
 
     private func observeDeviceChanges() {
@@ -387,6 +644,257 @@ public final class TranslationOrchestrator {
         reconnectWatchdogTask = nil
     }
 
+    // MARK: - NetworkMonitor pause / auto-resume
+
+    /// Subscribe to `networkMonitor.statusStream` for the duration of
+    /// the session. The first yield on attach is the current status,
+    /// so a `.satisfied` initial value is a no-op; transitions drive
+    /// `.paused ↔ .translating` via `handleNetworkStatusChange`.
+    private func startNetworkObserver(mode: SessionMode, languages: LanguagePair) {
+        networkObserverTask?.cancel()
+        let stream = networkMonitor.statusStream
+        networkObserverTask = Task { @MainActor [weak self] in
+            for await status in stream {
+                if Task.isCancelled { return }
+                guard let self else { return }
+                self.handleNetworkStatusChange(status, mode: mode, languages: languages)
+            }
+        }
+    }
+
+    private func stopNetworkObserver() {
+        networkObserverTask?.cancel()
+        networkObserverTask = nil
+    }
+
+    private func handleNetworkStatusChange(
+        _ status: NetworkPathStatus,
+        mode: SessionMode,
+        languages: LanguagePair
+    ) {
+        switch status {
+        case .unsatisfied:
+            enterNetworkPause(mode: mode)
+        case .satisfied:
+            if case .paused(_, _, _, .networkLost) = state {
+                resumeFromNetworkPause(mode: mode, languages: languages)
+            }
+        }
+    }
+
+    /// Tear down streams + captures and flip to `.paused(.networkLost)`.
+    ///
+    /// Idempotent vs. `.paused(.networkLost)` — calling again is a
+    /// no-op. But NOT idempotent vs. `.paused(.awaitingNetwork)`: a
+    /// drop arriving while resume is in flight must transition us
+    /// back to `.networkLost` so the resumeStreams reentrancy guard
+    /// observes a state change and aborts the half-resumed pipeline
+    /// (iter-2 review finding: matching all `.paused` would silently
+    /// swallow a mid-resume drop, then NetworkMonitor's de-dup would
+    /// suppress any later `.unsatisfied`, leaving the orchestrator
+    /// in `.translating` against a dead network).
+    private func enterNetworkPause(mode: SessionMode) {
+        if case .paused(_, _, _, .networkLost) = state { return }
+        guard let startedAt = sessionStartedAt else { return }
+        Self.log.info("network unsatisfied — entering .paused(.networkLost)")
+        // Stamp any in-flight entries (an original chunk arrived but the
+        // server never delivered its translation) as at-risk so the
+        // bubble view can render the "перевод не получен" placeholder
+        // if no late translation lands during / after the pause.
+        transcript.markActiveEntriesAtRisk()
+        stopSlowDetectionLoop()
+        for (_, tasks) in pipelineTasksBySpeaker {
+            for t in tasks { t.cancel() }
+        }
+        pipelineTasksBySpeaker.removeAll()
+        // Audio captured during a long outage is stale — by the time
+        // the network returns, replaying old frames would land after
+        // the live conversation moved on. The buffer is allocated
+        // again when resume re-opens the me-stream.
+        audioBufferBySpeaker.values.forEach { $0.clear() }
+        micCapture.stop()
+        peerCapture.stop()
+        // Capture the stream references BEFORE nil-ing — the spawned
+        // Task body runs on a later @MainActor turn, by which point
+        // `self.meStream` / `self.peerStream` would already be nil and
+        // the `close()` calls would be silent no-ops, leaking the
+        // underlying WebSockets + their receive/closeReason loops
+        // (review finding #2). Compare with `stopAllStreams` (below)
+        // which awaits close before nil-out from an async context.
+        let meSnapshot = meStream
+        let peerSnapshot = peerStream
+        meStream = nil
+        peerStream = nil
+        Task { @MainActor in
+            await meSnapshot?.close()
+            await peerSnapshot?.close()
+        }
+        state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: .networkLost)
+        armPauseRecoveryWatchdog()
+    }
+
+    private func resumeFromNetworkPause(mode: SessionMode, languages: LanguagePair) {
+        guard case .paused(_, _, let startedAt, .networkLost) = state else { return }
+        Self.log.info("network satisfied during pause — resuming")
+        state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: .awaitingNetwork)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.resumeStreams(mode: mode, languages: languages, startedAt: startedAt)
+        }
+    }
+
+    private func resumeStreams(
+        mode: SessionMode,
+        languages: LanguagePair,
+        startedAt: Date
+    ) async {
+        // Reentrancy guard at each await boundary: if the network
+        // dropped again mid-resume, NWPathMonitor's `.unsatisfied`
+        // handler will have flipped us back to `.paused(.networkLost)`.
+        // Continuing the resume in that case would wire a fresh
+        // pipeline against a path the OS already declared down —
+        // resulting in a phantom `.translating` state and a leaked
+        // half-connected stream (review finding #9).
+        if mode == .call || mode == .listen {
+            let peer = translationFactory.make(speaker: .peer)
+            do {
+                try await peer.connect(target: languages.mine)
+                guard case .paused(_, _, _, .awaitingNetwork) = state else {
+                    Self.log.info("resumeStreams — state changed during peer.connect (\(String(describing: self.state))); aborting resume")
+                    await peer.close()
+                    return
+                }
+                peerStream = peer
+                wireIncomingPipeline(stream: peer)
+                observeConnectionState(stream: peer, speaker: .peer, target: languages.mine, mode: mode)
+            } catch {
+                await failResume(error: error)
+                return
+            }
+        }
+        if mode == .call || mode == .test {
+            // Re-arm the outbound ring buffer so post-resume reconnect
+            // flaps continue to enjoy the brief-blip recovery path.
+            audioBufferBySpeaker[.me] = AudioRingBuffer(maxFrames: Self.audioBufferFrames)
+            let me = translationFactory.make(speaker: .me)
+            do {
+                try await me.connect(target: languages.peer)
+                guard case .paused(_, _, _, .awaitingNetwork) = state else {
+                    Self.log.info("resumeStreams — state changed during me.connect (\(String(describing: self.state))); aborting resume")
+                    await me.close()
+                    // Tear down the peer side too if we wired it above,
+                    // since resume as a whole is aborted. Cancel the
+                    // pipeline tasks BEFORE closing the stream so the
+                    // close()-yielded `.disconnected` event doesn't
+                    // race a still-iterating observer (iter-2 review
+                    // finding: peer-pipeline tasks were leaked here).
+                    for t in pipelineTasksBySpeaker[.peer] ?? [] { t.cancel() }
+                    pipelineTasksBySpeaker[.peer] = []
+                    let peerSnapshot = peerStream
+                    peerStream = nil
+                    await peerSnapshot?.close()
+                    return
+                }
+                meStream = me
+                wireOutgoingPipeline(stream: me, destination: mode == .test ? .speakers : .virtualMic)
+                observeConnectionState(stream: me, speaker: .me, target: languages.peer, mode: mode)
+            } catch {
+                await failResume(error: error)
+                return
+            }
+        }
+        cancelPauseRecoveryWatchdog()
+        state = .translating(mode: mode, startedAt: startedAt)
+        healthBySpeaker = [:]
+        if mode == .call || mode == .test { healthBySpeaker[.me] = .recovering }
+        if mode == .call || mode == .listen { healthBySpeaker[.peer] = .recovering }
+        recomputeAggregateHealth()
+        // Reset the per-session aliveness latches so the re-armed
+        // no-data watchdog can fire if the post-resume pipeline never
+        // delivers anything (review finding #5: a mic that was
+        // unplugged during the outage would otherwise silently strand
+        // the session forever).
+        anyMicFrameThisSession = false
+        anyServerDeltaThisSession = false
+        // Drop the pre-pause activity timestamps. Without this, the
+        // slow-detection loop sees `now - lastDeltaAtBySpeaker[.me]`
+        // = (pause duration + post-resume latency) and fires phantom
+        // `.slow` as soon as the recovering-flash window closes —
+        // even though the post-resume pipeline is perfectly healthy
+        // (iter-2 review finding: every recovery flickered `.slow`
+        // 2 s after the green dot returned).
+        lastDeltaAtBySpeaker = [:]
+        lastAudibleMicAt = nil
+        lastAudiblePeerAt = nil
+        startSlowDetectionLoop()
+        armNoDataWatchdog()
+        armRecoveringFlash()
+    }
+
+    private func failResume(error: Error) async {
+        Self.log.error("resume failed: \(String(describing: error)); falling back to terminal .error")
+        await stopAllStreams()
+        state = .error(.networkLost)
+    }
+
+    /// Force terminal `.error(.networkLost)` if pause-recovery hasn't
+    /// succeeded in `pauseRecoveryWatchdogSeconds` (60 s). Defense in
+    /// depth — without it a never-returning network leaves the app in
+    /// `.paused` forever.
+    private func armPauseRecoveryWatchdog() {
+        pauseRecoveryWatchdogTask?.cancel()
+        let clock = self.clock
+        pauseRecoveryWatchdogTask = Task { @MainActor [weak self] in
+            try? await clock.sleep(for: Self.pauseRecoveryWatchdogSeconds)
+            guard let self else { return }
+            if Task.isCancelled { return }
+            // Only escalate if we're still stuck on a network outage
+            // (`.networkLost`). Once `resumeFromNetworkPause` flips us
+            // to `.paused(.awaitingNetwork)`, resume is in flight —
+            // killing it would force-error a recovery that might
+            // succeed seconds later on a slow OpenAI handshake. The
+            // resume path cancels this watchdog when it lands on
+            // `.translating`; this guard handles the case where
+            // resume is still mid-await past the 60 s budget (review
+            // finding #3 — was matching both reasons).
+            if case .paused(_, _, _, .networkLost) = self.state {
+                Self.log.error("pause-recovery watchdog fired after \(Self.pauseRecoveryWatchdogSeconds)s in .networkLost — forcing terminal .error(.networkLost)")
+                await self.stopAllStreams()
+                self.state = .error(.networkLost)
+            }
+        }
+    }
+
+    private func cancelPauseRecoveryWatchdog() {
+        pauseRecoveryWatchdogTask?.cancel()
+        pauseRecoveryWatchdogTask = nil
+    }
+
+    /// Hold `.recovering` health for 2 s after resume, then drop to the
+    /// natural `.healthy` (or whatever the slow-detection loop computes).
+    /// Handle stored in `recoveringFlashTask` so `stopAllStreams()` can
+    /// cancel it — without that, a stale flash from session N can
+    /// clobber the connectivity health of a fast session-N+1 restart
+    /// (review finding #7).
+    private func armRecoveringFlash() {
+        recoveringFlashTask?.cancel()
+        let clock = self.clock
+        recoveringFlashTask = Task { @MainActor [weak self] in
+            try? await clock.sleep(for: 2)
+            guard let self else { return }
+            if Task.isCancelled { return }
+            for s in [Speaker.me, Speaker.peer] where self.healthBySpeaker[s] == .recovering {
+                self.healthBySpeaker[s] = .healthy
+            }
+            self.recomputeAggregateHealth()
+        }
+    }
+
+    private func cancelRecoveringFlash() {
+        recoveringFlashTask?.cancel()
+        recoveringFlashTask = nil
+    }
+
     private func observeConnectionState(
         stream: any TranslationStream,
         speaker: Speaker,
@@ -417,7 +925,7 @@ public final class TranslationOrchestrator {
                     // is included so a second speaker's mid-reconnect
                     // failure still triggers its own retry cycle.
                     switch self.state {
-                    case .translating, .reconnecting:
+                    case .translating, .paused, .reconnecting:
                         await self.handleStreamFailure(
                             error: err,
                             speaker: speaker,
@@ -459,6 +967,15 @@ public final class TranslationOrchestrator {
         receivedAnyData: Bool
     ) async {
         Self.log.error("handleStreamFailure — speaker=\(String(describing: speaker)), error=\(String(describing: error)), receivedAnyData=\(receivedAnyData)")
+        // Stamp this speaker's in-flight entries (original chunk
+        // arrived but the server hadn't delivered its translation
+        // yet) as at-risk so the bubble view can render the
+        // "перевод не получен" placeholder if no late translation
+        // lands during the reconnect cycle. Scoped to the failing
+        // speaker so the healthy stream's bubbles don't get
+        // decorated with the placeholder while their own translation
+        // is still mid-flight (iter-3 review finding).
+        transcript.markActiveEntriesAtRisk(speaker: speaker)
         // Don't try to recover from terminal errors
         switch error {
         case .apiKeyInvalid, .insufficientCredits, .permissionDenied:
@@ -565,6 +1082,23 @@ public final class TranslationOrchestrator {
                     wireIncomingPipeline(stream: newStream)
                 case .me:
                     meStream = newStream
+                    // Drain the outbound audio ring buffer onto the
+                    // fresh stream BEFORE `wireOutgoingPipeline` starts
+                    // the new mic-frame consumer. This replays the
+                    // last ~3 s of in-flight audio so a brief WS flap
+                    // doesn't drop the user's mid-phrase. The send
+                    // happens off-actor in an unstructured Task because
+                    // each `await newStream.send` may yield, and we
+                    // don't want to block this @MainActor function.
+                    if let buf = audioBufferBySpeaker[.me] {
+                        let buffered = buf.drain()
+                        if !buffered.isEmpty {
+                            Self.log.info("flushing \(buffered.count) buffered audio frames to fresh me-stream")
+                            Task { [newStream] in
+                                for f in buffered { await newStream.send(f) }
+                            }
+                        }
+                    }
                     // Re-derive the destination from the active mode
                     // so a test-mode session that flapped doesn't
                     // accidentally route to BlackHole 2ch after the
@@ -586,6 +1120,17 @@ public final class TranslationOrchestrator {
                 // Reconnect succeeded — disarm the watchdog so it
                 // doesn't fire later and tear down a healthy session.
                 cancelReconnectWatchdog()
+                // Drop the pre-failure activity timestamp for this
+                // speaker. Without this, the slow-detection loop
+                // would see `now - lastDelta[speaker]` = (failure
+                // duration + retry backoff + reconnect latency) and
+                // fire phantom `.slow` the moment a post-reconnect
+                // mic frame stamps `lastAudibleMicAt` fresh — same
+                // class of bug iter-2 caught for resumeStreams
+                // (iter-3 review finding).
+                lastDeltaAtBySpeaker[speaker] = nil
+                healthBySpeaker[speaker] = .healthy
+                recomputeAggregateHealth()
                 return
             } catch {
                 // Close the half-connected stream before retrying. Without
@@ -610,6 +1155,15 @@ public final class TranslationOrchestrator {
     private func stopAllStreams() async {
         cancelReconnectWatchdog()
         cancelNoDataWatchdog()
+        stopNetworkObserver()
+        cancelPauseRecoveryWatchdog()
+        cancelRecoveringFlash()
+        stopSlowDetectionLoop()
+        healthBySpeaker = [:]
+        lastDeltaAtBySpeaker = [:]
+        lastAudibleMicAt = nil
+        lastAudiblePeerAt = nil
+        connectivityHealth = .healthy
         silentFrameWatchdog?.stop()
         silentFrameWatchdog = nil
         for t in globalTasks { t.cancel() }
@@ -618,6 +1172,11 @@ public final class TranslationOrchestrator {
         }
         globalTasks.removeAll()
         pipelineTasksBySpeaker.removeAll()
+        // Drop the per-speaker ring buffers entirely on stop — a fresh
+        // start() re-allocates them. Keeping the instance around past
+        // session boundaries would leak stale audio into a later
+        // reconnect from an unrelated session.
+        audioBufferBySpeaker.removeAll()
         micCapture.stop()
         peerCapture.stop()
         outputMixer.stop()
@@ -643,6 +1202,12 @@ public final class TranslationOrchestrator {
 
     public func updateOriginalMixVolume(_ v: Float) {
         outputMixer.setOriginalGain(min(max(v, 0), 1))
+    }
+
+    /// Read per-speaker connectivity health for the diagnostic snapshot.
+    /// Returns nil if the speaker's stream is not active.
+    public func streamHealth(for speaker: Speaker) -> ConnectivityHealth? {
+        healthBySpeaker[speaker]
     }
 
     // MARK: - Pipelines
@@ -672,8 +1237,11 @@ public final class TranslationOrchestrator {
     /// [0, 1]. Used by the mic-level diagnostic so support can tell
     /// "user spoke but app stayed silent" from "user spoke but mic
     /// was muted at the OS level". Returns 0 for empty / malformed
-    /// frames.
-    private static func rms(_ frame: AudioFrame) -> Float {
+    /// frames. `nonisolated` because the peer splitter task (which
+    /// runs off-MainActor) reads this; relying on Swift 5 mode to
+    /// suppress the isolation check would break a future Swift 6
+    /// migration.
+    nonisolated static func rms(_ frame: AudioFrame) -> Float {
         let bytes = frame.pcm
         guard !bytes.isEmpty else { return 0 }
         switch frame.format {
@@ -711,7 +1279,19 @@ public final class TranslationOrchestrator {
     private func wireOutgoingPipeline(stream: any TranslationStream, destination: OutgoingDestination) {
         let micFrames = micCapture.start(deviceUID: currentSettings.inputDeviceUID)
         let transformer = self.transformer
-        let task1 = Task { [stream, weak self] in
+        // Capture the buffer reference on @MainActor (right here) so
+        // the off-actor mic pump doesn't read `audioBufferBySpeaker`
+        // — a Dictionary — concurrently with MainActor mutations
+        // (`removeAll`, reassignment, etc.). The AudioRingBuffer
+        // instance itself is internally lock-guarded, so calling
+        // `append` on the captured reference off-actor is safe.
+        // On reconnect or pause the outer task is cancelled, so even
+        // if a late frame slips in here it lands on the (now-orphan)
+        // old buffer rather than racing the live one.
+        // (Review finding #1 — the previous version's "captured into
+        // a local under main once (above)" comment was lying.)
+        let outboundBuffer = audioBufferBySpeaker[.me]
+        let task1 = Task { [stream, outboundBuffer, weak self] in
             var frameIndex = 0
             for await frame in micFrames {
                 // First mic frame proves the capture engine spun up
@@ -730,6 +1310,7 @@ public final class TranslationOrchestrator {
                     self?.logMicLevel(rms: rms, frameIndex: idx)
                 }
                 let wire = transformer.toWire(frame)
+                outboundBuffer?.append(wire)
                 await stream.send(wire)
                 frameIndex += 1
             }
@@ -761,7 +1342,10 @@ public final class TranslationOrchestrator {
                     // the stream's handle()) means we mark "we
                     // actually delivered data" rather than just "we
                     // parsed an event".
-                    await MainActor.run { self?.markFirstDataReceived() }
+                    await MainActor.run { [weak self] in
+                        self?.recordDeltaArrival(speaker: .me)
+                        self?.markFirstDataReceived()
+                    }
                     resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
                 }
                 resampledContinuation.finish()
@@ -781,6 +1365,7 @@ public final class TranslationOrchestrator {
         }
         let task3 = Task { @MainActor [transcript, stream, weak self] in
             for await d in stream.transcripts {
+                self?.recordDeltaArrival(speaker: .me)
                 self?.markFirstDataReceived()
                 transcript.apply(d)
             }
@@ -815,12 +1400,29 @@ public final class TranslationOrchestrator {
                 _ = self  // intentionally not flipping state to .error
             }
         }
+        // Stop the previous watchdog BEFORE overwriting — otherwise a
+        // reconnect / resume orphans the old one and N flaps produce N
+        // parallel watchdogs racing the same callback (review
+        // finding #4).
+        silentFrameWatchdog?.stop()
         watchdog.start()
         self.silentFrameWatchdog = watchdog
 
-        let splitter = Task {
+        let splitter = Task { [weak self] in
             for await frame in peerFrames {
                 watchdog.observe(frame.pcm)
+                // Stamp peer audibility for slow-detection's per-side
+                // gate. RMS is computed off-actor (Self.rms is a pure
+                // static); the MainActor hop is only for the property
+                // write. We avoid hopping on every frame by checking
+                // the threshold here first and skipping the hop when
+                // it'd be a no-op.
+                let rms = Self.rms(frame)
+                if rms >= Self.micAudibleRMSThreshold {
+                    await MainActor.run { [weak self] in
+                        self?.markPeerFrameReceived(rms: rms)
+                    }
+                }
                 translationContinuation.yield(frame)
                 passthroughContinuation.yield(frame)
             }
@@ -852,7 +1454,10 @@ public final class TranslationOrchestrator {
                     // tap) for A/B comparison of what the model
                     // emits vs what the speakers receive.
                     WireDumper.shared.write(wireFrame.pcm)
-                    await MainActor.run { self?.markFirstDataReceived() }
+                    await MainActor.run { [weak self] in
+                        self?.recordDeltaArrival(speaker: .peer)
+                        self?.markFirstDataReceived()
+                    }
                     resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
                 }
                 resampledContinuation.finish()
@@ -865,6 +1470,7 @@ public final class TranslationOrchestrator {
         }
         let transcripts = Task { @MainActor [transcript, stream, weak self] in
             for await d in stream.transcripts {
+                self?.recordDeltaArrival(speaker: .peer)
                 self?.markFirstDataReceived()
                 transcript.apply(d)
             }

@@ -59,7 +59,8 @@ enum TranscriptGrouping {
                         secondaryText: b.secondaryText,
                         isFirstInGroup: isFirst,
                         isLastInGroup: isLast,
-                        isLive: isLive
+                        isLive: isLive,
+                        translationLost: b.translationLost
                     )
                 )
             }
@@ -89,6 +90,26 @@ enum TranscriptGrouping {
         let primaryParts = splitOnSentence(primaryRaw, threshold: splitThreshold)
         let secondaryParts = splitOnSentence(secondaryRaw, threshold: splitThreshold)
         let n = max(primaryParts.count, secondaryParts.count, 1)
+        // An entry's translation is "lost" when the orchestrator
+        // flagged it at-risk during a pause/reconnect AND no
+        // translation text ever arrived. Matches the store's
+        // `markActiveEntriesAtRisk` flag predicate exactly — a
+        // partial translation keeps its text on screen rather than
+        // being wiped by the placeholder.
+        let translationLost = entry.translationAtRisk && entry.translatedText.isEmpty
+        // For peer entries where the translation never arrived, the
+        // primary slot is empty on EVERY split bubble (peer's primary
+        // is `translatedText`). The previous behaviour put the
+        // placeholder only on the tail bubble, which left bubbles
+        // 0..N-2 rendering an empty Text('') above their secondary
+        // (the original) with no indicator that a translation was
+        // expected. For peer entries we propagate the flag to all
+        // bubbles so the placeholder appears wherever primary would
+        // otherwise be blank. For `.me` entries the original behaviour
+        // (tail-only) is still correct because the primary slot is
+        // `originalText`, which is non-empty per-bubble (review
+        // finding #12).
+        let propagateToAll = translationLost && entry.speaker == .peer
         var out: [BubbleViewModel] = []
         out.reserveCapacity(n)
         for i in 0..<n {
@@ -96,6 +117,8 @@ enum TranscriptGrouping {
             let s = secondaryParts[safe: i] ?? secondaryParts.last ?? secondaryRaw
             // Stable derivative id so SwiftUI diffing works across re-groups.
             let bubbleId = derive(entry.id, suffix: i)
+            let isLastOfSplit = (i == n - 1)
+            let bubbleLost = propagateToAll || (translationLost && isLastOfSplit)
             out.append(
                 BubbleViewModel(
                     id: bubbleId,
@@ -104,7 +127,8 @@ enum TranscriptGrouping {
                     secondaryText: s,
                     isFirstInGroup: false,
                     isLastInGroup: false,
-                    isLive: false
+                    isLive: false,
+                    translationLost: bubbleLost
                 )
             )
         }

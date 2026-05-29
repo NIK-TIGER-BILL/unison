@@ -49,8 +49,11 @@ public struct PopoverView: View {
             }
             // Timer + Stop stay visible across `.translating`/`.reconnecting`
             // flapping so the UI doesn't bounce; only this thin hint swaps in.
-            if vm.isReconnecting {
-                reconnectingHint
+            // Covers reconnect, .paused (network lost / awaiting), and the
+            // .translating × {slow, recovering} sub-states. Empty string
+            // collapses the row entirely so we don't reserve vertical space.
+            if !vm.statusText.isEmpty {
+                statusHint
             }
             if let reason = vm.state.errorValue {
                 ErrorRow(
@@ -85,7 +88,7 @@ public struct PopoverView: View {
 
     private var topRow: some View {
         HStack(spacing: 8) {
-            StatusDot(state: vm.statusKind.dotState)
+            StatusDot(state: vm.statusDotState)
             Text("Unison")
                 .font(.system(size: 13, weight: .semibold))
                 .tracking(-0.26)
@@ -257,12 +260,12 @@ public struct PopoverView: View {
         }
     }
 
-    private var reconnectingHint: some View {
+    private var statusHint: some View {
         HStack(spacing: 6) {
             ProgressView()
                 .controlSize(.small)
                 .scaleEffect(0.7)
-            Text("Переподключение…")
+            Text(vm.statusText)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }
@@ -297,15 +300,3 @@ private enum PopoverLayout {
     static let width: CGFloat = 340
 }
 
-// MARK: - StatusKind → StatusDot.State
-
-private extension PopoverViewModel.StatusKind {
-    var dotState: StatusDot.State {
-        switch self {
-        case .ready: .ready
-        case .active: .active
-        case .warn:  .warn
-        case .error: .error
-        }
-    }
-}

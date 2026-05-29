@@ -36,6 +36,14 @@ public final class PopoverViewModel {
     /// touches this — `orchestrator.state` always wins when it exists.
     public var previewState: SessionState = .idle
 
+    /// Test-only override for the aggregate `ConnectivityHealth`. Read
+    /// by `connectivityHealth` only when no orchestrator is wired (i.e.
+    /// the VM was built via `previewing(...)`). `internal` (not
+    /// `private`) so snapshot tests reaching in via
+    /// `@testable import UnisonUI` can prime a state without driving the
+    /// real orchestrator.
+    var previewConnectivityHealth: ConnectivityHealth = .healthy
+
     /// Monotonic tick bumped whenever the *environment* changes —
     /// device list, BlackHole install, mic permission grant. The
     /// `startBlockedReason` computation reads it (via `_ = envTick`)
@@ -92,17 +100,29 @@ public final class PopoverViewModel {
         settings: Settings = .default,
         state: SessionState = .idle,
         permissions: any PermissionsService,
-        deviceRegistry: any AudioDeviceRegistry
+        deviceRegistry: any AudioDeviceRegistry,
+        connectivityHealth: ConnectivityHealth = .healthy
     ) -> PopoverViewModel {
-        PopoverViewModel(
+        let vm = PopoverViewModel(
             permissions: permissions,
             deviceRegistry: deviceRegistry,
             settings: settings,
             previewState: state
         )
+        vm.previewConnectivityHealth = connectivityHealth
+        return vm
     }
 
     public var state: SessionState { orchestrator?.state ?? previewState }
+
+    /// Aggregate connectivity health, read from the orchestrator when
+    /// available, falls back to the preview override otherwise. The UI
+    /// only surfaces this when `state == .translating` (the other states
+    /// already speak for themselves); the view-model still keeps the
+    /// fallback so the property is well-defined in every state.
+    public var connectivityHealth: ConnectivityHealth {
+        orchestrator?.connectivityHealth ?? previewConnectivityHealth
+    }
 
     public var languagePairDisplay: String {
         let mine = settings.languagePair.mine
@@ -157,25 +177,79 @@ public final class PopoverViewModel {
     /// (`canStart`) with content validation (`isLanguagePairValid`).
     public var canStartStrict: Bool { canStart && isLanguagePairValid }
 
-    /// Visual status for the header dot.
-    /// - `.error` while the orchestrator is in `.error`
-    /// - `.active` while connecting / translating / reconnecting
-    /// - `.warn` when the language pair is invalid
-    /// - `.ready` otherwise
-    public var statusKind: StatusKind {
-        if case .error = state { return .error }
-        if state.isActive { return .active }
-        if !isLanguagePairValid { return .warn }
-        return .ready
+    /// Human-readable status line shown below the timer / primary
+    /// button. Empty string means "no secondary line at all" — the row
+    /// collapses entirely in that case so we don't reserve vertical
+    /// space for an unused hint.
+    ///
+    /// Exhaustively covers every `SessionState`; `.translating`
+    /// additionally branches on `connectivityHealth` for the slow /
+    /// recovery surface.
+    public var statusText: String {
+        switch state {
+        case .idle, .connecting, .error:
+            return ""
+        case .reconnecting:
+            return "Переподключение…"
+        case .paused(_, _, _, .networkLost):
+            return "Нет интернета. Ждём…"
+        case .paused(_, _, _, .awaitingNetwork):
+            return "Возобновляем…"
+        case .translating:
+            switch connectivityHealth {
+            case .slow: return "Медленная сеть"
+            case .recovering: return "Связь восстановлена"
+            case .healthy: return ""
+            }
+        }
     }
 
-    /// Status-dot kind, decoupled from `StatusDot.State` so consumers
-    /// (and tests) don't pull in SwiftUI.
-    public enum StatusKind: Equatable, Sendable {
-        case ready
-        case active
-        case warn
-        case error
+    /// The popover header status dot, derived from
+    /// `state × connectivityHealth`. This is the single source of truth
+    /// for the header dot — `PopoverView` binds straight to it. The
+    /// colour mapping mirrors the design spec's status table
+    /// (`docs/superpowers/specs/2026-05-27-network-aware-session-design.md`,
+    /// "Status dot colour" column) exactly:
+    ///
+    /// | state / health                  | dot          |
+    /// | ------------------------------- | ------------ |
+    /// | `.idle` (valid pair)            | `.ready`     |
+    /// | `.idle` (invalid pair)          | `.warn`      |
+    /// | `.connecting`                   | `.active`    |
+    /// | `.translating` + `.healthy`     | `.active`    |
+    /// | `.translating` + `.slow`        | `.warn`      |
+    /// | `.translating` + `.recovering`  | `.recovering`|
+    /// | `.paused(.networkLost)`         | `.paused`    |
+    /// | `.paused(.awaitingNetwork)`     | `.active`    |
+    /// | `.reconnecting`                 | `.warn`      |
+    /// | `.error`                        | `.error`     |
+    ///
+    /// Note `.error` maps to `.error` (red) and `.paused(.awaitingNetwork)`
+    /// to `.active` (cyan, "returning") — getting either wrong was the
+    /// gap the final PR review caught (the header previously routed
+    /// through a 4-state projection that collapsed paused / slow /
+    /// recovering all to cyan).
+    public var statusDotState: StatusDot.State {
+        switch state {
+        case .idle:
+            return isLanguagePairValid ? .ready : .warn
+        case .connecting:
+            return .active
+        case .reconnecting:
+            return .warn
+        case .paused(_, _, _, .networkLost):
+            return .paused
+        case .paused(_, _, _, .awaitingNetwork):
+            return .active
+        case .error:
+            return .error
+        case .translating:
+            switch connectivityHealth {
+            case .slow: return .warn
+            case .recovering: return .recovering
+            case .healthy: return .active
+            }
+        }
     }
 
     /// Title for the primary action button.

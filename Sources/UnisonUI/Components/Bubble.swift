@@ -14,6 +14,12 @@ public struct Bubble: View {
     /// Multiplier driven by the transcript size slider (0.75 … 1.30).
     public let scale: Double
     public let isTestMode: Bool
+    /// When true, the translation never arrived for this entry (the
+    /// orchestrator paused/reconnected mid-flight). Renders a grey
+    /// italic "перевод не получен" placeholder where the translation
+    /// would normally appear — for `.me` that's the `secondary` slot,
+    /// for `.peer` it's the `primary` slot.
+    public let translationLost: Bool
 
     @Environment(\.colorSchemeContrast) private var contrast
 
@@ -25,7 +31,8 @@ public struct Bubble: View {
         isLastInGroup: Bool,
         isLive: Bool,
         scale: Double = 1.0,
-        isTestMode: Bool = false
+        isTestMode: Bool = false,
+        translationLost: Bool = false
     ) {
         self.speaker = speaker
         self.primary = primary
@@ -35,21 +42,32 @@ public struct Bubble: View {
         self.isLive = isLive
         self.scale = scale
         self.isTestMode = isTestMode
+        self.translationLost = translationLost
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 5 * scale) {
             HStack(spacing: 6 * scale) {
-                Text(primary)
-                    .font(.system(size: 14.5 * scale, weight: .medium))
-                    .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .shadow(color: .black.opacity(0.25), radius: 0, x: 0, y: 1)
+                if speaker == .peer && translationLost && primary.isEmpty {
+                    // Peer's translation is the primary slot — when it
+                    // never arrived, show the placeholder here.
+                    lostPlaceholder
+                } else {
+                    Text(primary)
+                        .font(.system(size: 14.5 * scale, weight: .medium))
+                        .foregroundStyle(.white)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .shadow(color: .black.opacity(0.25), radius: 0, x: 0, y: 1)
+                }
                 if isLive {
                     TypingDots(scale: scale)
                 }
             }
-            if !secondary.isEmpty {
+            if speaker == .me && translationLost && secondary.isEmpty {
+                // My translation is the secondary slot — when it never
+                // arrived, show the placeholder here.
+                lostPlaceholder
+            } else if !secondary.isEmpty {
                 Text(secondary)
                     .font(.system(size: 11 * scale, weight: .regular))
                     .italic()
@@ -67,6 +85,20 @@ public struct Bubble: View {
         .frame(maxWidth: .infinity, alignment: speaker == .me ? .leading : .trailing)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabelText)
+    }
+
+    /// Grey italic placeholder rendered where the translation would
+    /// normally appear when the orchestrator lost the translation
+    /// mid-flight.
+    private var lostPlaceholder: some View {
+        HStack(spacing: 4 * scale) {
+            Image(systemName: "exclamationmark.bubble")
+                .font(.system(size: 10 * scale))
+            Text("Перевод не получен — нестабильная сеть")
+                .font(.system(size: 13 * scale, weight: .regular).italic())
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(UnisonColors.whiteAlpha(0.45))
     }
 
     /// Opacities stay ≤ 0.25 so the system's specular / refraction

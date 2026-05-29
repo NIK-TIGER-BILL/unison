@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import UnisonDomain
 @testable import UnisonUI
@@ -19,7 +20,8 @@ private func makeOrchestrator(mixer: MockAudioOutputMixer = .init()) -> Translat
         permissions: perms,
         deviceRegistry: registry,
         clock: SystemClock(),
-        transformer: MockAudioFormatTransformer()
+        transformer: MockAudioFormatTransformer(),
+        networkMonitor: MockNetworkPathMonitor(initial: .satisfied)
     )
 }
 
@@ -209,6 +211,30 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     #expect(vm.bubbleGroups[0].bubbles.last?.isLive == false)
 }
 
+// MARK: - translationLost surfacing (T9)
+
+@MainActor
+@Test func bubble_translationAtRiskWithEmptyTranslation_marksLost() {
+    let store = TranscriptStore()
+    let id = UUID()
+    store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .original, text: "Тест", isFinal: false))
+    store.markActiveEntriesAtRisk()
+    let vm = TranscriptViewModel(store: store)
+    let groups = vm.bubbleGroups
+    #expect(groups.first?.bubbles.first?.translationLost == true)
+}
+
+@MainActor
+@Test func bubble_translationDelivered_clearsLost() {
+    let store = TranscriptStore()
+    let id = UUID()
+    store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .original, text: "Тест", isFinal: false))
+    store.markActiveEntriesAtRisk()
+    store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .translated, text: "Test", isFinal: true))
+    let vm = TranscriptViewModel(store: store)
+    #expect(vm.bubbleGroups.first?.bubbles.first?.translationLost == false)
+}
+
 // MARK: - Live bubble finalisation
 
 @MainActor
@@ -274,3 +300,27 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     #expect(vm.elapsedSeconds == 0)
     #expect(vm.elapsedSecondsString == "00:00")
 }
+
+// MARK: - pillStatusText / pillDotState (T12)
+
+@MainActor
+@Test func transcriptVM_pauseNetworkLost_pillStatus() {
+    let store = TranscriptStore()
+    let vm = TranscriptViewModel(store: store)
+    let started = Date()
+    vm.previewState = .paused(mode: .call, since: Date(), startedAt: started, reason: .networkLost)
+    #expect(vm.pillStatusText == "Пауза")
+    #expect(vm.pillDotState == .paused)
+}
+
+@MainActor
+@Test func transcriptVM_translatingHealthy_pillStatus_empty() {
+    let store = TranscriptStore()
+    let vm = TranscriptViewModel(store: store)
+    let started = Date()
+    vm.previewState = .translating(mode: .call, startedAt: started)
+    vm.previewConnectivityHealth = .healthy
+    #expect(vm.pillStatusText == "")
+    #expect(vm.pillDotState == .active)
+}
+

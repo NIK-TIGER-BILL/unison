@@ -4,6 +4,13 @@ public enum SessionState: Equatable, Sendable {
     case idle
     case connecting(mode: SessionMode)
     case translating(mode: SessionMode, startedAt: Date)
+    /// Network-level pause. WS streams are closed, mic + peer captures
+    /// are stopped, and we're waiting for the path to come back. Set
+    /// by the orchestrator in response to `NWPathMonitor` reporting
+    /// `unsatisfied`; cleared by the same monitor reporting
+    /// `satisfied`. `.reconnecting` is reserved for WS-level flap
+    /// inside an otherwise-healthy network.
+    case paused(mode: SessionMode, since: Date, startedAt: Date, reason: PauseReason)
     /// `since` is when the current reconnect attempt began (used by the
     /// status icon for backoff-aware diagnostics). `startedAt` is the
     /// original session start time — preserved across reconnects so the
@@ -16,24 +23,25 @@ public enum SessionState: Equatable, Sendable {
 
     public var isActive: Bool {
         switch self {
-        case .connecting, .translating, .reconnecting: true
+        case .connecting, .translating, .paused, .reconnecting: true
         case .idle, .error: false
         }
     }
 
     public var activeMode: SessionMode? {
         switch self {
-        case .connecting(let m), .translating(let m, _), .reconnecting(let m, _, _): m
+        case .connecting(let m), .translating(let m, _), .paused(let m, _, _, _), .reconnecting(let m, _, _): m
         case .idle, .error: nil
         }
     }
 
     /// Wall-clock start time of the active session, preserved across
-    /// reconnects. `nil` outside of `.translating` / `.reconnecting`
-    /// (i.e. `.idle`, `.connecting`, `.error`).
+    /// reconnects and pauses. `nil` outside of `.translating` / `.paused` /
+    /// `.reconnecting` (i.e. `.idle`, `.connecting`, `.error`).
     public var sessionStartedAt: Date? {
         switch self {
         case .translating(_, let t): t
+        case .paused(_, _, let t, _): t
         case .reconnecting(_, _, let t): t
         case .idle, .connecting, .error: nil
         }
@@ -42,4 +50,17 @@ public enum SessionState: Equatable, Sendable {
     public var errorValue: TranslationError? {
         if case .error(let e) = self { return e } else { return nil }
     }
+}
+
+/// Reason the orchestrator entered `.paused`. Distinct from
+/// `TranslationError` because `.paused` is recoverable — the session
+/// is still alive and will auto-resume when the network returns.
+public enum PauseReason: Sendable, Equatable {
+    /// `NWPathMonitor` reported `.unsatisfied`. WS streams torn down,
+    /// captures halted. UI shows "Нет интернета. Ждём…".
+    case networkLost
+    /// Network returned (`NWPathMonitor` → `.satisfied`) and we're in
+    /// the middle of re-establishing streams. Brief transitional
+    /// state; UI shows "Возобновляем…".
+    case awaitingNetwork
 }

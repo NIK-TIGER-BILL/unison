@@ -13,6 +13,8 @@ public struct ControlPill: View {
     public let isHidden: Bool
     public let isSettingsOpen: Bool
     public let isTestMode: Bool
+    public let explicitDotState: StatusDot.State?
+    public let statusText: String
     public let onToggleSettings: () -> Void
     public let onToggleHidden: () -> Void
     public let onStop: () -> Void
@@ -23,6 +25,8 @@ public struct ControlPill: View {
         isHidden: Bool,
         isSettingsOpen: Bool,
         isTestMode: Bool = false,
+        dotState: StatusDot.State? = nil,
+        statusText: String = "",
         onToggleSettings: @escaping () -> Void,
         onToggleHidden: @escaping () -> Void,
         onStop: @escaping () -> Void
@@ -32,6 +36,8 @@ public struct ControlPill: View {
         self.isHidden = isHidden
         self.isSettingsOpen = isSettingsOpen
         self.isTestMode = isTestMode
+        self.explicitDotState = dotState
+        self.statusText = statusText
         self.onToggleSettings = onToggleSettings
         self.onToggleHidden = onToggleHidden
         self.onStop = onStop
@@ -52,6 +58,13 @@ public struct ControlPill: View {
                     .tracking(0.4)
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Прошло: \(elapsedLabel)")
+                if !statusText.isEmpty {
+                    Text(statusText)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .accessibilityLabel(statusText)
+                }
                 sep
             }
             .allowsHitTesting(false)
@@ -104,8 +117,15 @@ public struct ControlPill: View {
     }
 
     private var dotState: StatusDot.State {
+        // T12: caller-provided state takes precedence — the VM derives
+        // it from `SessionState × ConnectivityHealth` so we can surface
+        // slow/recovering/paused without each call site re-deriving.
+        // Test-mode override still wins (yellow dot for the self-test
+        // session) regardless of caller-supplied state.
+        if isTestMode { return .warn }
+        if let explicit = explicitDotState { return explicit }
         if !isActive { return .ready }
-        return isTestMode ? .warn : .active
+        return .active
     }
 
     private var sep: some View {

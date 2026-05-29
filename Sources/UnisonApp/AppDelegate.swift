@@ -45,6 +45,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             message: "applicationDidFinishLaunching — pid=\(ProcessInfo.processInfo.processIdentifier)"
         )
 
+        // Crash detection: writes a session marker and surfaces a
+        // modal alert if the previous session's marker is still
+        // present (i.e. the previous run didn't reach
+        // `applicationWillTerminate`). Runs BEFORE any other init so
+        // the user can copy diagnostics even if the rest of launch
+        // also crashes. See `CrashReporter` for the design.
+        let pendingCrash = CrashReporter.startSession()
+
         installSignalHandlers()
 
         let hotkeys = HotkeyService()
@@ -126,6 +134,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // `UNISON_FORCE_STATE` overrides for the Tart VM screenshot
         // harness. Production launches never set this env var.
         applyForceStateOverrides()
+
+        // Defer the previous-crash alert to the next runloop tick so
+        // it surfaces AFTER the windows + status item have rendered
+        // (alerts attached to a not-yet-visible app can land behind
+        // other windows). The alert is modal — execution blocks here
+        // until the user dismisses it.
+        if let report = pendingCrash {
+            FileLogStore.shared.write(
+                category: "AppDelegate",
+                level: "error",
+                message: "previous session crashed (pid=\(report.previousPID), started=\(report.previousStartedAt)) — showing crash alert"
+            )
+            DispatchQueue.main.async {
+                CrashReporter.showCrashAlert(report)
+            }
+        }
     }
 
     /// Honor `UNISON_FORCE_STATE` so the screenshot harness can land
@@ -285,6 +309,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // players). No-op when env vars aren't set.
         WireDumper.shared.close()
         WireDumper.sent.close()
+
+        // Drop the crash marker as the LAST thing so a partial
+        // teardown that itself crashes is still surfaced on the next
+        // launch (the marker is only removed when shutdown is truly
+        // complete). See `CrashReporter` for the design rationale.
+        CrashReporter.markCleanShutdown()
     }
 
     /// Routes SIGINT / SIGTERM through `NSApp.terminate(_:)` so the full
@@ -334,7 +364,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         switch state {
         case .idle:
             target = .idle
-        case .connecting, .translating:
+        case .connecting, .translating, .paused:
             target = .active
         case .reconnecting:
             // Treat reconnect as a degraded active for v1 — the design

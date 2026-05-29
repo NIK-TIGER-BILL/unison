@@ -55,6 +55,7 @@ public struct HelpView: View {
             VStack(alignment: .leading, spacing: 8) {
                 stepRow(index: 1, text: "Откройте настройки звука в Zoom (или Google Meet, Discord и т. д.)")
                 stepRow(index: 2, text: "Микрофон → BlackHole 2ch")
+                stepRow(index: 3, text: "Динамик оставьте свой — Unison слышит звонок напрямую")
             }
         }
     }

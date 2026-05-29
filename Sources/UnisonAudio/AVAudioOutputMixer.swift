@@ -4,6 +4,11 @@ import CoreAudio
 import UnisonDomain
 
 public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
+    /// Diagnostic logger. Without this class logging anything, a silent
+    /// "the translation/original isn't playing on the device I picked"
+    /// failure (typically a misconfigured `outputDeviceUID` or a
+    /// silently-failed `AudioUnitSetProperty` call) is invisible. Mirrors
+    /// to `~/Library/Logs/Unison/unison.log` — see `UnisonLog`.
     private static let log = UnisonLog(category: "AudioOutput")
 
     private let engine = AVAudioEngine()
@@ -63,6 +68,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     }
 
     public func start(deviceUID: String?) async throws {
+        Self.log.info("start(deviceUID=\(deviceUID ?? "<system default>"))")
         if !attached {
             engine.attach(translatedPlayer)
             engine.attach(originalPlayer)
@@ -73,14 +79,25 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         // Assign the requested output device before resolving formats so
         // AVAudioEngine can negotiate the mixer→output connection at the
         // device's native sample rate.
-        if let uid = deviceUID, let deviceID = audioDeviceID(forUID: uid) {
-            var id = deviceID
-            AudioUnitSetProperty(
-                engine.outputNode.audioUnit!,
-                kAudioOutputUnitProperty_CurrentDevice,
-                kAudioUnitScope_Global, 0,
-                &id, UInt32(MemoryLayout<AudioDeviceID>.size)
-            )
+        if let uid = deviceUID {
+            if let deviceID = audioDeviceID(forUID: uid) {
+                var id = deviceID
+                let status = AudioUnitSetProperty(
+                    engine.outputNode.audioUnit!,
+                    kAudioOutputUnitProperty_CurrentDevice,
+                    kAudioUnitScope_Global, 0,
+                    &id, UInt32(MemoryLayout<AudioDeviceID>.size)
+                )
+                if status == noErr {
+                    Self.log.info("start — output device bound to '\(uid)' (id=\(deviceID))")
+                } else {
+                    Self.log.error("start — AudioUnitSetProperty(CurrentDevice → \(uid)) FAILED status=\(status); engine will play to SYSTEM DEFAULT output instead of the user's selection")
+                }
+            } else {
+                Self.log.error("start — audioDeviceID(forUID: \(uid)) returned nil; user-selected device is unreachable, falling back to system default")
+            }
+        } else {
+            Self.log.info("start — no deviceUID set in Settings; using system default output")
         }
 
         // Wiring: translatedPlayer → timePitch → mixer; originalPlayer → mixer.
@@ -97,6 +114,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         do {
             try engine.start()
         } catch {
+            Self.log.error("start — engine.start() threw: \(String(describing: error))")
             throw NSError(
                 domain: "AVAudioOutputMixer",
                 code: -2,
@@ -105,6 +123,8 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         }
         translatedPlayer.play()
         originalPlayer.play()
+        let outFormat = engine.outputNode.outputFormat(forBus: 0)
+        Self.log.info("start — engine running; outputNode format: \(outFormat.sampleRate)Hz × \(outFormat.channelCount)ch; ready to schedule buffers")
 
         // Diagnostic dump: if `UNISON_DUMP_PLAYBACK_WAV=<path>` is set,
         // install a tap on the timePitch output and stream every render

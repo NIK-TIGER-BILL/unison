@@ -34,3 +34,6 @@ Tests/UnisonUITests/__Snapshots__/**/*.failed.png
 
 # Lint tool binaries cached by scripts/lint.sh
 scripts/.bin/
+
+# Claude Code local session lockfile (per-machine state)
+.claude/

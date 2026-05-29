@@ -166,7 +166,8 @@ public final class Composition {
             permissions: permissions,
             deviceRegistry: registry,
             clock: SystemClock(),
-            transformer: ResamplerAdapter()
+            transformer: ResamplerAdapter(),
+            networkMonitor: NetworkMonitor()
         )
 
         let initialSettings = settingsStore.load()

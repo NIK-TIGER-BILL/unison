@@ -1,4 +1,5 @@
 import Foundation
+import UnisonDomain
 
 /// Snapshot of everything we want a user to be able to send when they
 /// file a bug. Built by `DiagnosticCollector` (in `UnisonApp`) and rendered
@@ -28,6 +29,14 @@ public struct DiagnosticInfo: Sendable, Equatable {
     public let blackHole2ch: String
     /// e.g. `"present (length 51)"` or `"empty"` — never the key value.
     public let openAIKeyStatus: String
+    /// Aggregate connectivity health across streams.
+    public let connectivityHealth: ConnectivityHealth
+    /// Per-stream health for the "me" (user's audio) stream. Nil if not active
+    /// (e.g. in .listen mode).
+    public let meStreamHealth: ConnectivityHealth?
+    /// Per-stream health for the "peer" (other participant's audio) stream. Nil
+    /// if not active (e.g. in .test mode).
+    public let peerStreamHealth: ConnectivityHealth?
     /// Most-recent few `SessionState` error transitions, with timestamps.
     /// Empty array is fine — represents "no errors seen recently".
     public let recentErrors: [String]
@@ -46,6 +55,9 @@ public struct DiagnosticInfo: Sendable, Equatable {
         speakerDevice: String? = nil,
         blackHole2ch: String,
         openAIKeyStatus: String,
+        connectivityHealth: ConnectivityHealth = .healthy,
+        meStreamHealth: ConnectivityHealth? = nil,
+        peerStreamHealth: ConnectivityHealth? = nil,
         recentErrors: [String] = [],
         recentLogLines: [String] = [],
         collectedAt: Date = Date()
@@ -58,6 +70,9 @@ public struct DiagnosticInfo: Sendable, Equatable {
         self.speakerDevice = speakerDevice
         self.blackHole2ch = blackHole2ch
         self.openAIKeyStatus = openAIKeyStatus
+        self.connectivityHealth = connectivityHealth
+        self.meStreamHealth = meStreamHealth
+        self.peerStreamHealth = peerStreamHealth
         self.recentErrors = recentErrors
         self.recentLogLines = recentLogLines
         self.collectedAt = collectedAt
@@ -69,13 +84,25 @@ public struct DiagnosticInfo: Sendable, Equatable {
     /// projection of properties — `DiagnosticSheet` renders these
     /// without any further translation.
     public var statusLines: [String] {
-        [
+        var lines = [
             "Сессия: \(sessionState)",
             "Микрофон: \(micDevice ?? "по умолчанию")",
             "Аудио-выход: \(speakerDevice ?? "по умолчанию")",
             "BlackHole 2ch: \(blackHole2ch)",
-            "OpenAI ключ: \(openAIKeyStatus)"
+            "OpenAI ключ: \(openAIKeyStatus)",
+            "Связь: \(connectivityHealth.ruLabel)"
         ]
+        // Per-stream health is the diagnostic surface for the
+        // asymmetric-failure story this PR added — include it in
+        // statusLines so it lands in both the sheet AND the
+        // copy-to-clipboard plaintext (review finding #11).
+        if let me = meStreamHealth {
+            lines.append("  • Моя речь: \(me.ruLabel)")
+        }
+        if let peer = peerStreamHealth {
+            lines.append("  • Собеседник: \(peer.ruLabel)")
+        }
+        return lines
     }
 
     /// Russian-language one-liners for the "Система" section.

@@ -48,3 +48,27 @@ import Testing
     #expect(SessionState.idle.activeMode == nil)
     #expect(SessionState.translating(mode: .listen, startedAt: epochDate(0)).activeMode == .listen)
 }
+
+@Test func sessionState_pausedNetworkLost_isActive() {
+    let started = epochDate(0)
+    let state = SessionState.paused(
+        mode: .call, since: epochDate(10), startedAt: started, reason: .networkLost
+    )
+    #expect(state.isActive == true)
+    #expect(state.activeMode == .call)
+    #expect(state.sessionStartedAt == started)
+}
+
+@Test func sessionState_pausedAwaitingNetwork_carriesStartedAt() {
+    let started = epochDate(-30)
+    let state = SessionState.paused(
+        mode: .listen, since: epochDate(0), startedAt: started, reason: .awaitingNetwork
+    )
+    #expect(state.activeMode == .listen)
+    #expect(state.sessionStartedAt == started)
+}
+
+@Test func pauseReason_equatable() {
+    #expect(PauseReason.networkLost == PauseReason.networkLost)
+    #expect(PauseReason.networkLost != PauseReason.awaitingNetwork)
+}

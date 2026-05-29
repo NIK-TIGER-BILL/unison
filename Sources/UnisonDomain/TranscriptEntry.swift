@@ -10,12 +10,20 @@ public struct TranscriptEntry: Identifiable, Sendable, Equatable {
     public let sourceLanguage: Language?
     public let targetLanguage: Language
     public let timestamp: Date
+    /// True when the orchestrator transitioned through `.paused` /
+    /// `.reconnecting` while this entry was still accumulating
+    /// deltas. Used by `BubbleViewModel.translationLost` to decide
+    /// whether to render the "перевод не получен" placeholder. A
+    /// late-arriving translation delta clears this flag (see
+    /// `TranscriptStore.apply`).
+    public var translationAtRisk: Bool
 
     public init(
         id: UUID, speaker: Speaker,
         originalText: String? = nil, translatedText: String,
         sourceLanguage: Language?, targetLanguage: Language,
-        timestamp: Date
+        timestamp: Date,
+        translationAtRisk: Bool = false
     ) {
         self.id = id
         self.speaker = speaker
@@ -24,6 +32,7 @@ public struct TranscriptEntry: Identifiable, Sendable, Equatable {
         self.sourceLanguage = sourceLanguage
         self.targetLanguage = targetLanguage
         self.timestamp = timestamp
+        self.translationAtRisk = translationAtRisk
     }
 }
 

@@ -103,4 +103,34 @@ struct PopoverViewSnapshotTests {
         let size = CGSize(width: SnapSize.popover.width, height: 480)
         snap(darkFloor(PopoverView(vm: vm), size: size), size: size)
     }
+
+    /// `.translating` + `connectivityHealth == .slow` — the status dot
+    /// flips yellow and a "Медленная сеть" hint replaces the language
+    /// pair label. Mirrors T1-T12 work that wired `ConnectivityHealth`
+    /// into the popover status row.
+    @Test func popover_translatingSlow() throws {
+        let started = Date().addingTimeInterval(-14)
+        let vm = makeVM(state: .translating(mode: .call, startedAt: started))
+        vm.previewConnectivityHealth = .slow
+        snap(darkFloor(PopoverView(vm: vm), size: SnapSize.popover), size: SnapSize.popover)
+    }
+
+    /// `.paused(reason: .networkLost)` — grey dot, "Нет интернета. Ждём…"
+    /// hint. Taller frame matches `popover_reconnecting` so the hint that
+    /// sits past the 420pt cutoff stays in-frame.
+    @Test func popover_pausedNetworkLost() throws {
+        let started = Date().addingTimeInterval(-14)
+        let size = CGSize(width: SnapSize.popover.width, height: 480)
+        let vm = makeVM(state: .paused(mode: .call, since: Date(), startedAt: started, reason: .networkLost))
+        snap(darkFloor(PopoverView(vm: vm), size: size), size: size)
+    }
+
+    /// `.paused(reason: .awaitingNetwork)` — cyan dot, "Возобновляем…"
+    /// hint. Transitional state between network return and WS resume.
+    @Test func popover_pausedAwaitingNetwork() throws {
+        let started = Date().addingTimeInterval(-14)
+        let size = CGSize(width: SnapSize.popover.width, height: 480)
+        let vm = makeVM(state: .paused(mode: .call, since: Date(), startedAt: started, reason: .awaitingNetwork))
+        snap(darkFloor(PopoverView(vm: vm), size: size), size: size)
+    }
 }

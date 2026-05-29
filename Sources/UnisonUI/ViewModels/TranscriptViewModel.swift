@@ -99,14 +99,20 @@ public final class TranscriptViewModel {
         )
     }
 
-    /// Seconds since the orchestrator transitioned to `.translating`. Zero
-    /// while idle / connecting / errored. In snapshot/preview mode the VM
-    /// is constructed without an orchestrator; callers can set
-    /// `previewElapsedSeconds` to drive the pill timer artificially.
+    /// Seconds since the orchestrator first entered `.translating`. The
+    /// timer keeps ticking across `.paused` and `.reconnecting` because
+    /// the orchestrator preserves `sessionStartedAt` across those
+    /// transitions on purpose — snapping to 00:00 on every WS flap
+    /// looks like the session got dropped (review finding #6 — the
+    /// pill timer contradicted the popover header's running counter).
+    /// Zero while idle / connecting / errored. In snapshot/preview
+    /// mode the VM is constructed without an orchestrator; callers
+    /// can set `previewElapsedSeconds` to drive the pill timer
+    /// artificially.
     public var elapsedSeconds: TimeInterval {
         if let override = previewElapsedSeconds { return override }
         guard let orch = orchestrator,
-              case .translating(_, let startedAt) = orch.state else {
+              let startedAt = orch.state.sessionStartedAt else {
             return 0
         }
         return nowProvider().timeIntervalSince(startedAt)
@@ -131,6 +137,82 @@ public final class TranscriptViewModel {
     /// from a real translation session.
     public var isTestMode: Bool {
         orchestrator?.state.activeMode == .test
+    }
+
+    // MARK: - Preview / snapshot overrides
+
+    /// Snapshot-only override for `effectiveState`. Production callers
+    /// leave this `nil` so the orchestrator's `state` is the source of
+    /// truth. Mirrors `PopoverViewModel.previewState` (T11).
+    public var previewState: SessionState?
+
+    /// Snapshot-only override for `connectivityHealth`. Production
+    /// callers leave this at `.healthy`; the orchestrator's value wins
+    /// whenever one is wired. Mirrors `PopoverViewModel`.
+    public var previewConnectivityHealth: ConnectivityHealth = .healthy
+
+    /// State the control pill should reflect — `previewState` if set
+    /// (snapshot tests), otherwise the orchestrator's `state`, falling
+    /// back to `.idle` when no orchestrator is wired.
+    public var effectiveState: SessionState {
+        previewState ?? orchestrator?.state ?? .idle
+    }
+
+    /// Aggregate connectivity health — orchestrator's value when
+    /// wired, otherwise the preview override.
+    public var connectivityHealth: ConnectivityHealth {
+        orchestrator?.connectivityHealth ?? previewConnectivityHealth
+    }
+
+    // MARK: - Control pill status surface
+
+    /// Russian secondary label rendered next to the pill timer. Empty
+    /// string means "no label" — the view collapses the slot entirely
+    /// so we don't reserve horizontal space for nothing.
+    ///
+    /// Wording is shorter than `PopoverViewModel.statusText` because
+    /// the control pill is space-constrained:
+    /// - `.paused(.networkLost)` → "Пауза" (popover says
+    ///   "Нет интернета. Ждём…")
+    /// - `.translating + .recovering` → "" (popover flashes
+    ///   "Связь восстановлена"; the pill omits to avoid flicker)
+    public var pillStatusText: String {
+        switch effectiveState {
+        case .reconnecting:
+            return "Переподключение…"
+        case .paused(_, _, _, .networkLost):
+            return "Пауза"
+        case .paused(_, _, _, .awaitingNetwork):
+            return "Возобновляем…"
+        case .translating:
+            switch connectivityHealth {
+            case .slow: return "Медленная сеть"
+            case .recovering: return ""
+            case .healthy: return ""
+            }
+        case .idle, .connecting, .error:
+            return ""
+        }
+    }
+
+    /// Status-dot kind for the control pill. Mirrors
+    /// `PopoverViewModel.statusDotState` (T11): `.translating` cross-
+    /// references `connectivityHealth` so a slow stream surfaces as a
+    /// warning dot without resetting the elapsed timer.
+    public var pillDotState: StatusDot.State {
+        switch effectiveState {
+        case .idle: return .ready
+        case .connecting: return .active
+        case .reconnecting: return .warn
+        case .paused: return .paused
+        case .error: return .warn
+        case .translating:
+            switch connectivityHealth {
+            case .slow: return .warn
+            case .recovering: return .recovering
+            case .healthy: return .active
+            }
+        }
     }
 
     // MARK: - Mutations
