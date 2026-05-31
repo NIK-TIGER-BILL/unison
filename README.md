@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/images/icon.png" width="132" height="132" alt="Unison app icon">
+
 # Unison
 
 ### Real-time voice translation for video calls

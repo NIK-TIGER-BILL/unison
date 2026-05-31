@@ -24,6 +24,7 @@ case "$TARGET" in
     EXEC_NAME="Unison"
     INFO_PLIST="Resources/Info.plist"
     ENTITLEMENTS="Resources/Unison.entitlements"
+    ICON_FILE="Resources/AppIcon.icns"
     ;;
   tap-benchmark)
     APP_NAME="TapBenchmark"
@@ -31,6 +32,7 @@ case "$TARGET" in
     EXEC_NAME="tap-benchmark"
     INFO_PLIST="Sources/Tools/TapBenchmark/Info.plist"
     ENTITLEMENTS="Sources/Tools/TapBenchmark/tap-benchmark.entitlements"
+    ICON_FILE=""
     ;;
   *)
     echo "Unknown --target: $TARGET (expected: unison | tap-benchmark)" >&2
@@ -58,6 +60,11 @@ mkdir -p "$MACOS" "$RESOURCES"
 
 cp "$EXEC_PATH" "$MACOS/$EXEC_NAME"
 cp "$INFO_PLIST" "$CONTENTS/Info.plist"
+
+# App icon (CFBundleIconFile = "AppIcon" → Contents/Resources/AppIcon.icns).
+if [ -n "${ICON_FILE:-}" ] && [ -f "$ICON_FILE" ]; then
+  cp "$ICON_FILE" "$RESOURCES/AppIcon.icns"
+fi
 
 # Optional Developer ID signing for unison; tap-benchmark always ad-hoc.
 if [ "$TARGET" = "unison" ] && [ "${DEVELOPER_ID:-}" != "" ]; then

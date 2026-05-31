@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg4" x1="0.06" y1="0" x2="0.94" y2="1">
+      <stop offset="0" stop-color="#0EA5E9"/>
+      <stop offset="0.52" stop-color="#14B8A6"/>
+      <stop offset="1" stop-color="#34D399"/>
+    </linearGradient>
+    <radialGradient id="hi4" cx="0.3" cy="0.2" r="0.95">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.5"/>
+      <stop offset="0.45" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="sh4" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="20" stdDeviation="30" flood-color="#063b34" flood-opacity="0.32"/>
+    </filter>
+    <filter id="ls4" x="-60%" y="-60%" width="220%" height="220%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#063b34" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#sh4)">
+    <rect x="72" y="72" width="880" height="880" rx="202" fill="url(#bg4)"/>
+  </g>
+  <rect x="72" y="72" width="880" height="880" rx="202" fill="url(#hi4)"/>
+  <rect x="74" y="74" width="876" height="876" rx="200" fill="none" stroke="#ffffff" stroke-opacity="0.28" stroke-width="3"/>
+
+  <g transform="translate(153.6 142.4) scale(2.8)" fill="none" stroke="#ffffff"
+     stroke-width="12" stroke-linecap="round" stroke-linejoin="round" filter="url(#ls4)">
+    <path d="M82 66L82 146C82 177.5 102.5 198 128 198C153.5 198 174 177.5 174 146L174 66M58 86L58 136M38 102L38 126M198 86L198 136M218 102L218 126"/>
+  </g>
+</svg>
