@@ -19,6 +19,18 @@ import Testing
     #expect(hk?.display == "⌃⌥U")
 }
 
+@Test func hotkeyParser_rejectsShiftOnly() {
+    // A global ⇧U would hijack typing a capital U — shift alone is not
+    // a qualifying modifier.
+    let hk = HotkeyParser.parse(modifiers: [.shift], keyChar: "U")
+    #expect(hk == nil)
+}
+
+@Test func hotkeyParser_acceptsShiftCombinedWithRealModifier() {
+    let hk = HotkeyParser.parse(modifiers: [.shift, .command], keyChar: "U")
+    #expect(hk?.display == "⇧⌘U")
+}
+
 @Test func hotkeyParser_rejectsEscape() {
     let hk = HotkeyParser.parse(modifiers: [.command], keyChar: "escape")
     #expect(hk == nil)
@@ -37,8 +49,8 @@ import Testing
 }
 
 @Test func hotkeyParser_mapsSpaceToOpenBox() {
-    let hk = HotkeyParser.parse(modifiers: [.shift], keyChar: " ")
-    #expect(hk?.display == "⇧␣")
+    let hk = HotkeyParser.parse(modifiers: [.shift, .control], keyChar: " ")
+    #expect(hk?.display == "⌃⇧␣")
 }
 
 @Test func hotkeyParser_mapsArrowKeys() {

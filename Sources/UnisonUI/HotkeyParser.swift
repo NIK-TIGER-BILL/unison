@@ -8,14 +8,16 @@ public enum HotkeyParser {
     /// Try to construct a `Hotkey` from a modifier set and a key character.
     ///
     /// Rules (mirroring the design HTML's `kbd-recorder`):
-    /// - At least one modifier among ⌃ ⌥ ⇧ ⌘ is **required** — bare keys
-    ///   are rejected to avoid accidental swallow of normal typing.
+    /// - At least one modifier among ⌃ ⌥ ⌘ is **required** — bare keys
+    ///   and shift-only combos are rejected to avoid swallowing normal
+    ///   typing (a global ⇧U would hijack every capital U). ⇧ is fine
+    ///   as an *additional* modifier.
     /// - `keyChar` must not be empty. Whitespace-only strings are mapped
     ///   to the `space` glyph.
     /// - Common navigation keys (arrows, return, tab, escape, space) get a
     ///   prettier display glyph.
     public static func parse(modifiers: Set<HotkeyModifier>, keyChar: String) -> Hotkey? {
-        guard !modifiers.isEmpty else { return nil }
+        guard modifiers.contains(where: { $0 != .shift }) else { return nil }
         let trimmed = keyChar.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !keyChar.isEmpty else { return nil }
         // Escape cancels recording — caller treats `nil` as cancel; we

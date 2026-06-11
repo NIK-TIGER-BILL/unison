@@ -72,8 +72,11 @@ let package = Package(
             swiftSettings: langModeV5
         ),
         .testTarget(name: "UnisonDomainTests", dependencies: ["UnisonDomain", "UnisonUI", "UnisonAudio"], swiftSettings: langModeV5),
-        .testTarget(name: "UnisonTranslationTests", dependencies: ["UnisonTranslation"], swiftSettings: langModeV5),
-        .testTarget(name: "UnisonAudioTests", dependencies: ["UnisonAudio"],
+        // Both targets `@testable import UnisonDomain` — the dependency
+        // must be declared, not inherited through same-package search
+        // paths (breaks under explicit-target-dependency checking).
+        .testTarget(name: "UnisonTranslationTests", dependencies: ["UnisonTranslation", "UnisonDomain"], swiftSettings: langModeV5),
+        .testTarget(name: "UnisonAudioTests", dependencies: ["UnisonAudio", "UnisonDomain"],
                     resources: [.copy("Fixtures")], swiftSettings: langModeV5),
         .testTarget(name: "UnisonSystemTests", dependencies: ["UnisonSystem", "UnisonDomain"], swiftSettings: langModeV5),
         .testTarget(

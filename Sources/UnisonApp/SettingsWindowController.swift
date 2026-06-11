@@ -13,15 +13,25 @@ public final class SettingsWindowController {
     private var window: NSWindow?
     private let viewModel: SettingsViewModel
     private let onRecordHotkey: (HotkeyKind) -> Void
+    private let onCancelRecordHotkey: () -> Void
     private let onOpenURL: (URL) -> Void
+    /// Fired when the user closes the Settings window. AppDelegate
+    /// hooks this to cancel an in-flight hotkey recording — without
+    /// it, the recording monitor keeps swallowing modifier-less
+    /// typing app-wide and the next combo pressed anywhere becomes
+    /// the new hotkey.
+    public var onClose: () -> Void = {}
+    private var closeObserver: NSObjectProtocol?
 
     public init(
         viewModel: SettingsViewModel,
         onRecordHotkey: @escaping (HotkeyKind) -> Void = { _ in },
+        onCancelRecordHotkey: @escaping () -> Void = {},
         onOpenURL: @escaping (URL) -> Void = { url in NSWorkspace.shared.open(url) }
     ) {
         self.viewModel = viewModel
         self.onRecordHotkey = onRecordHotkey
+        self.onCancelRecordHotkey = onCancelRecordHotkey
         self.onOpenURL = onOpenURL
     }
 
@@ -48,7 +58,8 @@ public final class SettingsWindowController {
             let root = SettingsView(
                 vm: viewModel,
                 onOpenURL: onOpenURL,
-                onRecordHotkey: onRecordHotkey
+                onRecordHotkey: onRecordHotkey,
+                onCancelRecordHotkey: onCancelRecordHotkey
             )
             // 10pt matches the system corner radius of `.titled` windows.
             w.contentViewController = GlassHostingViewController(
@@ -59,6 +70,18 @@ public final class SettingsWindowController {
             w.setContentSize(NSSize(width: 560, height: 620))
             w.center()
             window = w
+            closeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: w,
+                queue: .main
+            ) { [weak self] _ in
+                // Notification block-observers aren't actor-isolated;
+                // queue .main + assumeIsolated keeps `onClose` on the
+                // MainActor without an async hop.
+                MainActor.assumeIsolated {
+                    self?.onClose()
+                }
+            }
         }
         // CoreAudio change events feed the VM live, but a stale
         // snapshot can survive an unplug if the window was closed

@@ -118,9 +118,15 @@ The script:
 1. Boots the VM (or attaches to a running one)
 2. Builds `build/TapBenchmark.app` on the host via `bundle_app.sh --target tap-benchmark`
 3. Pushes the bundle into the VM
-4. Installs or removes BlackHole 16ch per `--scenario` (for comparative testing only)
-5. Pre-grants TCC audio capture for `com.unison.tapbench`
-6. Runs the benchmark over SSH (`--silent` so the click train isn't audible)
+4. Configures the scenario: `without-blackhole` removes the BlackHole 16ch
+   driver (then kickstarts coreaudiod); `with-blackhole` only warns if the
+   driver is missing — the script never installs it (the benchmark then
+   skips the BlackHole phase)
+5. Resets TCC Microphone / AudioCapture decisions for `com.unison.tapbench`
+   so the capture prompt state is clean
+6. Runs the benchmark over SSH inside the console user's session
+   (`launchctl asuser`), output captured to a log file — the click train
+   is audible in the VM
 7. Pulls the JSON report back to `vm-tap-benchmark/results-<unix-ts>.json`
 
 VM uses a virtio audio device; absolute latency may differ from host

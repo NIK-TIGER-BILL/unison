@@ -59,19 +59,36 @@ public func snap<V: View>(
     let url = snapshotURL(file: file, test: test, named: name)
     let mode = SnapshotRecordMode.current
 
+    // A failed render must never become a reference or a silent pass.
+    guard !bitmap.isEmpty else {
+        Issue.record("Snapshot render produced no image data for \(url.lastPathComponent) — bitmap rep or PNG encode failed.")
+        return
+    }
+
     let fm = FileManager.default
     try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
 
     switch mode {
     case .all:
-        try? bitmap.write(to: url)
-    case .missing:
-        if !fm.fileExists(atPath: url.path) {
-            try? bitmap.write(to: url)
-            return // First run — recording, no diff to perform.
+        do {
+            try bitmap.write(to: url)
+            // Record mode is for refreshing references, not for proving
+            // anything — fail loudly so a leaked RECORD_SNAPSHOTS=1
+            // (especially on CI) can't turn the whole suite green.
+            Issue.record("Recorded \(url.lastPathComponent) (RECORD_SNAPSHOTS=1). Re-run without the flag to verify.")
+        } catch {
+            Issue.record("Failed to record snapshot \(url.lastPathComponent): \(error)")
         }
-        guard let existing = try? Data(contentsOf: url) else {
+    case .missing:
+        guard fm.fileExists(atPath: url.path), let existing = try? Data(contentsOf: url) else {
+            // Auto-recording a missing reference and passing would make
+            // every new/renamed test vacuously green (and on CI the
+            // recorded file is discarded, so it would assert nothing
+            // forever). Record the candidate, but fail the run.
             try? bitmap.write(to: url)
+            Issue.record(
+                "No reference snapshot for \(url.lastPathComponent) — recorded a new one. Inspect and commit it, then re-run."
+            )
             return
         }
         if !imagesMatch(existing, bitmap, perceptualPrecision: 0.96) {
@@ -113,8 +130,33 @@ private func renderToPNG<V: View>(view: V, size: CGSize) -> Data {
         return Data()
     }
     host.cacheDisplay(in: host.bounds, to: rep)
-    let image = NSImage(size: host.bounds.size)
-    image.addRepresentation(rep)
+
+    // Pin the output to 1x. `bitmapImageRepForCachingDisplay` renders at
+    // the offscreen window's backing scale (inherited from the main
+    // screen), but all committed references are 1x — on a Retina-main
+    // machine every render would come out 2x and fail the size guard
+    // wholesale. On 1x machines this branch is a no-op, so existing
+    // references stay bit-identical.
+    let wantW = Int(size.width)
+    let wantH = Int(size.height)
+    if rep.pixelsWide != wantW || rep.pixelsHigh != wantH, let cg = rep.cgImage {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        if let ctx = CGContext(
+            data: nil, width: wantW, height: wantH, bitsPerComponent: 8,
+            bytesPerRow: wantW * 4, space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) {
+            ctx.interpolationQuality = .high
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: wantW, height: wantH))
+            if let scaled = ctx.makeImage() {
+                let scaledRep = NSBitmapImageRep(cgImage: scaled)
+                scaledRep.size = size
+                return scaledRep.representation(using: .png, properties: [:]) ?? Data()
+            }
+        }
+        return Data()
+    }
+
     guard let png = rep.representation(using: .png, properties: [:]) else {
         return Data()
     }

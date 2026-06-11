@@ -17,15 +17,22 @@ public struct SettingsView: View {
 
     let onOpenURL: (URL) -> Void
     let onRecordHotkey: (HotkeyKind) -> Void
+    /// Fired when the user cancels an in-flight hotkey recording from
+    /// the UI (clicking the recording chip again). The host must tear
+    /// down its NSEvent monitor — clearing only the VM state would
+    /// leave the monitor swallowing keystrokes app-wide.
+    let onCancelRecordHotkey: () -> Void
 
     public init(
         vm: SettingsViewModel,
         onOpenURL: @escaping (URL) -> Void = { _ in },
-        onRecordHotkey: @escaping (HotkeyKind) -> Void = { _ in }
+        onRecordHotkey: @escaping (HotkeyKind) -> Void = { _ in },
+        onCancelRecordHotkey: @escaping () -> Void = {}
     ) {
         self.vm = vm
         self.onOpenURL = onOpenURL
         self.onRecordHotkey = onRecordHotkey
+        self.onCancelRecordHotkey = onCancelRecordHotkey
     }
 
     /// `Picker` needs a non-optional tag — reserve empty string as
@@ -171,7 +178,7 @@ public struct SettingsView: View {
                         in: 0...1
                     )
                     .frame(width: 140)
-                    Text("\(Int(vm.settings.originalMixVolume * 100))%")
+                    Text("\(Int((vm.settings.originalMixVolume * 100).rounded()))%")
                         .font(UnisonFonts.mono(11))
                         .tracking(0.44)
                         .foregroundStyle(.secondary)
@@ -252,8 +259,7 @@ public struct SettingsView: View {
                     text: Binding(
                         get: { vm.apiKey },
                         set: { vm.updateApiKey($0) }
-                    ),
-                    isVisible: $vm.apiKeyVisible
+                    )
                 )
                 .frame(maxWidth: .infinity)
                 HStack(spacing: 6) {
@@ -287,6 +293,7 @@ public struct SettingsView: View {
                                 vm.beginRecordingHotkey(.startStop)
                             } else {
                                 vm.cancelRecordingHotkey()
+                                onCancelRecordHotkey()
                             }
                         }
                     ),
@@ -306,6 +313,7 @@ public struct SettingsView: View {
                                 vm.beginRecordingHotkey(.showTranscript)
                             } else {
                                 vm.cancelRecordingHotkey()
+                                onCancelRecordHotkey()
                             }
                         }
                     ),
@@ -429,9 +437,9 @@ public struct SettingsView: View {
 
 private struct SecretInputBound: View {
     @Binding var text: String
-    @Binding var isVisible: Bool
 
     var body: some View {
+        // Show/hide toggle lives inside `SecretInput` (internal state).
         SecretInput(text: $text, placeholder: "sk-proj-…")
     }
 }

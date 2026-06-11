@@ -79,10 +79,13 @@ panel is hit-test transparent
 
 ## Debug / harness env vars
 
-`UNISON_FORCE_STATE` (parsed once at launch by `Composition`):
+`UNISON_FORCE_STATE` (read via `UnisonForceState.current` — a computed
+property re-read on each access; same-process env is immutable, so
+effectively launch-constant):
 
 - `onboarding-done` / `transcript-demo` — Process Tap audio capture
   preseeded, keychain preseeded, mocked permissions
+- `settings-open` — opens the Settings window at launch
 - `popover-open` — opens the popover at launch and disables
   auto-dismiss; used by the Tart screenshot harness
 - `start-translation` / `start-stop-start` — drives integration tests

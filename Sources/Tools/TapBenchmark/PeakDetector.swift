@@ -14,7 +14,7 @@ public struct PeakDetector {
         while i < buffer.count {
             if abs(buffer[i]) >= threshold {
                 peaks.append(i)
-                i = i + refractorySamples
+                i += refractorySamples
             } else {
                 i += 1
             }

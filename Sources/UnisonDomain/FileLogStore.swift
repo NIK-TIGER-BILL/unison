@@ -51,9 +51,11 @@ public final class FileLogStore: @unchecked Sendable {
     /// SSH or a `cat` for the integration test pulls quickly, and so
     /// the I/O cost of the rotate itself stays bounded.
     public let maxFileBytes: Int
-    /// How many archival files to keep including the live one. With
-    /// `5 × 2MB` we retain roughly the last 10 MB of activity — enough
-    /// for several start/stop cycles plus a long meeting.
+    /// How many rotated archives to keep IN ADDITION to the live file
+    /// (the rotation test codifies `maxFiles + 1` files on disk). With
+    /// `5 × 2MB` archives plus the live file we retain up to ~12 MB of
+    /// activity — enough for several start/stop cycles plus a long
+    /// meeting.
     public let maxFiles: Int
 
     /// I/O serial queue. Marked `userInitiated` so log writes don't

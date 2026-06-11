@@ -194,6 +194,47 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
     #expect(o.state.errorValue == .apiKeyInvalid)
 }
 
+@Test @MainActor func orchestrator_meConnectFailure_tearsDownAlreadyWiredPeerSide() async throws {
+    // In `.call` mode the peer stream connects and wires BEFORE the me
+    // stream. If me.connect fails, the orchestrator must tear the peer
+    // side (and captures/mixer) down — otherwise audio keeps streaming
+    // to OpenAI behind a terminal `.error` state, with no way to stop
+    // it from the UI (`start()` requires `.idle`).
+    final class MeFailsFactory: TranslationStreamFactory, @unchecked Sendable {
+        let peerStream = MockTranslationStream(speaker: .peer)
+        func make(speaker: Speaker) -> any TranslationStream {
+            switch speaker {
+            case .peer: return peerStream
+            case .me:
+                let s = MockTranslationStream(speaker: .me)
+                s.connectError = TranslationError.apiKeyInvalid
+                return s
+            }
+        }
+    }
+    let factory = MeFailsFactory()
+    let peerCapture = MockPeerAudioCapture()
+    let mixer = MockAudioOutputMixer()
+    let o2 = TranslationOrchestrator(
+        micCapture: MockMicrophoneCapture(),
+        peerCapture: peerCapture,
+        outputMixer: mixer,
+        virtualMicPlayer: MockAudioPlayer(),
+        translationFactory: factory,
+        permissions: defaultPerms(),
+        deviceRegistry: defaultRegistry(),
+        clock: SystemClock(),
+        transformer: MockAudioFormatTransformer(),
+        networkMonitor: MockNetworkPathMonitor(initial: .satisfied)
+    )
+    await o2.start(mode: .call, languages: .default)
+
+    #expect(o2.state.errorValue == .apiKeyInvalid)
+    #expect(factory.peerStream.closeCalls >= 1, "Peer stream must be closed when me.connect fails mid-start")
+    #expect(peerCapture.stopCalls >= 1, "Peer capture must be stopped when start() fails midway")
+    #expect(mixer.stopCalls >= 1, "Output mixer must be stopped when start() fails midway")
+}
+
 @Test @MainActor func orchestrator_initialConnectFailure_genericError_mapsToNetworkLost() async {
     // A non-TranslationError thrown from connect should map to .networkLost.
     struct GenericError: Error {}
@@ -260,28 +301,44 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
 }
 
 @Test @MainActor func orchestrator_rateLimited_usesRetryAfterAsFirstDelay() async throws {
-    // When the failure is .rateLimited(retryAfter: X), the orchestrator should
-    // use X as the first backoff delay instead of BackoffPolicy's initial.
-    // We can't easily observe the delay value itself (it's consumed by clock.sleep
-    // internally), but we can confirm the path was taken by checking that the
-    // orchestrator enters .reconnecting.
+    // When the failure is .rateLimited(retryAfter: 7), the orchestrator must
+    // use 7 s as the first backoff delay instead of BackoffPolicy's initial
+    // (1 s). Observable via FakeClock: just before the 7 s mark no fresh
+    // stream may exist; once virtual time crosses 7 s the retry fires and
+    // builds one.
     let fakeClock = FakeClock(now: epochDate(0))
     let factory = MockTranslationStreamFactory()
     let o = makeOrchestrator(factory: factory, clock: fakeClock)
     await o.start(mode: .call, languages: .default)
+    let originalPeer = factory.streams[.peer]
 
     factory.streams[.peer]?.emitConnectionState(.failed(.rateLimited(retryAfter: 7), receivedAnyData: true))
-
-    for _ in 0..<20 {
+    for _ in 0..<50 {
         try await Task.sleep(nanoseconds: 10_000_000)
         if case .reconnecting = o.state { break }
     }
-
-    if case .reconnecting = o.state {
-        #expect(true)
-    } else {
+    guard case .reconnecting = o.state else {
         Issue.record("Expected .reconnecting after rateLimited failure, got \(o.state)")
+        return
     }
+    // Let the retry task park on clock.sleep(7) before advancing.
+    try await Task.sleep(nanoseconds: 100_000_000)
+
+    // 6.9 s — BackoffPolicy's 1 s initial would already have fired; the
+    // retry-after path must still be waiting.
+    fakeClock.advance(by: 6.9)
+    try await Task.sleep(nanoseconds: 100_000_000)
+    #expect(factory.streams[.peer] === originalPeer,
+            "Retry fired before retryAfter elapsed — BackoffPolicy initial was used instead of retry-after")
+
+    // Crossing 7 s releases the retry → fresh stream + recovery.
+    fakeClock.advance(by: 0.2)
+    for _ in 0..<50 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if factory.streams[.peer] !== originalPeer { break }
+    }
+    #expect(factory.streams[.peer] !== originalPeer,
+            "Retry must fire once virtual time crosses the retryAfter deadline")
 }
 
 @Test @MainActor func orchestrator_reconnect_closesPreviousStream() async throws {
@@ -306,6 +363,60 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
     }
 
     #expect(originalPeer.closeCalls >= 1, "Original peer stream should have been closed during reconnect")
+}
+
+/// Cancellation-AWARE test clock: like the production `SystemClock`, its
+/// `sleep` rides `Task.sleep` and therefore throws `CancellationError`
+/// on a cancelled task — but compresses time (1 virtual second = 20 real
+/// milliseconds) so backoff delays and watchdog deadlines keep their
+/// relative order without slowing the suite. The other mock clocks ignore
+/// cancellation entirely, which is how the reconnect-retry-loop
+/// self-cancellation bug stayed invisible to them.
+final class ScaledRealClock: Clock, @unchecked Sendable {
+    func now() -> Date { Date() }
+    func sleep(for seconds: TimeInterval) async throws {
+        try await Task.sleep(nanoseconds: UInt64(seconds * 20_000_000)) // 1s → 20ms
+    }
+}
+
+@Test @MainActor func orchestrator_midSessionFailure_retriesAndRecovers_underCancellationAwareClock() async throws {
+    // Production regression guard: `handleStreamFailure` cancels the failed
+    // speaker's pipeline tasks — including the observer task it used to run
+    // its retry loop on. With a cancellation-aware clock (= production
+    // SystemClock behaviour) the first backoff sleep then threw
+    // CancellationError and the session never reconnected, riding the
+    // 15 s watchdog into terminal `.error(.networkLost)` on every WS flap.
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: ScaledRealClock())
+    await o.start(mode: .call, languages: .default)
+    guard case .translating = o.state else {
+        Issue.record("Expected .translating after start, got \(o.state)")
+        return
+    }
+    // Disarm the no-data watchdog (20 virtual s = 400 real ms here) so it
+    // can't race the recovery assertion on a slow machine.
+    factory.streams[.peer]?.emitTranscript(
+        TranscriptDelta(entryId: UUID(), speaker: .peer, kind: .original, text: "привет", isFinal: false)
+    )
+    try await Task.sleep(nanoseconds: 20_000_000)
+
+    let originalPeer = factory.streams[.peer]
+    originalPeer?.emitConnectionState(.failed(.networkLost, receivedAnyData: true))
+
+    // First backoff delay = 1 virtual s = 20 real ms; the reconnect
+    // watchdog = 15 virtual s = 300 real ms. Poll up to 2 s for recovery.
+    let deadline = Date().addingTimeInterval(2.0)
+    while Date() < deadline {
+        if case .translating = o.state, factory.streams[.peer] !== originalPeer { break }
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+
+    guard case .translating = o.state else {
+        Issue.record("Retry loop must bring the session back to .translating (did it run on a cancelled task?); got \(o.state)")
+        return
+    }
+    #expect(factory.streams[.peer] !== originalPeer, "Reconnect must build a fresh peer stream via the factory")
+    await o.stop()
 }
 
 @Test @MainActor func orchestrator_terminalErrorMidSession_setsErrorWithoutReconnect() async throws {
@@ -365,11 +476,10 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
     registry.notifyDeviceChange()
     try await Task.sleep(nanoseconds: 100_000_000)
 
-    // State should still be .translating (soft fallback)
-    if case .translating = o.state {
-        #expect(true)
-    } else {
-        Issue.record("Expected .translating, got \(o.state)")
+    // The soft fallback must not interrupt the session.
+    guard case .translating = o.state else {
+        Issue.record("Input-device loss must soft-fallback, not interrupt: expected .translating, got \(o.state)")
+        return
     }
 }
 
@@ -835,14 +945,77 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
     #expect(store.entries.first?.translationAtRisk == false, "Non-empty translated delta must clear the flag")
 }
 
+/// Stream whose `connect()` parks until the test releases it — lets a
+/// test freeze the orchestrator mid-resume deterministically instead of
+/// racing real-time sleeps against the resume pipeline.
+final class GatedConnectStream: TranslationStream, @unchecked Sendable {
+    let transcripts: AsyncStream<TranscriptDelta> = AsyncStream { _ in }
+    let output: AsyncStream<AudioFrame> = AsyncStream { _ in }
+    let connectionState: AsyncStream<ConnectionState> = AsyncStream { _ in }
+    private let lock = NSLock()
+    private var gate: CheckedContinuation<Void, Never>?
+    private var _closeCalls = 0
+    var closeCalls: Int {
+        lock.lock(); defer { lock.unlock() }
+        return _closeCalls
+    }
+
+    func connect(target: Language) async throws {
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            lock.lock(); gate = c; lock.unlock()
+        }
+    }
+
+    func releaseConnect() {
+        lock.lock(); let g = gate; gate = nil; lock.unlock()
+        g?.resume()
+    }
+
+    func send(_ frame: AudioFrame) async {}
+    func close() async { recordClose() }
+    private func recordClose() {
+        lock.lock(); _closeCalls += 1; lock.unlock()
+    }
+}
+
+/// Factory that switches from normal mock streams to gated ones on demand.
+final class GateSwitchFactory: TranslationStreamFactory, @unchecked Sendable {
+    let normal = MockTranslationStreamFactory()
+    var gateNext = false
+    private(set) var gated: [GatedConnectStream] = []
+    func make(speaker: Speaker) -> any TranslationStream {
+        if gateNext {
+            let s = GatedConnectStream()
+            gated.append(s)
+            return s
+        }
+        return normal.make(speaker: speaker)
+    }
+}
+
 /// Iter-2 #1: a network drop arriving while resume is in flight
 /// (state == `.paused(.awaitingNetwork)`) must re-enter `.networkLost`
 /// so the resumeStreams reentrancy guard observes the state change
-/// and aborts the half-resumed pipeline.
+/// and aborts the half-resumed pipeline. The resume is FROZEN inside
+/// `connect()` via a gated stream, so the drop deterministically lands
+/// mid-resume — the earlier version raced real-time sleeps and passed
+/// even with the regression present (the tolerated `.translating`
+/// branch was exactly the regression's outcome).
 @Test @MainActor func orchestrator_dropDuringResume_transitionsBackToNetworkLost() async throws {
     let netMon = MockNetworkPathMonitor(initial: .satisfied)
-    let factory = MockTranslationStreamFactory()
-    let o = makeOrchestrator(factory: factory, networkMonitor: netMon)
+    let factory = GateSwitchFactory()
+    let o = TranslationOrchestrator(
+        micCapture: MockMicrophoneCapture(),
+        peerCapture: MockPeerAudioCapture(),
+        outputMixer: MockAudioOutputMixer(),
+        virtualMicPlayer: MockAudioPlayer(),
+        translationFactory: factory,
+        permissions: defaultPerms(),
+        deviceRegistry: defaultRegistry(),
+        clock: SystemClock(),
+        transformer: MockAudioFormatTransformer(),
+        networkMonitor: netMon
+    )
     await o.start(mode: .test, languages: .default)
     try? await Task.sleep(nanoseconds: 50_000_000)
 
@@ -853,25 +1026,45 @@ final class FailingMockFactory: TranslationStreamFactory, @unchecked Sendable {
         return
     }
 
-    // Network recovers — resume starts, transitioning to .awaitingNetwork
-    // before / between connect awaits.
+    // Resume — the fresh me-stream's connect() parks on the gate, so the
+    // orchestrator is reliably stuck in `.paused(.awaitingNetwork)`.
+    factory.gateNext = true
     netMon.simulate(.satisfied)
-    try? await Task.sleep(nanoseconds: 50_000_000)
+    for _ in 0..<100 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if !factory.gated.isEmpty { break }
+    }
+    guard let gatedStream = factory.gated.first else {
+        Issue.record("Resume never reached connect() — gated stream missing")
+        return
+    }
+    guard case .paused(_, _, _, .awaitingNetwork) = o.state else {
+        Issue.record("Expected .paused(.awaitingNetwork) mid-resume, got \(o.state)")
+        return
+    }
 
-    // Drop again immediately — the orchestrator must observe this
-    // and re-enter .networkLost (rather than silently no-op'ing
-    // because the state matches `.paused`).
+    // Drop arrives while resume is parked — must flip back to
+    // `.networkLost`, NOT silently no-op because the state already
+    // matches `.paused`.
     netMon.simulate(.unsatisfied)
-    try? await Task.sleep(nanoseconds: 300_000_000)
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    guard case .paused(_, _, _, .networkLost) = o.state else {
+        Issue.record("Mid-resume drop was swallowed: expected .paused(.networkLost), got \(o.state)")
+        return
+    }
 
+    // Release the parked connect — the resume's reentrancy guard must
+    // observe the state change, abort, and close the half-connected
+    // stream instead of wiring it into a phantom `.translating`.
+    gatedStream.releaseConnect()
+    for _ in 0..<100 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if gatedStream.closeCalls >= 1 { break }
+    }
+    #expect(gatedStream.closeCalls >= 1, "Aborted resume must close the half-connected stream")
     if case .paused(_, _, _, .networkLost) = o.state {
-        // ok
-    } else if case .translating = o.state {
-        // Tolerated: the resume completed before the second simulate
-        // landed. The test's stricter assertion is the next branch.
-    } else if case .error(.networkLost) = o.state {
-        // Tolerated: pauseRecoveryWatchdog won the race.
+        // Still paused on the dead network — correct.
     } else {
-        Issue.record("Expected .paused(.networkLost) (or transient .translating/.error after race), got \(o.state)")
+        Issue.record("State must remain .paused(.networkLost) after aborted resume, got \(o.state)")
     }
 }

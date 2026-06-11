@@ -216,9 +216,11 @@ public final class Composition {
         // group's `liveEntryId` is always nil → the animated dots that
         // mark "this bubble is still being received" never appear in
         // production, even though the unit tests + design call for it.
+        // Weak capture: the VM holds the store strongly, so a strong
+        // capture here would create a store ↔ VM retain cycle.
         let transcriptVMRef = self.transcriptVM
-        orchestrator.transcript.onDeltaApplied = { entryId in
-            transcriptVMRef.extendLive(entryId: entryId)
+        orchestrator.transcript.onDeltaApplied = { [weak transcriptVMRef] entryId in
+            transcriptVMRef?.extendLive(entryId: entryId)
         }
         // Project the persisted original-mix volume into the transcript VM
         // so the popover slider opens at the saved value. The VM stores it
@@ -226,14 +228,7 @@ public final class Composition {
         self.transcriptVM.originalVolume = Int(
             (initialSettings.originalMixVolume * 100).rounded()
         )
-        // Persist volume changes back to Settings whenever the user moves
-        // the slider in the transcript settings popover. The settings VM
-        // exposes the canonical mutation — calling it triggers `onChange`
-        // which writes to the SettingsStore.
-        let settingsVMRef = self.settingsVM
-        self.transcriptVM.onOriginalVolumeChanged = { volume in
-            settingsVMRef.setOriginalMixVolume(volume)
-        }
+        wireCrossSurfaceSync()
 
         // Refresh both view-models when CoreAudio reports the hardware
         // roster changed. Without this the input/output pickers stayed
@@ -244,6 +239,7 @@ public final class Composition {
         // DispatchQueue, so hop to MainActor before touching the
         // @Observable view-models.
         let popVMForRefresh = self.popoverVM
+        let settingsVMRef = self.settingsVM
         registry.onDeviceListChanged = { [weak settingsVMRef, weak popVMForRefresh] in
             Task { @MainActor in
                 settingsVMRef?.refreshDeviceList()
@@ -272,6 +268,40 @@ public final class Composition {
                 store: self.orchestrator.transcript,
                 viewModel: self.transcriptVM
             )
+        }
+    }
+
+    /// Cross-surface synchronisation between the three view-models.
+    /// Kept out of `init` so the composition root reads as construct →
+    /// wire, and each closure documents the bug its absence caused.
+    private func wireCrossSurfaceSync() {
+        // Persist volume changes back to Settings whenever the user moves
+        // the slider in the transcript settings popover. The settings VM
+        // exposes the canonical mutation — calling it triggers `onChange`
+        // which writes to the SettingsStore.
+        let settingsVMRef = self.settingsVM
+        self.transcriptVM.onOriginalVolumeChanged = { volume in
+            settingsVMRef.setOriginalMixVolume(volume)
+        }
+        // …and the reverse: moving the Settings-window slider keeps the
+        // transcript popover's percentage in sync (display only — the
+        // engine gain already flows through `onChange`). Without this,
+        // the popover showed a stale value until reopened.
+        let transcriptVMForVolume = self.transcriptVM
+        self.settingsVM.onOriginalMixVolumeChanged = { [weak transcriptVMForVolume] v in
+            transcriptVMForVolume?.originalVolume = Int((v * 100).rounded())
+        }
+        // Persist popover-side picks (language pair / Call-Listen mode)
+        // through the same canonical settings pipeline the window uses.
+        // Previously the popover mutated its own in-memory copy: picks
+        // were lost on restart and reverted by the next Settings save.
+        self.popoverVM.onSettingsChanged = { [weak settingsVMRef] s in
+            settingsVMRef?.adoptExternalSettings(s)
+        }
+        // «Запускать при логине» → SMAppService. The toggle used to be
+        // pure UI theater (persisted a bool nobody read).
+        self.settingsVM.onAutostartChanged = { enabled in
+            LoginItemService.apply(enabled)
         }
     }
 }
@@ -343,16 +373,14 @@ extension Composition {
         if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen {
             return InMemoryKeychain(seeded: "sk-unison-vm-screenshot-placeholder-key")
         }
-        // `startTranslation` and `startStopStart` run the *real*
+        // Everything else — production launches AND the
+        // `startTranslation` / `startStopStart` integration states —
+        // uses the real `MacKeychain`: those states run the *real*
         // translation pipeline, so they need a real OpenAI key. The
         // integration script pre-seeds the macOS keychain via
         // `security add-generic-password` before launching, so the
-        // production `MacKeychain` resolves correctly. Falling back here
-        // to `MacKeychain` (no seed) makes the auth-failed path
-        // observable when the key is missing/revoked.
-        if force == .startTranslation || force == .startStopStart {
-            return MacKeychain()
-        }
+        // production `MacKeychain` resolves correctly; a missing or
+        // revoked key keeps the auth-failed path observable.
         return MacKeychain()
     }
 

@@ -28,6 +28,10 @@ set -euo pipefail
 VM_NAME="${VM_NAME:-unison-test}"
 VM_USER="${VM_USER:-admin}"
 VM_PASS="${VM_PASS:-admin}"
+# Shell-quoted form for embedding in remote command lines — bare
+# interpolation would let quotes/spaces in the password break out of
+# (or inject into) the remote shell command.
+Q_VM_PASS="$(printf '%q' "$VM_PASS")"
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR)
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PATH="$REPO_DIR/build/Unison.app"
@@ -68,6 +72,8 @@ if [ -z "${OPENAI_KEY:-}" ]; then
   err "or to a known-bad string to exercise the .apiKeyInvalid surface."
   exit 2
 fi
+# Shell-quoted form for embedding in remote command lines (see Q_VM_PASS).
+Q_OPENAI_KEY="$(printf '%q' "$OPENAI_KEY")"
 if [ ! -f "$TEST_AUDIO" ]; then
   warn "Missing $TEST_AUDIO — regenerating via scripts/gen_test_speech_wav.sh"
   bash "$REPO_DIR/scripts/gen_test_speech_wav.sh"
@@ -81,9 +87,21 @@ fi
 
 # --- 2. Boot the VM if not already running -----------------------------------
 start_vm_if_needed() {
-  if tart_ip="$(tart ip "$VM_NAME" 2>/dev/null)" && [ -n "${tart_ip:-}" ]; then
-    log "VM \"$VM_NAME\" already running at $tart_ip"
-    return 0
+  # `tart ip` returns the last-known IP even when the VM is stopped, so we
+  # can't trust it alone — check the actual VM state from `tart list`.
+  local state
+  state="$(tart list --format json 2>/dev/null \
+            | python3 -c 'import json,sys
+for vm in json.load(sys.stdin):
+    if vm.get("Name")=="'"$VM_NAME"'":
+        print(vm.get("State","unknown")); break' 2>/dev/null || echo unknown)"
+  if [ "$state" = "running" ]; then
+    local tart_ip
+    tart_ip="$(tart ip "$VM_NAME" 2>/dev/null || true)"
+    if [ -n "$tart_ip" ]; then
+      log "VM \"$VM_NAME\" already running at $tart_ip"
+      return 0
+    fi
   fi
   log "Starting VM \"$VM_NAME\" in background (graphics mode)…"
   nohup tart run "$VM_NAME" >/tmp/vm-integ.log 2>&1 &
@@ -152,11 +170,14 @@ log "Seeding OpenAI API key into VM keychain…"
 #     unlock state from the *previous* call doesn't carry over. So we
 #     bundle delete + unlock + add into a single SSH session via a
 #     here-doc-style heredoc.
+# Secrets are embedded via their printf-%q forms (host-side expansion,
+# remote interpreter is explicitly bash) so quotes/spaces in the values
+# can't break out of the remote command line.
 ssh_vm bash <<EOF
 set -e
 security delete-generic-password -s com.unison.app -a openai-api-key /Users/$VM_USER/Library/Keychains/login.keychain-db >/dev/null 2>&1 || true
-security unlock-keychain -p '$VM_PASS' /Users/$VM_USER/Library/Keychains/login.keychain-db >/dev/null
-security add-generic-password -A -s com.unison.app -a openai-api-key -w '$OPENAI_KEY' /Users/$VM_USER/Library/Keychains/login.keychain-db
+security unlock-keychain -p $Q_VM_PASS /Users/$VM_USER/Library/Keychains/login.keychain-db >/dev/null
+security add-generic-password -A -s com.unison.app -a openai-api-key -w $Q_OPENAI_KEY /Users/$VM_USER/Library/Keychains/login.keychain-db
 echo "keychain seed ok"
 EOF
 
@@ -179,7 +200,7 @@ ssh_vm "
     UNISON_DEV_MODE=1 \
     UNISON_FORCE_STATE=$FORCE_STATE \
     UNISON_TEST_AUDIO=/Users/$VM_USER/test_speech_ru.wav \
-    UNISON_API_KEY='$OPENAI_KEY' \
+    UNISON_API_KEY=$Q_OPENAI_KEY \
     UNISON_DUMP_OUTPUT_WAV=/tmp/unison_output.wav \
     UNISON_MOCK_PERMISSION_GRANTED=microphone \
     /Users/$VM_USER/Unison.app/Contents/MacOS/Unison >/tmp/unison.log 2>&1 &

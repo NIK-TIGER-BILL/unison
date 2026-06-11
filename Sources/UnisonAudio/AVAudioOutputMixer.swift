@@ -167,11 +167,11 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         }
         // Placeholder WAV header (data chunk size = 0xFFFF_FFFF until stop()
         // patches it). 48 kHz mono float32 PCM.
-        handle.write(Self.buildWAVHeader(sampleRate: 48_000,
-                                         channels: 1,
-                                         bitsPerSample: 32,
-                                         isFloat: true,
-                                         dataSize: 0xFFFF_FFFF))
+        try? handle.write(contentsOf: Self.buildWAVHeader(sampleRate: 48_000,
+                                                          channels: 1,
+                                                          bitsPerSample: 32,
+                                                          isFloat: true,
+                                                          dataSize: 0xFFFF_FFFF))
         dumpHandle = handle
         dumpedByteCount = 0
         Self.log.info("UNISON_DUMP_PLAYBACK_WAV — capturing post-timePitch audio to \(path)")
@@ -189,7 +189,10 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
 
     private func appendDumpData(_ d: Data) {
         guard let handle = dumpHandle else { return }
-        handle.write(d)
+        // Throwing write — the legacy `write(_:)` raises an uncatchable
+        // ObjC exception on I/O failure and would crash mid-call over a
+        // diagnostics file.
+        try? handle.write(contentsOf: d)
         dumpedByteCount &+= UInt32(d.count)
     }
 
@@ -206,9 +209,9 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         let dataSize: UInt32 = dumpedByteCount
         let fileSize = dataSize &+ 36
         try? handle.seek(toOffset: 4)
-        handle.write(Self.uint32LE(fileSize))
+        try? handle.write(contentsOf: Self.uint32LE(fileSize))
         try? handle.seek(toOffset: 40)
-        handle.write(Self.uint32LE(dataSize))
+        try? handle.write(contentsOf: Self.uint32LE(dataSize))
         try? handle.close()
         dumpHandle = nil
         let durationSec = Double(dataSize) / 4.0 / 48_000.0
@@ -225,7 +228,10 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         var header = Data()
         let byteRate = sampleRate * UInt32(channels) * UInt32(bitsPerSample / 8)
         let blockAlign = channels * (bitsPerSample / 8)
-        let fileSize = dataSize &+ 36
+        // 0xFFFF_FFFF data-size sentinel must propagate to the RIFF
+        // size too — `&+ 36` would wrap it to 35 and strict parsers
+        // reject the unterminated file.
+        let fileSize = dataSize == 0xFFFF_FFFF ? dataSize : dataSize &+ 36
         header.append(contentsOf: "RIFF".utf8)
         header.append(uint32LE(fileSize))
         header.append(contentsOf: "WAVE".utf8)
@@ -310,7 +316,12 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         if translatedChunkIndex % 10 == 0 {
             let rmsIn = Self.rms(frame)
             let rmsOut = Self.rms(boostedFrame)
-            Self.log.debug("[speakers] translated chunk \(translatedChunkIndex) rms_in=\(String(format: "%.5f", rmsIn)) rms_out=\(String(format: "%.5f", rmsOut)) agc_gain=\(String(format: "%.3f", appliedGain)) agc_lt_rms=\(String(format: "%.5f", agc.longTermRMS))")
+            let chunkLine = "[speakers] translated chunk \(translatedChunkIndex)"
+                + " rms_in=\(String(format: "%.5f", rmsIn))"
+                + " rms_out=\(String(format: "%.5f", rmsOut))"
+                + " agc_gain=\(String(format: "%.3f", appliedGain))"
+                + " agc_lt_rms=\(String(format: "%.5f", agc.longTermRMS))"
+            Self.log.debug(chunkLine)
         }
         translatedChunkIndex += 1
         let frameLength = buf.frameLength

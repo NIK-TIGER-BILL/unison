@@ -50,3 +50,71 @@ import Testing
     #expect(wire.sampleRate == 24_000)
     #expect(wire.format == AudioSampleFormat.int16)
 }
+
+// MARK: - Device-format robustness (USB/BT mics deliver int16; some configs deliver stereo)
+
+private func sineInt16(rate: Int, seconds: Double = 0.1, channels: Int = 1) -> Data {
+    let frames = Int(Double(rate) * seconds)
+    var out = Data(capacity: frames * channels * 2)
+    for i in 0..<frames {
+        let v = Int16(sin(Double(i) * 2.0 * .pi * 440.0 / Double(rate)) * 12_000)
+        for _ in 0..<channels {
+            withUnsafeBytes(of: v.littleEndian) { out.append(contentsOf: $0) }
+        }
+    }
+    return out
+}
+
+private func sineFloat32(rate: Int, seconds: Double = 0.1, channels: Int = 1) -> Data {
+    let frames = Int(Double(rate) * seconds)
+    var out = Data(capacity: frames * channels * 4)
+    for i in 0..<frames {
+        let v = Float(sin(Double(i) * 2.0 * .pi * 440.0 / Double(rate)) * 0.4)
+        for _ in 0..<channels {
+            withUnsafeBytes(of: v.bitPattern.littleEndian) { out.append(contentsOf: $0) }
+        }
+    }
+    return out
+}
+
+@Test func resampler_int16MicInput_48k_convertsWithoutCrashing() {
+    // USB mics deliver int16 at the device rate. This used to hit
+    // resampleFloat32's fatalError("expects .float32 input").
+    let input = makeFrame(pcm: sineInt16(rate: 48_000), rate: 48_000, format: .int16)
+    let out = Resampler.toOpenAIWire(input)
+    #expect(out.sampleRate == 24_000)
+    #expect(out.format == .int16)
+    #expect(out.channels == 1)
+    #expect(abs(out.sampleCount - input.sampleCount / 2) <= 1)
+}
+
+@Test func resampler_int16MicInput_16k_upsamplesToWire() {
+    // Bluetooth HFP headset mics run at 8/16 kHz int16.
+    let input = makeFrame(pcm: sineInt16(rate: 16_000), rate: 16_000, format: .int16)
+    let out = Resampler.toOpenAIWire(input)
+    #expect(out.sampleRate == 24_000)
+    #expect(out.format == .int16)
+    #expect(abs(out.sampleCount - input.sampleCount * 3 / 2) <= 1)
+}
+
+@Test func resampler_stereoFloat32Input_mixesDownToMono() {
+    // Interleaved stereo from a 2ch capture config. This used to trap the
+    // mono precondition in resampleFloat32 — a mid-call crash.
+    let input = makeFrame(pcm: sineFloat32(rate: 48_000, channels: 2), rate: 48_000, channels: 2, format: .float32)
+    let out = Resampler.toOpenAIWire(input)
+    #expect(out.sampleRate == 24_000)
+    #expect(out.format == .int16)
+    #expect(out.channels == 1)
+    #expect(abs(out.sampleCount - input.sampleCount / 2) <= 1)
+}
+
+@Test func resampler_stereoInt16AtWireRate_isNotPassedThroughUnmixed() {
+    // int16@24k stereo must NOT take the passthrough shortcut — the wire
+    // format is strictly mono.
+    let input = makeFrame(pcm: sineInt16(rate: 24_000, channels: 2), rate: 24_000, channels: 2, format: .int16)
+    let out = Resampler.toOpenAIWire(input)
+    #expect(out.channels == 1)
+    #expect(out.sampleRate == 24_000)
+    #expect(out.format == .int16)
+    #expect(abs(out.sampleCount - input.sampleCount) <= 1)
+}

@@ -107,6 +107,12 @@ func install_happyPath_invokesPkgutilAndInstaller() async throws {
     #expect(script.contains("launchctl kickstart -k system/com.apple.audio.coreaudiod"))
     #expect(script.contains("killall coreaudiod"))
     #expect(script.contains("|| true"))
+    // TOCTOU guard: the privileged command re-verifies the pkg's
+    // SHA-256 (computed in Swift right after signature verification)
+    // before `installer` runs. The fake downloader touches an EMPTY
+    // file, so the embedded hash must be SHA-256 of zero bytes.
+    #expect(script.contains("shasum -a 256 -c"))
+    #expect(script.contains("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"))
 
     let urls = downloadedURLs.withLock { $0 }
     #expect(urls == [
@@ -196,6 +202,62 @@ func install_signatureCheckFails_throwsSignatureInvalid() async {
     } catch {
         Issue.record("unexpected error: \(error)")
     }
+}
+
+@Test
+func install_pkgutilPassesButSignerIsNotExistentialAudio_throwsSignatureInvalid() async {
+    // `pkgutil --check-signature` exits 0 for ANY validly signed pkg —
+    // a malicious-but-notarized pkg substituted on the CDN would pass
+    // a status-only check. The installer must pin the signer identity
+    // and reject everything else, without ever reaching osascript.
+    let releaseJSON = makeReleaseJSON(tag: "v0.6.1", assets: [])
+    let processCalls = Mutex<[(String, [String])]>([])
+    let installer = makeFakeInstaller(.init(
+        fetchData: makeFetcher(returning: releaseJSON),
+        downloadFile: makeNoOpDownloader(),
+        runProcess: { executable, arguments in
+            processCalls.withLock { $0.append((executable, arguments)) }
+            if executable.hasSuffix("pkgutil") {
+                return (0, pkgutilSignedByOtherVendor, "")
+            }
+            return (0, "", "")
+        }
+    ))
+
+    do {
+        try await installer.runBundledInstaller()
+        Issue.record("expected throw")
+    } catch let error as BlackHoleInstallError {
+        #expect(error == .signatureInvalid)
+    } catch {
+        Issue.record("unexpected error: \(error)")
+    }
+    // The privileged installer step must never have been invoked.
+    let calls = processCalls.withLock { $0 }
+    #expect(calls.allSatisfy { $0.0.hasSuffix("pkgutil") })
+}
+
+@Test(.timeLimit(.minutes(1)))
+func spawnAndDrain_largeStderrPlusStdout_doesNotDeadlock() throws {
+    // Regression for the pipe deadlock: a child writing >64 KiB (the
+    // Darwin pipe buffer) to stderr while the parent first read stdout
+    // to EOF blocked both sides forever. Drains must be concurrent.
+    // If the implementation regresses, the time limit converts the
+    // hang into a failure.
+    let result = try BundledBlackHoleInstaller.spawnAndDrain(
+        "/bin/sh",
+        ["-c", "dd if=/dev/zero bs=1024 count=200 2>/dev/null | tr '\\0' 'e' >&2; printf ok"]
+    )
+    #expect(result.status == 0)
+    #expect(result.stdout == "ok")
+    #expect(result.stderr.count == 200 * 1024)
+}
+
+@Test
+func sha256Hex_matchesKnownVector() throws {
+    // FIPS 180-2 test vector: SHA-256("abc").
+    #expect(try sha256HexOfTempFile(contents: "abc")
+        == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
 }
 
 @Test
@@ -310,7 +372,9 @@ func install_osascriptNonZero_propagatesStderrInInstallFailed() async {
         fetchData: makeFetcher(returning: releaseJSON),
         downloadFile: makeNoOpDownloader(),
         runProcess: { executable, _ in
-            if executable.hasSuffix("pkgutil") { return (0, "", "") }
+            if executable.hasSuffix("pkgutil") {
+                return (0, pkgutilSignedByExistentialAudio, "")
+            }
             // osascript: simulate "User canceled."
             return (1, "", "0:0: execution error: User canceled. (-128)\n")
         }

@@ -1,8 +1,17 @@
+// swiftlint:disable file_length
+// The orchestrator is one deliberately-cohesive state machine: session
+// lifecycle, per-speaker reconnect, network pause/resume, watchdogs and
+// connectivity health all mutate the same @MainActor state and are
+// documented inline with their review history. Splitting it to satisfy
+// the length thresholds would scatter that state behind accessors
+// without reducing real complexity. Roughly a third of the line count
+// is rationale comments.
 import Foundation
 import Observation
 
 @MainActor
 @Observable
+// swiftlint:disable:next type_body_length
 public final class TranslationOrchestrator {
     /// Diagnostic logger for the orchestrator. Every state mutation
     /// and every guard failure writes a line here, which is mirrored
@@ -111,6 +120,18 @@ public final class TranslationOrchestrator {
     // Pipeline tasks bucketed per speaker so a reconnect cancels exactly the
     // tasks bound to the failed stream and leaves the healthy side untouched.
     private var pipelineTasksBySpeaker: [Speaker: [Task<Void, Never>]] = [:]
+    /// Per-speaker reconnect retry loop. Deliberately NOT stored in
+    /// `pipelineTasksBySpeaker`: `handleStreamFailure` cancels the failed
+    /// speaker's pipeline tasks — including the connection-state observer
+    /// it is itself running on — so the retry loop must live on a fresh
+    /// unstructured task. Run inline, the loop would execute on an
+    /// already-cancelled task and the production `SystemClock`'s
+    /// `Task.sleep` would throw `CancellationError` on the first backoff
+    /// delay, silently aborting every reconnect (the session then rides
+    /// the reconnect watchdog into terminal `.error(.networkLost)`).
+    /// The mock clocks ignore cancellation, which is why tests never saw
+    /// it. Cancelled in `stopAllStreams` and `enterNetworkPause`.
+    private var reconnectTasks: [Speaker: Task<Void, Never>] = [:]
     /// Per-speaker short-window ring buffer of wire-format outbound
     /// audio. The mic-frame consumer appends each frame after
     /// `transformer.toWire(...)`; on reconnect the orchestrator drains
@@ -275,6 +296,12 @@ public final class TranslationOrchestrator {
             } catch {
                 let mapped = mapConnectError(error)
                 Self.log.error("start() peer.connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
+                // Partial-start teardown: the output mixer is already
+                // running and `peerStream` holds a half-open stream.
+                // Without this, they keep running behind a terminal
+                // `.error` state (and `start()` refuses to run again
+                // because the state never returns to `.idle`).
+                await stopAllStreams()
                 state = .error(mapped)
                 return
             }
@@ -299,6 +326,12 @@ public final class TranslationOrchestrator {
             } catch {
                 let mapped = mapConnectError(error)
                 Self.log.error("start() me.connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
+                // Partial-start teardown: in `.call` mode the peer
+                // pipeline is already wired and translating at this
+                // point — leaving it running behind `.error` keeps
+                // streaming audio to OpenAI with no way to stop it
+                // from the UI (`start()` requires `.idle`).
+                await stopAllStreams()
                 state = .error(mapped)
                 return
             }
@@ -707,6 +740,11 @@ public final class TranslationOrchestrator {
             for t in tasks { t.cancel() }
         }
         pipelineTasksBySpeaker.removeAll()
+        // A speaker may be mid-retry when the network drops; the pause /
+        // auto-resume path owns recovery from here, so the WS-level
+        // retry loop must not keep dialing against a dead path.
+        for (_, t) in reconnectTasks { t.cancel() }
+        reconnectTasks.removeAll()
         // Audio captured during a long outage is stale — by the time
         // the network returns, replaying old frames would land after
         // the live conversation moved on. The buffer is allocated
@@ -991,10 +1029,11 @@ public final class TranslationOrchestrator {
         // delivering a single chunk, is almost always a credential or
         // model-access problem. The server happily accepts the WS upgrade
         // (which is why we don't see it on `connect()` itself) and drops
-        // us on the first message. If we see this twice in a row on the
-        // same speaker, escalate to terminal `.apiKeyInvalid` so the user
-        // gets a clear error instead of a `.translating ↔ .reconnecting`
-        // flicker.
+        // us on the first message. The threshold is currently 1 — a
+        // single empty close escalates straight to terminal
+        // `.apiKeyInvalid` (see `emptyCloseTerminalThreshold` for why a
+        // lone occurrence is already conclusive); the counter machinery
+        // stays so the threshold can be raised without rework.
         if !receivedAnyData {
             let next = (consecutiveEmptyCloses[speaker] ?? 0) + 1
             consecutiveEmptyCloses[speaker] = next
@@ -1044,6 +1083,25 @@ public final class TranslationOrchestrator {
             await peerStream?.close()
             peerStream = nil
         }
+        // Spawn the retry loop on a fresh task — see `reconnectTasks` for
+        // why running it inline on this (just-self-cancelled) observer
+        // task would abort the first backoff sleep in production.
+        reconnectTasks[speaker]?.cancel()
+        reconnectTasks[speaker] = Task { @MainActor [weak self] in
+            await self?.runReconnectLoop(speaker: speaker, target: target, mode: mode, initialError: error)
+        }
+    }
+
+    /// Backoff-retry loop that re-creates a failed speaker's stream. Runs
+    /// on its own task (`reconnectTasks[speaker]`); aborts quietly when
+    /// `stop()` / a network pause changes the state out of `.reconnecting`
+    /// or cancels the task.
+    private func runReconnectLoop(
+        speaker: Speaker,
+        target: Language,
+        mode: SessionMode,
+        initialError error: TranslationError
+    ) async {
         var backoff = BackoffPolicy(initial: 1, cap: 30)
         var firstAttempt = true
         // Re-create the stream and try again, up to 5 attempts then give up
@@ -1170,8 +1228,10 @@ public final class TranslationOrchestrator {
         for (_, tasks) in pipelineTasksBySpeaker {
             for t in tasks { t.cancel() }
         }
+        for (_, t) in reconnectTasks { t.cancel() }
         globalTasks.removeAll()
         pipelineTasksBySpeaker.removeAll()
+        reconnectTasks.removeAll()
         // Drop the per-speaker ring buffers entirely on stop — a fresh
         // start() re-allocates them. Keeping the instance around past
         // session boundaries would leak stale audio into a later

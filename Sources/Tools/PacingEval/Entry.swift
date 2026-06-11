@@ -373,8 +373,8 @@ struct PacingEvalCLI {
                 // apples-to-apples (same model behaviour, different
                 // pacing decisions).
                 let variants: [(name: String, preroll: Double, fixed: Double?)] = [
-                    ("v3-adaptive",     0.0, nil),
-                    ("fixed-1.0",       0.0, 1.0),
+                    ("v3-adaptive", 0.0, nil),
+                    ("fixed-1.0", 0.0, 1.0),
                     ("fixed-1.0-pre200", 0.2, 1.0),
                     ("fixed-1.0-pre500", 0.5, 1.0)
                 ]

@@ -131,7 +131,7 @@ public enum CompensatingAGC {
             var out = samples
             out.withUnsafeMutableBufferPointer { buf in
                 for i in 0..<n {
-                    buf[i] = buf[i] * g
+                    buf[i] *= g
                 }
             }
             return (newState, out)
@@ -168,7 +168,7 @@ public enum CompensatingAGC {
         var out = samples
         out.withUnsafeMutableBufferPointer { buf in
             for i in 0..<n {
-                buf[i] = buf[i] * g
+                buf[i] *= g
             }
         }
         return (newState, out)

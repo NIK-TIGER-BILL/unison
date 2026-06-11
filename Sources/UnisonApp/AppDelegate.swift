@@ -65,10 +65,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             onRecordHotkey: { [weak self] kind in
                 self?.beginHotkeyRecording(kind)
             },
+            onCancelRecordHotkey: { [weak self] in
+                // Clicking the recording chip again cancels — tear the
+                // NSEvent monitor down, not just the VM's UI flag.
+                self?.hotkeyService.endRecording()
+            },
             onOpenURL: { url in
                 NSWorkspace.shared.open(url)
             }
         )
+        // Closing Settings mid-recording must cancel the recording —
+        // otherwise the local monitor keeps swallowing plain typing
+        // app-wide and the next combo pressed anywhere silently
+        // becomes the new hotkey.
+        settingsWindow.onClose = { [weak self] in
+            guard let self else { return }
+            self.hotkeyService.endRecording()
+            self.composition.settingsVM.cancelRecordingHotkey()
+        }
 
         // Help window — same chromeless-glass design as Settings.
         helpWindow = HelpWindowController()
@@ -138,8 +152,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // Defer the previous-crash alert to the next runloop tick so
         // it surfaces AFTER the windows + status item have rendered
         // (alerts attached to a not-yet-visible app can land behind
-        // other windows). The alert is modal — execution blocks here
-        // until the user dismisses it.
+        // other windows). Launch finishes uninterrupted; the alert
+        // then runs modal inside the async block on that later tick.
         if let report = pendingCrash {
             FileLogStore.shared.write(
                 category: "AppDelegate",
@@ -174,13 +188,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // Activate the app first so the popover renders above
             // anything the harness left in front (e.g. a Terminal
             // window from the SSH session host). Defer the actual
-            // `showPopover()` to the next run-loop tick: at this
-            // point in `applicationDidFinishLaunching` the status-item
-            // button hasn't had its frame laid out yet, and
+            // `showPopover()` by 0.5 s: at this point in
+            // `applicationDidFinishLaunching` the status-item button
+            // hasn't had its frame laid out yet, and
             // `StatusItemController.showPopover` anchors the panel
             // below `button.bounds` — calling it immediately places
-            // the panel at (0,0) on some hosts. One async hop is
-            // enough to let AppKit position the button.
+            // the panel at (0,0) on some hosts. A fixed delay (rather
+            // than a single async hop) gives AppKit time to position
+            // the button even on slow VM hosts.
             NSApp.activate(ignoringOtherApps: true)
             let item = statusItem!
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -364,8 +379,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         switch state {
         case .idle:
             target = .idle
-        case .connecting, .translating, .paused:
+        case .connecting, .translating:
             target = .active
+        case .paused:
+            // Network-level pause: audio is actually stopped, so show
+            // the muted U-only icon + "на паузе" status instead of
+            // pretending the session is live.
+            target = .paused
         case .reconnecting:
             // Treat reconnect as a degraded active for v1 — the design
             // doesn't define a distinct "warn" status icon and the
@@ -377,14 +397,27 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Transcript visibility tracks `isActive`. Only act on
         // transitions to avoid flickering when other observed state
-        // changes without flipping active.
-        let wasActive = lastMenubarState == .active
+        // changes without flipping active. `.paused` counts as active
+        // here (`SessionState.paused.isActive == true`) so the window
+        // doesn't churn on pause/resume.
+        let wasActive = lastMenubarState == .active || lastMenubarState == .paused
         let isActive = state.isActive
         if isActive != wasActive {
             if isActive {
                 transcriptWindow.show()
             } else {
                 transcriptWindow.hide()
+            }
+            // «Скрывать меню при старте сессии»: drop the menubar icon
+            // while a session runs (hotkeys + transcript pill keep the
+            // session controllable), restore it the moment the session
+            // ends. The toggle used to be a persisted no-op.
+            if composition.settingsVM.hideMenuOnSession {
+                statusItem.setStatusItemVisible(!isActive)
+            } else if !isActive {
+                // Defensive: if the toggle was flipped off mid-session,
+                // never leave the icon hidden after the session ends.
+                statusItem.setStatusItemVisible(true)
             }
         }
 

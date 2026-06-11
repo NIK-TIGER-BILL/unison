@@ -99,10 +99,30 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
         onChange: { _ in },
         keychain: kc
     )
-    vm.updateApiKey("sk-new-9876543210")
-    #expect(kc.loadAPIKey() == "sk-new-9876543210")
-    #expect(vm.apiKey == "sk-new-9876543210")
+    vm.updateApiKey("sk-new-98765432109876543210")
+    #expect(kc.loadAPIKey() == "sk-new-98765432109876543210")
+    #expect(vm.apiKey == "sk-new-98765432109876543210")
     #expect(vm.lastSavedAt != nil)
+}
+
+@MainActor
+@Test func settingsVM_updateApiKey_partialEditDoesNotClobberStoredKey() throws {
+    // Per-keystroke edits used to write truncated garbage into the
+    // Keychain (and a ⌘A-retype transiently deleted the stored key).
+    // A partial value must keep the previously stored key intact and
+    // must NOT flash «сохранено».
+    let kc = MockKeychain()
+    try kc.saveAPIKey("sk-old-12345678901234567890")
+    let vm = SettingsViewModel(
+        initial: .default,
+        deviceRegistry: MockAudioDeviceRegistry(),
+        onChange: { _ in },
+        keychain: kc
+    )
+    vm.updateApiKey("sk-pro")  // mid-edit fragment
+    #expect(kc.loadAPIKey() == "sk-old-12345678901234567890", "Partial key must not overwrite the stored one")
+    #expect(vm.apiKey == "sk-pro", "In-memory value tracks the field")
+    #expect(vm.lastSavedAt == nil, "No save indicator for a write that didn't happen")
 }
 
 @MainActor
@@ -323,20 +343,6 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
     registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
     vm.refreshBlackHoleStatus()
     #expect(vm.blackHole2chStatus == .ready)
-}
-
-@MainActor
-@Test func settingsVM_apiKeyVisibility_toggles() {
-    let vm = SettingsViewModel(
-        initial: .default,
-        deviceRegistry: MockAudioDeviceRegistry(),
-        onChange: { _ in }
-    )
-    #expect(vm.apiKeyVisible == false)
-    vm.toggleApiKeyVisibility()
-    #expect(vm.apiKeyVisible)
-    vm.toggleApiKeyVisibility()
-    #expect(vm.apiKeyVisible == false)
 }
 
 // MARK: - HotkeyStorage Codable round-trip

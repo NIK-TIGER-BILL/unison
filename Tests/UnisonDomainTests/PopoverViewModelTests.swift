@@ -77,22 +77,6 @@ private func makeReadyVM(
     #expect(vm.canStart)
 }
 
-@MainActor
-@Test func popoverVM_displayPair() {
-    let perms = MockPermissionsService()
-    perms.statuses[.microphone] = .granted
-    let orch = makeOrchestratorForVM(perms: perms)
-    let registry = MockAudioDeviceRegistry()
-    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
-    let vm = PopoverViewModel(
-        orchestrator: orch,
-        permissions: perms,
-        deviceRegistry: registry,
-        settings: Settings(languagePair: LanguagePair(mine: .ru, peer: .en))
-    )
-    #expect(vm.languagePairDisplay == "🇷🇺 Русский → 🇬🇧 English")
-}
-
 // MARK: - Phase 3a additions
 
 @Test
@@ -162,14 +146,31 @@ func popoverVM_primaryButton_idleLabelsAndIcon() {
 
 @MainActor
 @Test
-func popoverVM_toggleSessionMode_swapsCallAndListen() {
+func popoverVM_updateSessionMode_setsModeAndPersists() {
     var settings = Settings.default
     settings.sessionMode = .call
     let vm = makeReadyVM(settings: settings)
-    vm.toggleSessionMode()
+    var persisted: [SessionMode] = []
+    vm.onSettingsChanged = { persisted.append($0.sessionMode) }
+    vm.updateSessionMode(.listen)
     #expect(vm.settings.sessionMode == .listen)
-    vm.toggleSessionMode()
+    // Same-value writes must not spam the persistence pipeline.
+    vm.updateSessionMode(.listen)
+    vm.updateSessionMode(.call)
     #expect(vm.settings.sessionMode == .call)
+    #expect(persisted == [.listen, .call])
+}
+
+@MainActor
+@Test
+func popoverVM_updateLanguagePair_firesSettingsChanged() {
+    let vm = makeReadyVM(settings: .default)
+    var persistedPairs: [LanguagePair] = []
+    vm.onSettingsChanged = { persistedPairs.append($0.languagePair) }
+    let pair = LanguagePair(mine: .de, peer: .ja)
+    vm.updateLanguagePair(pair)
+    #expect(vm.settings.languagePair == pair)
+    #expect(persistedPairs == [pair])
 }
 
 @MainActor
@@ -251,7 +252,7 @@ func popoverVM_elapsedSecondsString_keepsCountingDuringReconnecting() {
 
 @MainActor
 @Test
-func popoverVM_isReconnecting_trueOnlyDuringReconnecting() {
+func popoverVM_statusText_marksOnlyReconnecting() {
     let perms = MockPermissionsService()
     perms.statuses[.microphone] = .granted
     let registry = MockAudioDeviceRegistry()
@@ -259,22 +260,22 @@ func popoverVM_isReconnecting_trueOnlyDuringReconnecting() {
     let start = nowDate()
 
     let idle = PopoverViewModel.previewing(state: .idle, permissions: perms, deviceRegistry: registry)
-    #expect(idle.isReconnecting == false)
+    #expect(idle.statusText.isEmpty)
 
     let translating = PopoverViewModel.previewing(
         state: .translating(mode: .call, startedAt: start),
         permissions: perms, deviceRegistry: registry
     )
-    #expect(translating.isReconnecting == false)
+    #expect(translating.statusText.isEmpty)
 
     let reconnecting = PopoverViewModel.previewing(
         state: .reconnecting(mode: .call, since: start, startedAt: start),
         permissions: perms, deviceRegistry: registry
     )
-    #expect(reconnecting.isReconnecting)
+    #expect(reconnecting.statusText == "Переподключение…")
 
     let errored = PopoverViewModel.previewing(state: .error(.networkLost), permissions: perms, deviceRegistry: registry)
-    #expect(errored.isReconnecting == false)
+    #expect(errored.statusText.isEmpty)
 }
 
 // MARK: - statusText / statusDotState (T11)

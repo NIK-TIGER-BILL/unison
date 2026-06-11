@@ -8,7 +8,9 @@ import UnisonDomain
 /// - Runs of same-speaker entries collapse into a `BubbleGroup`.
 /// - Long messages split at sentence boundaries (`.`, `!`, `?`) into
 ///   ≤`splitThreshold` character chunks; the first non-empty chunk gets
-///   `isFirstInGroup`, the last gets `isLastInGroup`.
+///   `isFirstInGroup`, the last gets `isLastInGroup`. Text without
+///   terminators (or a single oversized sentence) falls back to a length
+///   split at whitespace so no chunk ever exceeds the threshold.
 /// - `liveEntryId`, when non-nil and matching the very last entry, marks
 ///   the last bubble of the last group as `isLive` (renders typing dots).
 enum TranscriptGrouping {
@@ -135,11 +137,14 @@ enum TranscriptGrouping {
         return out
     }
 
-    /// Split a string into chunks ≤ `threshold` characters, breaking only
-    /// at sentence-terminator runs (`.`, `!`, `?` plus trailing whitespace).
-    /// If the string is short enough, returns a single-element array.
-    /// Empty strings produce an empty array (so callers can pad with the
-    /// previous chunk).
+    /// Split a string into chunks ≤ `threshold` characters, breaking
+    /// preferentially at sentence-terminator runs (`.`, `!`, `?` plus
+    /// trailing whitespace). Text without terminators — or a single
+    /// sentence longer than the threshold — is length-split at the
+    /// nearest whitespace before the boundary (`hardSplit`), so every
+    /// returned chunk respects the threshold. If the string is short
+    /// enough, returns a single-element array. Empty strings produce an
+    /// empty array (so callers can pad with the previous chunk).
     static func splitOnSentence(_ text: String, threshold: Int) -> [String] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
@@ -149,15 +154,26 @@ enum TranscriptGrouping {
         let pattern = #"[^.!?]+[.!?]+\s*"#
         let nsText = trimmed as NSString
         var sentences: [String] = []
+        var matchedUpTo = 0
         if let regex = try? NSRegularExpression(pattern: pattern) {
             let matches = regex.matches(in: trimmed, range: NSRange(location: 0, length: nsText.length))
             for m in matches {
                 sentences.append(nsText.substring(with: m.range))
+                matchedUpTo = m.range.location + m.range.length
+            }
+        }
+        // The regex only captures terminator-ended runs — an unterminated
+        // trailing fragment ("Привет. а дальше без точки…") would be
+        // silently dropped otherwise. Keep it as a final pseudo-sentence.
+        if matchedUpTo < nsText.length {
+            let rest = nsText.substring(from: matchedUpTo)
+            if !rest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                sentences.append(rest)
             }
         }
         if sentences.isEmpty {
-            // Fallback: a single sentence with no terminator; hard-split by length.
-            sentences = [trimmed]
+            // No terminators at all — pure length split.
+            return hardSplit(trimmed, threshold: threshold)
         }
 
         var chunks: [String] = []
@@ -174,7 +190,43 @@ enum TranscriptGrouping {
         }
         let tail = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
         if !tail.isEmpty { chunks.append(tail) }
-        return chunks.isEmpty ? [trimmed] : chunks
+        if chunks.isEmpty { return hardSplit(trimmed, threshold: threshold) }
+        // The sentence loop flushes *before* overflow, so the only way a
+        // chunk exceeds the threshold is a single sentence that is itself
+        // oversized — length-split those.
+        return chunks.flatMap { chunk in
+            chunk.count > threshold ? hardSplit(chunk, threshold: threshold) : [chunk]
+        }
+    }
+
+    /// Length-based fallback for text without usable sentence boundaries.
+    /// Breaks at the nearest whitespace at or before the threshold; an
+    /// unbroken run longer than the threshold is hard-cut mid-run.
+    static func hardSplit(_ text: String, threshold: Int) -> [String] {
+        guard threshold > 0 else { return [text] }
+        var remaining = Substring(text)
+        var parts: [String] = []
+        while remaining.count > threshold {
+            let limit = remaining.index(remaining.startIndex, offsetBy: threshold)
+            let window = remaining[remaining.startIndex..<limit]
+            if let breakIdx = window.lastIndex(where: { $0.isWhitespace }) {
+                let piece = String(remaining[remaining.startIndex..<breakIdx])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !piece.isEmpty { parts.append(piece) }
+                remaining = remaining[remaining.index(after: breakIdx)...]
+            } else {
+                // No whitespace inside the window — hard cut.
+                parts.append(String(window))
+                remaining = remaining[limit...]
+            }
+            // Drop leading whitespace before the next piece.
+            while let first = remaining.first, first.isWhitespace {
+                remaining = remaining.dropFirst()
+            }
+        }
+        let tail = String(remaining).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tail.isEmpty { parts.append(tail) }
+        return parts.isEmpty ? [text] : parts
     }
 
     /// Deterministic child id from the entry id + chunk index, so SwiftUI's

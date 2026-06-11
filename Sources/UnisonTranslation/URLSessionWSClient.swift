@@ -27,10 +27,26 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
     private let receiveStreamRef: AsyncStream<WSMessage>
     private let closeReasonStreamRef: AsyncStream<WSCloseReason>
 
-    /// Set after the delegate fires `didCloseWith:` so the receive loop
-    /// knows the close arrived through the delegate path and doesn't
-    /// also emit a duplicate `.error(...)` for the same disconnect.
-    private var closedByDelegate = false
+    /// One-shot guard so exactly ONE close reason reaches `closeStream()`
+    /// per connection, no matter which path observes the disconnect
+    /// first: the delegate's `didCloseWith:`, the receive loop's thrown
+    /// error, or a client-initiated `close()`. Without it, a receive
+    /// error racing the delegate callback emitted TWO failure events —
+    /// the generic `.error(NSError)` then `.abnormal(code:reason:)` —
+    /// which made the consumer run its failure handling twice and let
+    /// the generic transport noise win the sticky error classification
+    /// over the server's actual close reason. Lock-protected because
+    /// the three paths run on three different threads.
+    private let closeEmitLock = NSLock()
+    private var closeEventEmitted = false
+
+    /// Returns `true` exactly once per client instance.
+    private func tryMarkCloseEmitted() -> Bool {
+        closeEmitLock.lock(); defer { closeEmitLock.unlock() }
+        if closeEventEmitted { return false }
+        closeEventEmitted = true
+        return true
+    }
 
     public override init() {
         let q = OperationQueue()
@@ -82,7 +98,9 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
     public func close() async {
         task?.cancel(with: .normalClosure, reason: nil)
         receiveContinuation?.finish()
-        closeContinuation?.yield(.normal)
+        if tryMarkCloseEmitted() {
+            closeContinuation?.yield(.normal)
+        }
         closeContinuation?.finish()
         // Break the URLSession ↔ delegate reference cycle. `URLSession`
         // strongly retains its delegate (per Apple docs: "the session
@@ -109,16 +127,17 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
                     @unknown default: break
                     }
                 } catch {
-                    // If the delegate already reported the close, skip the
-                    // duplicate `.error(...)` emission — the consumer already
-                    // saw the typed `.abnormal(code:reason:)` and acted on it.
-                    if self?.closedByDelegate == true {
-                        self?.receiveContinuation?.finish()
-                        break
-                    }
+                    // Give the delegate's `didCloseWith:` a brief window to
+                    // win the one-shot — its typed close code + server
+                    // reason payload is strictly richer than the generic
+                    // transport NSError this path sees. URLSession does not
+                    // guarantee the ordering between the two.
+                    try? await Task.sleep(nanoseconds: 100_000_000)
                     let ns = error as NSError
-                    Self.log.error("receive loop error: domain=\(ns.domain) code=\(ns.code) desc=\(ns.localizedDescription)")
-                    self?.closeContinuation?.yield(.error(ns))
+                    if self?.tryMarkCloseEmitted() == true {
+                        Self.log.error("receive loop error: domain=\(ns.domain) code=\(ns.code) desc=\(ns.localizedDescription)")
+                        self?.closeContinuation?.yield(.error(ns))
+                    }
                     self?.receiveContinuation?.finish()
                     break
                 }
@@ -142,7 +161,7 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
         didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
         reason: Data?
     ) {
-        closedByDelegate = true
+        guard tryMarkCloseEmitted() else { return }
         // Decode the server-provided reason payload as UTF-8. OpenAI
         // realtime returns a JSON error message (e.g.
         // `{"error":{"type":"invalid_request_error",...}}`) — we

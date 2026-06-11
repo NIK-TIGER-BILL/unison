@@ -80,14 +80,17 @@ private func makeEntry(
     #expect(groups[0].bubbles.count == 1)
 }
 
-@Test func grouping_singleSentenceLongerThanThresholdStaysOne() {
-    // A single sentence (no `.!?` boundary inside) cannot be split — the
-    // splitter has nothing to break on, so it returns a single bubble even
-    // if it exceeds the threshold.
+@Test func grouping_singleSentenceLongerThanThresholdHardSplits() {
+    // A single sentence (no `.!?` boundary inside) used to flow through
+    // as one oversized bubble. The splitter now falls back to a length
+    // split at whitespace, so every bubble respects the threshold.
     let long = String(repeating: "слово ", count: 100) // ~600 chars, no terminator
     let e = makeEntry(.me, original: long, translated: long)
     let groups = TranscriptGrouping.group(entries: [e], splitThreshold: 240)
-    #expect(groups[0].bubbles.count == 1)
+    #expect(groups[0].bubbles.count >= 2)
+    for b in groups[0].bubbles {
+        #expect(b.primaryText.count <= 240)
+    }
 }
 
 @Test func grouping_multipleSentencesAtThresholdGetSplit() {
@@ -153,4 +156,49 @@ private func makeEntry(
     let text = s + s + s
     let parts = TranscriptGrouping.splitOnSentence(text, threshold: 100)
     #expect(parts.count == 3)
+}
+
+// MARK: - Hard length split (terminator-less fallback)
+
+@Test func splitOnSentence_terminatorless600Chars_allChunksWithinThreshold() {
+    let text = String(repeating: "слово ", count: 100) // 600 chars, no `.!?`
+    let parts = TranscriptGrouping.splitOnSentence(text, threshold: 240)
+    #expect(parts.count >= 2)
+    for p in parts {
+        #expect(!p.isEmpty)
+        #expect(p.count <= 240)
+    }
+    // No words lost or reordered by the split.
+    let originalWords = text.split(separator: " ").map(String.init)
+    let rejoinedWords = parts.joined(separator: " ").split(separator: " ").map(String.init)
+    #expect(rejoinedWords == originalWords)
+}
+
+@Test func splitOnSentence_unbrokenRun_hardCutsAtThreshold() {
+    // 500 identical characters with no whitespace anywhere — nothing to
+    // break on, so the splitter hard-cuts at the threshold boundary.
+    let text = String(repeating: "ы", count: 500)
+    let parts = TranscriptGrouping.splitOnSentence(text, threshold: 240)
+    #expect(parts.count == 3) // 240 + 240 + 20
+    for p in parts {
+        #expect(p.count <= 240)
+    }
+    #expect(parts.joined() == text)
+}
+
+@Test func splitOnSentence_oversizedSentenceAmongNormalOnes_isLengthSplit() {
+    // A normal short sentence followed by one oversized unterminated
+    // fragment: the short one keeps sentence-boundary behaviour, the
+    // oversized tail is captured (not dropped) and length-split so no
+    // chunk exceeds the threshold.
+    let short = "Коротко. "
+    let oversized = String(repeating: "слово ", count: 50) // 300 chars, no terminator
+    let parts = TranscriptGrouping.splitOnSentence(short + oversized, threshold: 240)
+    #expect(parts.count >= 2)
+    for p in parts {
+        #expect(p.count <= 240)
+    }
+    // No words lost: 1 ("Коротко.") + 50 ("слово").
+    let words = parts.joined(separator: " ").split(separator: " ")
+    #expect(words.count == 51)
 }

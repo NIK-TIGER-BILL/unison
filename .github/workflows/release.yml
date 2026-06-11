@@ -5,13 +5,26 @@ on:
     tags:
       - 'v*'
 
+# `softprops/action-gh-release` creates the release and uploads the
+# DMG — that needs a writable GITHUB_TOKEN even when the repo default
+# is read-only.
+permissions:
+  contents: write
+
 jobs:
   build-release:
-    runs-on: macos-14
+    # swift-tools 6.2 + macOS 26 SDK — see ci.yml for the runner note.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.0.app
+      - name: Stamp version from tag
+        # Without this every release ships an app self-identifying as
+        # the hardcoded 1.0 from Resources/Info.plist — wrong in crash
+        # reports and the Diagnostic sheet.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" Resources/Info.plist
       - name: Import signing certificate
         env:
           CERT_P12_BASE64: ${{ secrets.CERT_P12_BASE64 }}
@@ -21,6 +34,10 @@ jobs:
           security create-keychain -p "" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "" build.keychain
+          # A fresh keychain auto-locks after 300 s; the release build
+          # takes longer than that, so codesign would hit a locked
+          # keychain ("User interaction is not allowed"). 6 h timeout.
+          security set-keychain-settings -lut 21600 build.keychain
           security import cert.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "" build.keychain
       - name: Build release

@@ -61,7 +61,10 @@ final class MockKeychain: KeychainService, @unchecked Sendable {
         installer: MockInstaller(),
         keychain: kc
     )
-    try vm.saveAPIKey("sk-test-123")
+    // Route through the validated draft path — the raw-string overload
+    // was an unvalidated keychain write kept only for test convenience.
+    vm.apiKeyDraft = "sk-test-12345678901234567890"
+    vm.saveAPIKey()
     vm.refresh()
     #expect(vm.steps.first { $0.kind == .apiKey }?.isDone == true)
 }

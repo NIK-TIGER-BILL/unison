@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import UnisonDomain
 
@@ -177,6 +178,19 @@ public enum CrashReporter {
                 message: "marker file malformed (length \(raw.count)) — surfacing crash with best-effort metadata"
             )
         }
+        // A marker whose PID is still alive is not a crash — it's a
+        // second running instance of the app. Skip the report and
+        // leave the marker alone: it belongs to that instance, which
+        // removes it on its own clean shutdown. `kill(pid, 0)` sends
+        // no signal — rc 0 just means the process exists.
+        if pid > 0, let livePID = pid_t(exactly: pid), kill(livePID, 0) == 0 {
+            FileLogStore.shared.write(
+                category: "CrashReporter",
+                level: "info",
+                message: "marker pid \(pid) is still running — second live instance, not a crash"
+            )
+            return nil
+        }
         // Delete only after successful read so a sporadic IO error
         // doesn't lose the signal.
         try? FileManager.default.removeItem(at: markerURL)
@@ -194,13 +208,22 @@ public enum CrashReporter {
     // MARK: - Log + .ips collection
 
     /// Read the last `lineCount` lines from `~/Library/Logs/Unison/unison.log`.
-    /// Bounded so a multi-MB log doesn't get pulled into RAM in full.
+    /// Bounded: seeks to the final 64 KiB and decodes only that chunk,
+    /// so a multi-MB log never gets pulled into RAM in full.
     private static func readUnisonLogTail(lineCount: Int) -> String {
         let logURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Logs/Unison/unison.log")
-        guard let content = try? String(contentsOf: logURL, encoding: .utf8) else {
+        guard let handle = try? FileHandle(forReadingFrom: logURL) else {
             return "(unison.log не найден или не читается)"
         }
+        defer { try? handle.close() }
+        let maxTailBytes: UInt64 = 64 * 1024
+        let fileSize = (try? handle.seekToEnd()) ?? 0
+        try? handle.seek(toOffset: fileSize > maxTailBytes ? fileSize - maxTailBytes : 0)
+        let data = (try? handle.readToEnd()) ?? Data()
+        // Lossy UTF-8 decode: the byte cut can land mid-sequence; a
+        // replacement character on the first (truncated) line is fine.
+        let content = String(decoding: data, as: UTF8.self)
         let allLines = content.components(separatedBy: "\n")
         return allLines.suffix(lineCount).joined(separator: "\n")
     }
@@ -242,7 +265,7 @@ public enum CrashReporter {
         // size + non-template so the colour reads as the app's
         // identity rather than greyscale.
         let size = NSSize(width: 64, height: 64)
-        let img = NSImage(size: size, flipped: false) { rect in
+        let img = NSImage(size: size, flipped: false) { _ in
             // Cyan brand fill (matches `.active` menubar state +
             // `UnisonColors.active`); reads as approachable rather
             // than alarming.
@@ -341,11 +364,16 @@ public enum CrashReporter {
             width: CGFloat.greatestFiniteMagnitude,
             height: CGFloat.greatestFiniteMagnitude
         )
-        // Scroll to bottom so the user sees the last entries (where
-        // the crash trail lives) without scrolling manually.
-        textView.scrollToEndOfDocument(nil)
-
         scroll.documentView = textView
+        // Scroll to bottom so the user sees the last entries (where
+        // the crash trail lives) without scrolling manually. Deferred
+        // one runloop tick: the scroll only takes effect once the text
+        // view is installed as the document view and laid out, which
+        // hasn't happened yet at this point. The modal alert's runloop
+        // still drains the main queue, so the block does fire.
+        DispatchQueue.main.async {
+            textView.scrollToEndOfDocument(nil)
+        }
         return scroll
     }
 

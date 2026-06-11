@@ -63,8 +63,8 @@ public final class SilentFrameWatchdog: @unchecked Sendable {
         return data.withUnsafeBytes { raw -> Bool in
             guard let base = raw.bindMemory(to: Float.self).baseAddress else { return true }
             let count = data.count / MemoryLayout<Float>.size
-            for i in 0..<count {
-                if base[i] != 0 { return false }
+            for i in 0..<count where base[i] != 0 {
+                return false
             }
             return true
         }
