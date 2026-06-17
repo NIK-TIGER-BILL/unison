@@ -21,13 +21,14 @@ jobs:
       - name: swift build
         run: swift build
       - name: swift test
-        # Deliberately NOT --parallel: swift-testing's parallel runner
-        # intermittently stalls this suite under load (~1 in 3 runs on a
-        # quiesced M-series Mac; a cluster of long-real-sleep @MainActor
-        # tests plus the mock-WS tests stops making progress while the
-        # main thread sits idle). The full suite runs in ~12 s serially,
-        # so parallelism buys nothing here anyway.
-        run: swift test
+        # `--no-parallel` is load-bearing, NOT a speed knob: swift-testing
+        # parallelises by DEFAULT (the `--parallel` flag is an XCTest-ism),
+        # and its parallel runner intermittently deadlocks this suite —
+        # a cluster of real-sleep @MainActor tests plus the mock-WS tests
+        # stops making progress while the main thread sits idle (seen ~1 in
+        # 3 runs locally; in CI it wedged until the 6 h job timeout). Serial
+        # runs the whole suite in well under a minute, so we lose nothing.
+        run: swift test --no-parallel
 
   lint:
     runs-on: macos-26

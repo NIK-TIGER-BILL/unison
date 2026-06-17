@@ -102,6 +102,36 @@ public func snap<V: View>(
     }
 }
 
+/// Render-only smoke check — no reference comparison.
+///
+/// Use for surfaces whose offscreen capture is non-deterministic and so
+/// cannot carry a stable pixel reference. The transparent floating
+/// transcript panel is the case in point: `bitmapImageRepForCachingDisplay`
+/// of a `backgroundColor = .clear` window captures the same Liquid-Glass
+/// content BIMODALLY across process/compositor state — fully transparent
+/// (alpha 0) in one run, composited-onto-opaque-black in another — so no
+/// single committed PNG matches every run. The bubble-bearing transcript
+/// snapshots happen to be stable enough to keep as pixel references, but
+/// the near-empty `transcript_empty` has so little opaque content that the
+/// background mode dominates and it flip-flops (green in isolation, red in
+/// the full suite, and vice-versa). This still exercises the real value:
+/// the view builds, lays out at the requested size, and renders without
+/// crashing or producing an empty/degenerate buffer.
+@MainActor
+public func snapSmoke<V: View>(_ view: V, size: CGSize) {
+    let bitmap = renderToPNG(view: view, size: size)
+    #expect(!bitmap.isEmpty, "Render produced no image data (\(Int(size.width))×\(Int(size.height)))")
+    // Confirm it decodes to the expected dimensions — catches a layout
+    // collapse / wrong-size render that an emptiness check alone misses.
+    if let src = CGImageSourceCreateWithData(bitmap as CFData, nil),
+       let img = CGImageSourceCreateImageAtIndex(src, 0, nil) {
+        #expect(img.width == Int(size.width) && img.height == Int(size.height),
+                "Render size \(img.width)×\(img.height) != expected \(Int(size.width))×\(Int(size.height))")
+    } else {
+        Issue.record("Render output is not a decodable image")
+    }
+}
+
 // MARK: - Rendering
 
 /// Wrap a SwiftUI view in an NSHostingView of the requested size and

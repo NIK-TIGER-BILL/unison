@@ -21,9 +21,13 @@ struct TranscriptViewSnapshotTests {
         .frame(width: size.width, height: size.height)
     }
 
+    // Smoke-only: the empty transcript is almost entirely transparent, and
+    // the transparent-panel offscreen capture is bimodal (see `snapSmoke`),
+    // so it can't carry a stable pixel reference. The bubble-bearing cases
+    // below keep full pixel snapshots.
     @Test func transcript_empty() throws {
         let vm = makeVM()
-        snap(panel(TranscriptView(vm: vm), size: SnapSize.transcript), size: SnapSize.transcript)
+        snapSmoke(panel(TranscriptView(vm: vm), size: SnapSize.transcript), size: SnapSize.transcript)
     }
 
     @Test func transcript_oneMeBubble() throws {
