@@ -49,6 +49,52 @@ private func makeEntry(
     #expect(b.secondaryText == "Hello")
 }
 
+// Regression: a single peer entry whose ORIGINAL has already streamed two
+// sentences (splits into 2 chunks) while the TRANSLATION is still one
+// short chunk must NOT render the translation duplicated across both
+// bubbles. The old `?? primaryParts.last` fallback repeated the last
+// translation chunk for every extra original chunk, producing the
+// reported "same translation in two consecutive bubbles" artifact that
+// resolved itself once the rest of the translation arrived.
+@Test func grouping_peerMismatchedSplit_doesNotDuplicateTranslation() {
+    let s1 = String(repeating: "x", count: 200) + "."
+    let s2 = String(repeating: "y", count: 200) + "."
+    let translated = "Перевод реплики."
+    let e = makeEntry(.peer, original: s1 + " " + s2, translated: translated)
+
+    let groups = TranscriptGrouping.group(entries: [e], splitThreshold: 240)
+    #expect(groups.count == 1)
+    let bubbles = groups[0].bubbles
+    // Original split into two chunks → two bubbles.
+    #expect(bubbles.count == 2)
+    // The translation must appear in EXACTLY ONE bubble's primary slot,
+    // never repeated into the second.
+    let withTranslation = bubbles.filter { $0.primaryText == translated }.count
+    #expect(withTranslation == 1, "translation duplicated across \(withTranslation) bubbles")
+    // First bubble carries the translation; the extra bubble's primary is
+    // empty (it only shows its own slice of the original).
+    #expect(bubbles[0].primaryText == translated)
+    #expect(bubbles[1].primaryText.isEmpty)
+    // Both original slices are still present and distinct.
+    #expect(bubbles[0].secondaryText != bubbles[1].secondaryText)
+}
+
+// Inverse: translation longer than original must not duplicate the
+// original across bubbles either.
+@Test func grouping_peerMismatchedSplit_doesNotDuplicateOriginal() {
+    let t1 = String(repeating: "ы", count: 200) + "."
+    let t2 = String(repeating: "э", count: 200) + "."
+    let original = "Short original."
+    let e = makeEntry(.peer, original: original, translated: t1 + " " + t2)
+
+    let groups = TranscriptGrouping.group(entries: [e], splitThreshold: 240)
+    let bubbles = groups[0].bubbles
+    #expect(bubbles.count == 2)
+    let withOriginal = bubbles.filter { $0.secondaryText == original }.count
+    #expect(withOriginal == 1, "original duplicated across \(withOriginal) bubbles")
+    #expect(bubbles[1].secondaryText.isEmpty)
+}
+
 // MARK: - Same-speaker grouping
 
 @Test func grouping_consecutiveSameSpeaker_collapseIntoOneGroup() {

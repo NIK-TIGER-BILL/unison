@@ -115,8 +115,17 @@ enum TranscriptGrouping {
         var out: [BubbleViewModel] = []
         out.reserveCapacity(n)
         for i in 0..<n {
-            let p = primaryParts[safe: i] ?? primaryParts.last ?? primaryRaw
-            let s = secondaryParts[safe: i] ?? secondaryParts.last ?? secondaryRaw
+            // Pad the shorter side with "" — NOT its last chunk. primary
+            // and secondary split independently (sentence boundaries
+            // rarely line up between a language and its translation), so
+            // when one side has fewer chunks the extra bubbles must leave
+            // its slot empty. Repeating the last chunk (the old behaviour)
+            // rendered the same translation/original in two consecutive
+            // bubbles — the visible duplicate the user reported, which
+            // cleared only once the lagging side finished streaming and
+            // the chunk counts evened out.
+            let p = primaryParts[safe: i] ?? ""
+            let s = secondaryParts[safe: i] ?? ""
             // Stable derivative id so SwiftUI diffing works across re-groups.
             let bubbleId = derive(entry.id, suffix: i)
             let isLastOfSplit = (i == n - 1)
