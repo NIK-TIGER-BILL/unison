@@ -95,6 +95,22 @@ private func makeOrchestrator(
     #expect(o.state == .idle)
 }
 
+// Regression: capture/engine teardown must NOT run on the main thread.
+// CoreAudio HAL teardown (Process Tap aggregate-device destroy,
+// AVAudioEngine.stop) is synchronous and can block for seconds — or hang
+// if coreaudiod is wedged — doing IPC to coreaudiod. Running it inline on
+// the @MainActor `stop()` froze the whole UI on Stop (observed: the app
+// hung at `ProcessTapCapture.teardown()` and had to be force-killed).
+@Test @MainActor func orchestrator_stop_tearsDownAudioOffMainThread() async throws {
+    let mic = MockMicrophoneCapture()
+    let o = makeOrchestrator(mic: mic)
+    await o.start(mode: .call, languages: .default)
+    await o.stop()
+    #expect(mic.stopCalls >= 1)
+    #expect(mic.stoppedOnMainThread == false,
+            "audio teardown ran on the main thread — a blocking CoreAudio stop would freeze the UI")
+}
+
 @Test @MainActor func orchestrator_updateOriginalMixVolume_propagatesToMixer() async throws {
     let mixer = MockAudioOutputMixer()
     let o = makeOrchestrator(mixer: mixer)

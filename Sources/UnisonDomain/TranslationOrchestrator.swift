@@ -1246,10 +1246,29 @@ public final class TranslationOrchestrator {
         // session boundaries would leak stale audio into a later
         // reconnect from an unrelated session.
         audioBufferBySpeaker.removeAll()
-        micCapture.stop()
-        peerCapture.stop()
-        outputMixer.stop()
-        virtualMicPlayer.stop()
+        // Tear capture + playback down OFF the main thread. These call
+        // synchronous CoreAudio HAL teardown — Process Tap
+        // aggregate-device + tap destroy, AVAudioEngine.stop,
+        // AVCaptureSession.stopRunning — which do IPC to coreaudiod and
+        // can block for seconds, or hang outright if coreaudiod is
+        // wedged. `stopAllStreams()` runs on the @MainActor (stop() is
+        // awaited from the popover on the main thread), so doing this
+        // inline froze the whole UI on Stop and forced a kill via
+        // Activity Monitor (the log ended at `[tap.stop] reason=user`,
+        // mid-teardown). Hopping to a detached task keeps the main
+        // thread servicing the run loop while CoreAudio tears down; the
+        // `await` resumes us once it finishes. (Apple also recommends
+        // calling `AVCaptureSession.stopRunning()` off the main thread.)
+        let mic = micCapture
+        let peer = peerCapture
+        let mixer = outputMixer
+        let vmic = virtualMicPlayer
+        await Task.detached(priority: .userInitiated) {
+            mic.stop()
+            peer.stop()
+            mixer.stop()
+            vmic.stop()
+        }.value
         await meStream?.close()
         await peerStream?.close()
         meStream = nil
