@@ -50,6 +50,14 @@ public struct UnisonLog: Sendable {
     /// `log stream` predicate doesn't need to change.
     public static let subsystem: String = "com.unison.app"
 
+    /// The file sink every `UnisonLog` mirrors into. Defaults to the
+    /// process-wide `FileLogStore.shared`. Exposed only so tests can
+    /// redirect logging to a temp store and assert on it without
+    /// touching the user's real `~/Library/Logs/Unison` (the shared
+    /// store is muted under `swift test`, so this is the supported way
+    /// to verify the UnisonLog → FileLogStore wiring).
+    nonisolated(unsafe) public static var fileSink: FileLogStore = .shared
+
     public init(category: String) {
         self.logger = Logger(subsystem: Self.subsystem, category: category)
         self.category = category
@@ -59,16 +67,16 @@ public struct UnisonLog: Sendable {
         // os.Logger requires the privacy modifier on interpolations; passing
         // a fully-formed `String` is treated as static-public by the runtime.
         logger.info("\(message, privacy: .public)")
-        FileLogStore.shared.write(category: category, level: "info", message: message)
+        Self.fileSink.write(category: category, level: "info", message: message)
     }
 
     public func error(_ message: String) {
         logger.error("\(message, privacy: .public)")
-        FileLogStore.shared.write(category: category, level: "error", message: message)
+        Self.fileSink.write(category: category, level: "error", message: message)
     }
 
     public func debug(_ message: String) {
         logger.debug("\(message, privacy: .public)")
-        FileLogStore.shared.write(category: category, level: "debug", message: message)
+        Self.fileSink.write(category: category, level: "debug", message: message)
     }
 }

@@ -37,7 +37,36 @@ public final class FileLogStore: @unchecked Sendable {
         let dir = FileManager.default
             .urls(for: .libraryDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Logs/Unison", isDirectory: true)
-        return FileLogStore(directory: dir)
+        // Suppress the file sink under `swift test`: every static
+        // `UnisonLog` (installer, WS stream, etc.) routes here, so a
+        // test run would otherwise scribble fake lines (0-byte mock
+        // installs, mock `invalid_api_key`, …) into the USER'S real
+        // `~/Library/Logs/Unison/unison.log` — which then surfaces,
+        // alarmingly and misleadingly, in a real crash report's log
+        // tail. Unified logging (os.Logger) still flows; only the
+        // shared file is muted. Test-constructed instances (temp dirs)
+        // stay enabled.
+        return FileLogStore(directory: dir, enabled: !isRunningUnderTests)
+    }()
+
+    /// `true` when the process is a `swift test` / XCTest run, detected
+    /// from the host executable: SwiftPM's swift-testing runner is
+    /// `swiftpm-testing-helper`, and an XCTest bundle runs under
+    /// `xctest` / a `*.xctest` bundle. (The XCTest env var and runtime
+    /// class are NOT present for a pure swift-testing run — verified —
+    /// so checking the executable path is the portable signal.) The
+    /// real app's executable is `Unison`, so this is `false` in
+    /// production and file logging is never disabled there. The
+    /// `UNISON_DISABLE_FILE_LOG=1` override is a manual escape hatch.
+    public static let isRunningUnderTests: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        if env["XCTestConfigurationFilePath"] != nil { return true }
+        if env["UNISON_DISABLE_FILE_LOG"] == "1" { return true }
+        let exe = (Bundle.main.executablePath ?? "").lowercased()
+        if exe.contains("swiftpm-testing-helper") || exe.contains("xctest") { return true }
+        let proc = ProcessInfo.processInfo.processName.lowercased()
+        if proc == "swiftpm-testing-helper" || proc.contains("xctest") { return true }
+        return false
     }()
 
     /// Directory that holds `unison.log` + rotated copies. Resolved
@@ -68,12 +97,18 @@ public final class FileLogStore: @unchecked Sendable {
     /// the integration test seeing a deterministic first line at every
     /// app launch.
     private var bannerEmitted = false
+    /// When `false`, `write` is a no-op (unified logging still happens
+    /// via `UnisonLog`'s `os.Logger`). The shared singleton sets this
+    /// off under `swift test` so incidental logging doesn't pollute the
+    /// user's real log file.
+    private let enabled: Bool
 
     /// Visible for tests. Production code uses `FileLogStore.shared`.
-    public init(directory: URL, maxFileBytes: Int = 2 * 1024 * 1024, maxFiles: Int = 5) {
+    public init(directory: URL, maxFileBytes: Int = 2 * 1024 * 1024, maxFiles: Int = 5, enabled: Bool = true) {
         self.directory = directory
         self.maxFileBytes = maxFileBytes
         self.maxFiles = maxFiles
+        self.enabled = enabled
         self.queue = DispatchQueue(label: "com.unison.app.FileLogStore", qos: .userInitiated)
     }
 
@@ -93,6 +128,7 @@ public final class FileLogStore: @unchecked Sendable {
     /// the rare path (e.g. `Composition.swift` writing the launch
     /// banner before any UnisonLog has been instantiated).
     public func write(category: String, level: String, message: String) {
+        guard enabled else { return }
         let timestamp = Self.timestampFormatter.string(from: Date())
         let line = "\(timestamp) [\(category):\(level)] \(message)\n"
         queue.async { [weak self] in

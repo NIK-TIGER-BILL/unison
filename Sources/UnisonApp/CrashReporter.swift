@@ -41,6 +41,11 @@ public enum CrashReporter {
         return dir.appendingPathComponent("session-active.marker")
     }()
 
+    /// A leftover marker older than this is treated as stale and not
+    /// surfaced (see `readPendingCrash`). 24 h comfortably exceeds any
+    /// real session length while still catching a crash-then-relaunch.
+    private static let staleCrashThreshold: TimeInterval = 24 * 60 * 60
+
     /// Snapshot of a previous crashed session, assembled from the
     /// marker + the file log + the matching macOS `.ips` report.
     public struct CrashReport {
@@ -194,6 +199,25 @@ public enum CrashReporter {
         // Delete only after successful read so a sporadic IO error
         // doesn't lose the signal.
         try? FileManager.default.removeItem(at: markerURL)
+
+        // Staleness guard: a marker whose session began more than
+        // `staleCrashThreshold` ago is not actionable on this launch —
+        // it's a leftover from an unclean shutdown days/weeks back (a
+        // force-kill, a power loss, an old build), not a crash the user
+        // just hit. Surfacing a scary dialog (with a long-stale log
+        // tail) then would be noise. We still removed the marker above,
+        // so it won't recur. The macOS `.ips` report, if any, remains
+        // on disk for forensic use. (Sessions essentially never run
+        // longer than this, so this won't hide a real recent crash of a
+        // long-lived session.)
+        if Date().timeIntervalSince(startedAt) > staleCrashThreshold {
+            FileLogStore.shared.write(
+                category: "CrashReporter",
+                level: "info",
+                message: "ignoring stale crash marker — previous session started \(startedAt) (>\(Int(staleCrashThreshold / 3600))h ago)"
+            )
+            return nil
+        }
 
         let logTail = readUnisonLogTail(lineCount: 80)
         let ipsPath = findLatestIPSFile(notOlderThan: startedAt)
