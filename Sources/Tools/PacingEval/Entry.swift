@@ -249,7 +249,7 @@ private func convertFloatToInt16AtSampleRate(floatPCM: Data,
     let src = AVAudioPCMBuffer(pcmFormat: fSrc, frameCapacity: srcFrames)!
     src.frameLength = srcFrames
     floatPCM.withUnsafeBytes { raw in
-        memcpy(src.floatChannelData![0], raw.baseAddress!, floatPCM.count)
+        _ = memcpy(src.floatChannelData![0], raw.baseAddress!, floatPCM.count)
     }
     let dstFrames = AVAudioFrameCount(Double(srcFrames) * targetSampleRate / sourceSampleRate) + 256
     let dst = AVAudioPCMBuffer(pcmFormat: fDst, frameCapacity: dstFrames)!
@@ -271,7 +271,7 @@ private func convertFloatToInt16AtSampleRate(floatPCM: Data,
     let bytes = Int(dst.frameLength) * 2
     var out = Data(count: bytes)
     out.withUnsafeMutableBytes { raw in
-        memcpy(raw.baseAddress!, dst.int16ChannelData![0], bytes)
+        _ = memcpy(raw.baseAddress!, dst.int16ChannelData![0], bytes)
     }
     return out
 }
