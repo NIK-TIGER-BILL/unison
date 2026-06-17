@@ -570,11 +570,11 @@ public final class TranslationOrchestrator {
             let stale: Bool
             if let lastDelta {
                 stale = now.timeIntervalSince(lastDelta) >= Self.slowThresholdSeconds
-            } else if let firstAudible = lastAudible {
-                // No delta yet, but the speaker has been audible for
-                // ≥ slowThresholdSeconds without any server response
-                // — that IS slow.
-                stale = now.timeIntervalSince(firstAudible) >= Self.slowThresholdSeconds
+            } else if let lastAudibleAt = lastAudible {
+                // No delta yet, but the speaker's most-recent audible
+                // frame is ≥ slowThresholdSeconds old with no server
+                // response — that IS slow.
+                stale = now.timeIntervalSince(lastAudibleAt) >= Self.slowThresholdSeconds
             } else {
                 stale = false
             }
@@ -683,6 +683,15 @@ public final class TranslationOrchestrator {
     /// the session. The first yield on attach is the current status,
     /// so a `.satisfied` initial value is a no-op; transitions drive
     /// `.paused ↔ .translating` via `handleNetworkStatusChange`.
+    ///
+    /// `languages` is captured at session start and threaded through to
+    /// the resume path. That's safe ONLY because the language pair is
+    /// immutable for the life of a session — the popover/settings
+    /// pickers are `.disabled` while `state.isActive`, so
+    /// `currentLanguages` can't drift from this captured value. If a
+    /// future change ever makes the pair editable mid-session, resume
+    /// must read `currentLanguages` instead of this capture, or it will
+    /// reconnect with stale languages after a network blip.
     private func startNetworkObserver(mode: SessionMode, languages: LanguagePair) {
         networkObserverTask?.cancel()
         let stream = networkMonitor.statusStream
