@@ -143,8 +143,7 @@ public final class AUHALInputCapture {
             "setOutputStreamFormat")
 
         var cb = AURenderCallbackStruct(
-            inputProc: { (inRefCon, ioFlags, inTimeStamp,
-                          inBusNumber, inNumberFrames, _) -> OSStatus in
+            inputProc: { (inRefCon, ioFlags, inTimeStamp, inBusNumber, inNumberFrames, _) -> OSStatus in
                 let capture = Unmanaged<AUHALInputCapture>.fromOpaque(inRefCon).takeUnretainedValue()
                 return capture.inputCallback(
                     ioFlags: ioFlags,

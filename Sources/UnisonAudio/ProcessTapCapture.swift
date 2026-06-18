@@ -128,14 +128,14 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
 
     private func createAggregateDevice() throws {
         let uid = try tapUID()
-        let aggUID = "com.unison.tapbench.\(UUID().uuidString)"
+        let aggUID = "com.unison.app.tap.\(UUID().uuidString)"
         let dict: [String: Any] = [
             kAudioAggregateDeviceNameKey as String: "UnisonProcessTap",
             kAudioAggregateDeviceUIDKey as String: aggUID,
             kAudioAggregateDeviceTapListKey as String: [
                 [kAudioSubTapUIDKey as String: uid]
             ],
-            kAudioAggregateDeviceIsPrivateKey as String: true,
+            kAudioAggregateDeviceIsPrivateKey as String: true
         ]
         let status = AudioHardwareCreateAggregateDevice(dict as CFDictionary, &aggregateDeviceID)
         try check(status, "AudioHardwareCreateAggregateDevice")
@@ -162,8 +162,7 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
         // The IOProc signature is:
         //   (AudioObjectID, *AudioTimeStamp, *AudioBufferList, *AudioTimeStamp,
         //    *AudioBufferList, *AudioTimeStamp, *void?) -> OSStatus
-        let proc: AudioDeviceIOProc = {
-            _, _, inInputData, inInputTime, _, _, inClientData in
+        let proc: AudioDeviceIOProc = { _, _, inInputData, inInputTime, _, _, inClientData in
             guard let inClientData = inClientData else { return noErr }
             let capture = Unmanaged<ProcessTapCapture>.fromOpaque(inClientData)
                 .takeUnretainedValue()
@@ -198,22 +197,34 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
         )
         guard let firstBuffer = abl.first,
               let mData = firstBuffer.mData else { return }
-        let frameCount = Int(firstBuffer.mDataByteSize) / MemoryLayout<Float>.size
+        let totalFloats = Int(firstBuffer.mDataByteSize) / MemoryLayout<Float>.size
+        let src = mData.assumingMemoryBound(to: Float.self)
+        // The CATapDescription requests a mono mixdown, but the HAL may
+        // deliver multi-channel buffers in some configurations. A
+        // multi-channel AudioBuffer (`mNumberChannels > 1`) is
+        // interleaved by definition — average the channels here so the
+        // rest of the pipeline always sees mono (the resampler's
+        // internals are mono-only).
+        let channels = max(1, Int(firstBuffer.mNumberChannels))
+        let frameCount = totalFloats / channels
         let byteCount = frameCount * MemoryLayout<Float>.size
         var data = Data(count: byteCount)
         data.withUnsafeMutableBytes { raw in
-            if let dst = raw.bindMemory(to: Float.self).baseAddress {
-                dst.initialize(from: mData.assumingMemoryBound(to: Float.self),
-                               count: frameCount)
+            guard let dst = raw.bindMemory(to: Float.self).baseAddress else { return }
+            if channels == 1 {
+                dst.initialize(from: src, count: frameCount)
+            } else {
+                for i in 0..<frameCount {
+                    var acc: Float = 0
+                    for c in 0..<channels { acc += src[i * channels + c] }
+                    dst[i] = acc / Float(channels)
+                }
             }
         }
-        // Use the actual buffer channel count rather than assuming mono — the
-        // CATapDescription requests a mono mixdown, but the HAL may deliver
-        // multi-channel buffers in some configurations.
         let frame = AudioFrame(
             pcm: data,
             sampleRate: Int(nativeSampleRate),
-            channels: Int(firstBuffer.mNumberChannels),
+            channels: 1,
             format: .float32
         )
         continuation?.yield(frame)
@@ -270,7 +281,7 @@ private func fourCCString(_ status: OSStatus) -> String {
         UInt8((status >> 24) & 0xff),
         UInt8((status >> 16) & 0xff),
         UInt8((status >> 8) & 0xff),
-        UInt8(status & 0xff),
+        UInt8(status & 0xff)
     ]
     return String(bytes: bytes, encoding: .ascii)?
         .filter { ($0.asciiValue ?? 0) >= 32 && ($0.asciiValue ?? 0) < 127 } ?? "----"

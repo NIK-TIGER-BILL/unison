@@ -3,8 +3,8 @@ import SwiftUI
 import UnisonUI
 
 /// Owns the menubar `NSStatusItem`. Left click toggles a custom
-/// `MenubarPanel` hosting `PopoverView`; right / Cmd click opens a
-/// context `NSMenu`. See CLAUDE.md for the popover machinery
+/// `MenubarPanel` hosting `PopoverView`; right-click / Control-click
+/// opens a context `NSMenu`. See CLAUDE.md for the popover machinery
 /// (auto-dismiss debounce, harness mode, why not `NSPopover`).
 ///
 /// `AppDelegate` observes the orchestrator's `SessionState` and pushes
@@ -18,6 +18,9 @@ public final class StatusItemController {
     /// debounce in `togglePopover`.
     private var lastDismissAt: Date?
     private static let dismissDebounce: TimeInterval = 0.2
+    /// Block-observer token for `NSWindow.didResizeNotification` —
+    /// kept so `deinit` can unregister it.
+    private var resizeObserverToken: (any NSObjectProtocol)?
 
     public var onStartStop: (() -> Void)?
     public var onShowTranscript: (() -> Void)?
@@ -34,6 +37,18 @@ public final class StatusItemController {
         }
     }
 
+    /// Show / hide the menubar icon. Backs the «Скрывать меню при
+    /// старте сессии» behaviour toggle — while hidden, control stays
+    /// available via the global hotkeys and the transcript pill.
+    public func setStatusItemVisible(_ visible: Bool) {
+        statusItem.isVisible = visible
+        // A hidden status item can't anchor the popover; close it so it
+        // doesn't float orphaned over the desktop.
+        if !visible, popoverPanel.isVisible {
+            popoverPanel.orderOut(nil)
+        }
+    }
+
     public init(
         popoverVM: PopoverViewModel,
         onOpenSettings: @escaping () -> Void = {},
@@ -42,7 +57,7 @@ public final class StatusItemController {
         onShowTranscript: @escaping () -> Void = {},
         onShowDiagnostic: @escaping () -> Void = {},
         onShowAbout: @escaping () -> Void = {},
-        onQuit: @escaping () -> Void = { NSApp.terminate(nil) }
+        onQuit: @escaping () -> Void = { Task { @MainActor in NSApp.terminate(nil) } }
     ) {
         self.popoverVM = popoverVM
         self.onOpenSettings = onOpenSettings
@@ -113,7 +128,7 @@ public final class StatusItemController {
         // Re-anchor the panel under the menubar icon when SwiftUI
         // content height changes — otherwise it grows from its
         // bottom-left and its top slides up into the menu bar.
-        NotificationCenter.default.addObserver(
+        resizeObserverToken = NotificationCenter.default.addObserver(
             forName: NSWindow.didResizeNotification,
             object: panel,
             queue: .main
@@ -127,13 +142,19 @@ public final class StatusItemController {
 
         if let button = statusItem.button {
             // Both events so the same handler can branch between popover
-            // (left) and context menu (right / Cmd-click).
+            // (left) and context menu (right-click / Control-click).
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
             button.action = #selector(handleClick(_:))
             button.target = self
             button.image = MenubarIcons.image(for: state)
             button.imagePosition = .imageOnly
             button.toolTip = "Unison"
+        }
+    }
+
+    deinit {
+        if let token = resizeObserverToken {
+            NotificationCenter.default.removeObserver(token)
         }
     }
 
@@ -187,13 +208,29 @@ public final class StatusItemController {
     }
 
     /// Pin the panel below the status-item button with a 4pt air gap.
+    /// X is clamped into the button's screen so a status item near the
+    /// right edge (or crowded by other items) can't push the panel
+    /// partially offscreen.
     private func repositionPanelBelow(button: NSStatusBarButton) {
         guard let buttonWindow = button.window else { return }
         let buttonRectInWindow = button.convert(button.bounds, to: nil)
         let buttonRectOnScreen = buttonWindow.convertToScreen(buttonRectInWindow)
         let panelSize = popoverPanel.frame.size
+        var x = buttonRectOnScreen.midX - panelSize.width / 2
+        let screen = buttonWindow.screen
+            ?? NSScreen.screens.first { $0.frame.intersects(buttonRectOnScreen) }
+        if let screen {
+            let visible = screen.visibleFrame
+            let minX = visible.minX + 8
+            let maxX = visible.maxX - panelSize.width - 8
+            // maxX < minX only if the panel is wider than the screen —
+            // then keep the centered origin rather than clamping badly.
+            if maxX >= minX {
+                x = min(max(x, minX), maxX)
+            }
+        }
         let origin = NSPoint(
-            x: buttonRectOnScreen.midX - panelSize.width / 2,
+            x: x,
             y: buttonRectOnScreen.minY - panelSize.height - 4
         )
         popoverPanel.setFrameOrigin(origin)
@@ -221,9 +258,12 @@ public final class StatusItemController {
         menu.addItem(.separator())
 
         // Keyboard equivalents here are cosmetic — global hotkeys
-        // are owned by `HotkeyService`.
+        // are owned by `HotkeyService`. A paused session is still
+        // running (auto-resumes when the network returns), so its
+        // toggle action — and therefore the title — is "stop".
+        let isSessionRunning = state == .active || state == .paused
         let startStop = NSMenuItem(
-            title: state == .active ? "Остановить перевод" : "Начать перевод",
+            title: isSessionRunning ? "Остановить перевод" : "Начать перевод",
             action: #selector(menuStartStop(_:)),
             keyEquivalent: "u"
         )

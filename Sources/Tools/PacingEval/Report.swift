@@ -141,11 +141,11 @@ struct AggregateAcrossRuns {
         let perceivedTails = runs.map { $0.sim.playbackFinishedAtSec - $0.arrival.inputDurationSec }
         let arrivalRates = runs.map { $0.arrival.arrivalRateRatio }
         let depthMaxes = runs.map { $0.sim.depthMax }
-        printStat("Underrun %",    underrunPercents, suffix: "%")
-        printStat("Max gap",       maxGaps,           suffix: "s")
+        printStat("Underrun %", underrunPercents, suffix: "%")
+        printStat("Max gap", maxGaps, suffix: "s")
         printStat("Perceived tail (post-input)", perceivedTails, suffix: "s")
-        printStat("Arrival rate",  arrivalRates,     suffix: "x")
-        printStat("Depth max",     depthMaxes,       suffix: "s")
+        printStat("Arrival rate", arrivalRates, suffix: "x")
+        printStat("Depth max", depthMaxes, suffix: "s")
         // Per-run timeline of max gaps — shows whether the "big gap"
         // moves around (network) or sticks (model).
         print("Per-run max-gap timeline:")

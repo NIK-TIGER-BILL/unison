@@ -3,7 +3,9 @@ import Foundation
 /// # Unison UI Kit
 ///
 /// Index of every public design-system surface in `UnisonUI`. The kit is
-/// strictly SwiftUI — it must not import `AppKit`. Anything that needs to
+/// SwiftUI-first — no window management or NSEvent monitors here
+/// (several files do import AppKit for value-level APIs like
+/// `NSWorkspace`/`NSPasteboard`). Anything that needs to
 /// talk to the system (window management, URL opening, `NSEvent` monitors)
 /// is exposed as a closure or callback that the host (`UnisonApp`) wires up.
 ///
@@ -173,8 +175,10 @@ import Foundation
 ///   `// BubbleGroupView(groups: vm.bubbleGroups, scale: vm.bubbleScale)`
 ///
 /// - **`ControlPill`** — transcript-window pill (dot + timer + gear + hide + stop).
-///   Uses `.glassEffect(.regular.interactive(), in: Capsule())` per
-///   Apple's guidance on interactive custom glass surfaces.
+///   Deliberately uses **non-interactive** glass
+///   (`.liquidGlass(shape: Capsule())`): `Glass.interactive()` installs a
+///   hit-testable surface that swallows mouse-down before it reaches the
+///   `WindowDragHandle` background and kills panel dragging.
 ///   `init(isActive: Bool, elapsedLabel: String, isHidden: Bool, isSettingsOpen: Bool, onToggleSettings: @escaping () -> Void, onToggleHidden: @escaping () -> Void, onStop: @escaping () -> Void)`
 ///   `// ControlPill(isActive: true, elapsedLabel: "00:42", isHidden: false, isSettingsOpen: false, onToggleSettings: …, onToggleHidden: …, onStop: …)`
 ///
@@ -189,9 +193,11 @@ import Foundation
 ///   Use 22–26 for main panels, 12–14 for inner blocks.
 /// - For settings/forms, prefer native `Form` + `.formStyle(.grouped)`
 ///   with `Section("Title")` headers. Use `LabeledContent` for rows.
-/// - For interactive custom glass surfaces (draggable pills, etc.),
-///   pass `.regular.interactive()` to `glassEffect(_:in:)` so the
-///   material responds to pointer/touch.
+/// - `.interactive()` glass must **NOT** be used on surfaces that rely
+///   on `WindowDragHandle` (e.g. the transcript control pill): the
+///   interactive material intercepts mouse-down and breaks manual
+///   window dragging. Reserve `.regular.interactive()` for
+///   self-contained controls that never sit on a drag handle.
 /// - When multiple `glassEffect`s appear as siblings in the same
 ///   layout, wrap them in `GlassEffectContainer` for best rendering
 ///   performance (and so SwiftUI can compose lensing across surfaces).
@@ -203,4 +209,6 @@ import Foundation
 ///   bar with `.safeAreaBar(edge: .bottom)`.
 /// - Section headers use title-case capitalization (per Apple's
 ///   official Liquid Glass guidance), not UPPERCASE.
-/// - The kit must never import `AppKit`; host integrations belong in `UnisonApp`.
+/// - No window management / NSEvent monitors in the kit; host
+///   integrations belong in `UnisonApp`. (Value-level AppKit imports —
+///   NSWorkspace, NSPasteboard — are tolerated.)

@@ -131,7 +131,7 @@ public enum CompensatingAGC {
             var out = samples
             out.withUnsafeMutableBufferPointer { buf in
                 for i in 0..<n {
-                    buf[i] = buf[i] * g
+                    buf[i] *= g
                 }
             }
             return (newState, out)
@@ -168,7 +168,7 @@ public enum CompensatingAGC {
         var out = samples
         out.withUnsafeMutableBufferPointer { buf in
             for i in 0..<n {
-                buf[i] = buf[i] * g
+                buf[i] *= g
             }
         }
         return (newState, out)
@@ -203,7 +203,7 @@ public final class CompensatingAGCRunner {
         var samples = [Float](repeating: 0, count: count)
         samples.withUnsafeMutableBufferPointer { dst in
             pcmF32.withUnsafeBytes { src in
-                memcpy(dst.baseAddress!, src.baseAddress!, pcmF32.count)
+                _ = memcpy(dst.baseAddress!, src.baseAddress!, pcmF32.count)
             }
         }
         let (newState, processed) = CompensatingAGC.processed(
@@ -216,7 +216,7 @@ public final class CompensatingAGCRunner {
         var outData = Data(count: pcmF32.count)
         processed.withUnsafeBufferPointer { src in
             outData.withUnsafeMutableBytes { dst in
-                memcpy(dst.baseAddress!, src.baseAddress!, pcmF32.count)
+                _ = memcpy(dst.baseAddress!, src.baseAddress!, pcmF32.count)
             }
         }
         return (outData, state.currentGain)

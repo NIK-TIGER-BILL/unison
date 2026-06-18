@@ -33,7 +33,7 @@ struct PacingSimulator {
     /// bookkeeping for diagnostics) but `applied_rate` ignores it and
     /// holds at this value. Used to test "what if pacing didn't
     /// accelerate at all" against v3's mild ramp-up on depth peaks.
-    var rateOverride: Double? = nil
+    var rateOverride: Double?
     /// Variant tag for the report.
     var variantLabel: String = "v3-default"
 
@@ -76,6 +76,10 @@ struct PacingSimulator {
         let playbackFinishedAtSec: Double
     }
 
+    // One linear tick loop — splitting it would scatter the simulator's
+    // invariants (queue/rate/underrun bookkeeping) across helpers that
+    // share a dozen locals. Eval-harness code, not production.
+    // swiftlint:disable:next function_body_length
     func simulate() -> (rows: [TickRow], summary: Summary) {
         // Convert arrivals to a tick-indexed schedule of bytes-to-add.
         // For each arrival t, we add bytes to the queue at the matching
@@ -116,7 +120,7 @@ struct PacingSimulator {
         // arrival is older than 2s — to avoid hanging forever if the
         // stream is sparse.
         var playbackStarted = prerollSec <= 0
-        var firstArrivalTick: Int? = nil
+        var firstArrivalTick: Int?
 
         var rows: [TickRow] = []
         rows.reserveCapacity(totalTicks)

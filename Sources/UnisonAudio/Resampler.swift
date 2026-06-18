@@ -83,17 +83,54 @@ private final class CachedConverter: @unchecked Sendable {
 
 public enum Resampler {
     public static func toOpenAIWire(_ frame: AudioFrame) -> AudioFrame {
-        if frame.sampleRate == 24_000, frame.format == .int16 { return frame }
-        let f32_24k = resampleFloat32(frame, targetSampleRate: 24_000)
+        if frame.sampleRate == 24_000, frame.format == .int16, frame.channels == 1 { return frame }
+        // Normalize to float32 mono before resampling. Capture sources
+        // aim for mono float32, but real devices diverge: USB/BT mics
+        // deliver int16 (the mic capture explicitly tags it) and some
+        // configurations deliver interleaved multi-channel. Both used
+        // to land in `resampleFloat32`'s fatalError / mono
+        // precondition — a guaranteed mid-call crash.
+        let f32 = frame.format == .float32 ? frame : convertInt16ToFloat32(frame)
+        let f32_24k = resampleFloat32(mixdownToMono(f32), targetSampleRate: 24_000)
         return convertFloat32ToInt16(f32_24k)
     }
 
     public static func fromOpenAIWire(_ frame: AudioFrame, targetSampleRate: Int) -> AudioFrame {
-        let f32 = convertInt16ToFloat32(frame)
-        return resampleFloat32(f32, targetSampleRate: targetSampleRate)
+        let f32 = frame.format == .float32 ? frame : convertInt16ToFloat32(frame)
+        return resampleFloat32(mixdownToMono(f32), targetSampleRate: targetSampleRate)
     }
 
     // MARK: - Helpers
+
+    /// Average interleaved channels into one mono channel. Multi-channel
+    /// frames that reach the resampler are interleaved by construction:
+    /// CoreAudio ABL buffers with `mNumberChannels > 1` and
+    /// `CMSampleBuffer` audio carry interleaved layouts, and the
+    /// captures reduce planar (non-interleaved) buffers to their first
+    /// plane before frames enter the pipeline. No-op for mono input.
+    private static func mixdownToMono(_ frame: AudioFrame) -> AudioFrame {
+        guard frame.channels > 1 else { return frame }
+        guard frame.format == .float32, !frame.pcm.isEmpty else {
+            // Empty multi-channel frame — re-tag only.
+            return AudioFrame(pcm: frame.pcm, sampleRate: frame.sampleRate,
+                              channels: 1, format: frame.format)
+        }
+        let ch = frame.channels
+        let frameCount = frame.sampleCount
+        var out = Data(count: frameCount * MemoryLayout<Float>.size)
+        frame.pcm.withUnsafeBytes { srcRaw in
+            guard let src = srcRaw.bindMemory(to: Float.self).baseAddress else { return }
+            out.withUnsafeMutableBytes { dstRaw in
+                guard let dst = dstRaw.bindMemory(to: Float.self).baseAddress else { return }
+                for i in 0..<frameCount {
+                    var acc: Float = 0
+                    for c in 0..<ch { acc += src[i * ch + c] }
+                    dst[i] = acc / Float(ch)
+                }
+            }
+        }
+        return AudioFrame(pcm: out, sampleRate: frame.sampleRate, channels: 1, format: .float32)
+    }
 
     private static func resampleFloat32(_ frame: AudioFrame, targetSampleRate: Int) -> AudioFrame {
         guard frame.format == .float32 else {
@@ -189,7 +226,10 @@ public enum Resampler {
 
     private static func convertFloat32ToInt16(_ frame: AudioFrame) -> AudioFrame {
         guard frame.format == .float32 else { fatalError("expected .float32") }
-        let n = frame.sampleCount
+        // Total sample values across ALL channels — `sampleCount` is
+        // per-channel frames, which would convert only 1/N of an
+        // interleaved multi-channel buffer.
+        let n = frame.pcm.count / MemoryLayout<Float>.size
         var out = Data(count: n * 2)
         frame.pcm.withUnsafeBytes { srcRaw in
             let src = srcRaw.bindMemory(to: Float.self).baseAddress!
@@ -206,7 +246,9 @@ public enum Resampler {
 
     private static func convertInt16ToFloat32(_ frame: AudioFrame) -> AudioFrame {
         guard frame.format == .int16 else { fatalError("expected .int16") }
-        let n = frame.sampleCount
+        // Total sample values across ALL channels (see note in
+        // `convertFloat32ToInt16`).
+        let n = frame.pcm.count / MemoryLayout<Int16>.size
         var out = Data(count: n * 4)
         frame.pcm.withUnsafeBytes { srcRaw in
             let src = srcRaw.bindMemory(to: Int16.self).baseAddress!

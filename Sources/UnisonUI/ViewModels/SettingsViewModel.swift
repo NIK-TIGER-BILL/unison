@@ -40,8 +40,6 @@ public final class SettingsViewModel {
     /// initializer; saved back via `updateApiKey(_:)`. Empty when no
     /// key is set or no keychain is wired in (tests).
     public var apiKey: String
-    /// Toggles the `SecretInput` between plain text and password mode.
-    public var apiKeyVisible: Bool = false
 
     /// Configured global hotkeys. Default values match the design
     /// (`⌃⌥U` / `⌃⌥T`). Persisted via `hotkeyStore` when supplied.
@@ -85,6 +83,22 @@ public final class SettingsViewModel {
     /// the host wiring to re-register hotkeys when they change.
     @ObservationIgnored
     public var onHotkeysChanged: ((Hotkey?, Hotkey?) -> Void)?
+
+    /// Fired when the user flips «Запускать при логине». The host wires
+    /// this to `SMAppService` (ServiceManagement lives in `UnisonApp` —
+    /// this module must stay AppKit-light). Without the hook the toggle
+    /// was pure UI theater: it persisted a bool nobody read.
+    @ObservationIgnored
+    public var onAutostartChanged: ((Bool) -> Void)?
+
+    /// Fired on every original-mix-volume mutation so the host can keep
+    /// the transcript popover's slider in sync. The reverse direction
+    /// (transcript slider → here) already flows through
+    /// `setOriginalMixVolume`; without this hook the sync was one-way
+    /// and the transcript popover showed a stale percentage after the
+    /// user moved the Settings slider.
+    @ObservationIgnored
+    public var onOriginalMixVolumeChanged: ((Float) -> Void)?
 
     public init(
         initial: Settings,
@@ -167,6 +181,18 @@ public final class SettingsViewModel {
     public func setOriginalMixVolume(_ v: Float) {
         settings.originalMixVolume = v
         emitChange()
+        onOriginalMixVolumeChanged?(settings.originalMixVolume)
+    }
+
+    /// Adopt a `Settings` value mutated by another surface (the menubar
+    /// popover's language / mode controls). Persists through the same
+    /// `onChange` pipeline as the window's own mutators so the two
+    /// surfaces can't diverge — previously the popover mutated its own
+    /// copy in memory only, so its picks were lost on restart and
+    /// silently clobbered by the next Settings-window save.
+    public func adoptExternalSettings(_ s: Settings) {
+        settings = s
+        emitChange()
     }
 
     public func setExcludedTapBundleIDs(_ ids: [String]) {
@@ -174,21 +200,33 @@ public final class SettingsViewModel {
         emitChange()
     }
 
-    /// Persist a new OpenAI API key. Writes to the configured Keychain
-    /// (if any); the value is also kept in memory so the view's binding
-    /// reflects the saved state without reloading. Empty values clear
-    /// the key.
+    /// Persist a new OpenAI API key. The in-memory value updates on
+    /// every keystroke (so the field binding stays live), but the
+    /// Keychain write happens only for an emptied field (= delete) or a
+    /// plausibly-complete key — the previous per-keystroke write stored
+    /// truncated garbage, and a ⌘A-retype transiently wiped the stored
+    /// key mid-edit. The validity rule mirrors onboarding's
+    /// `canSaveKey`. `lastSavedAt` bumps only when a write actually
+    /// happened AND succeeded, so the «сохранено» flash can't lie about
+    /// a rejected Keychain write.
     public func updateApiKey(_ key: String) {
         apiKey = key
-        if let keychain {
-            let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                try? keychain.deleteAPIKey()
-            } else {
-                try? keychain.saveAPIKey(trimmed)
+        guard let keychain else {
+            bumpSavedTimestamp()
+            return
+        }
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            if (try? keychain.deleteAPIKey()) != nil {
+                bumpSavedTimestamp()
+            }
+        } else if trimmed.hasPrefix("sk-"), trimmed.count >= 20 {
+            if (try? keychain.saveAPIKey(trimmed)) != nil {
+                bumpSavedTimestamp()
             }
         }
-        bumpSavedTimestamp()
+        // Anything else is a partial edit in progress — keep the old
+        // stored key until the field holds a complete one.
     }
 
     /// Persist a recorded hotkey for the given kind. Re-broadcasts via
@@ -217,6 +255,7 @@ public final class SettingsViewModel {
     public func updateAutostart(_ value: Bool) {
         autostart = value
         togglesStore?.saveToggle(.autostart, value)
+        onAutostartChanged?(value)
         bumpSavedTimestamp()
     }
 
@@ -224,10 +263,6 @@ public final class SettingsViewModel {
         hideMenuOnSession = value
         togglesStore?.saveToggle(.hideMenuOnSession, value)
         bumpSavedTimestamp()
-    }
-
-    public func toggleApiKeyVisibility() {
-        apiKeyVisible.toggle()
     }
 
     public func beginRecordingHotkey(_ kind: HotkeyKind) {

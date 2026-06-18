@@ -89,7 +89,7 @@ struct Session {
         // Receive task — records every output delta with its arrival
         // time AND the decoded int16 PCM so we can analyse amplitude
         // over time and reassemble the model's raw output as a WAV.
-        let outputStream = await stream.output
+        let outputStream = stream.output
         let receiveTask = Task {
             for await frame in outputStream {
                 let t = Date().timeIntervalSince(t0)

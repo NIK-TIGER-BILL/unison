@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Clickable monospaced label that records a hotkey when active.
 ///
-/// `UnisonUI` cannot import AppKit, so the actual NSEvent monitor lives in
+/// NSEvent monitors stay out of `UnisonUI`, so the actual monitor lives in
 /// `UnisonApp/HotkeyService.swift`. This view renders the visual state and
 /// exposes a binding (`isRecording`) plus a callback (`onCapture`) that
 /// the host wires to a real local-event monitor.
@@ -33,8 +33,16 @@ public struct HotkeyRecorder: View {
     public var body: some View {
         let canPulse = isRecording && !reduceMotion
         return Button {
-            isRecording = true
-            onStartRecording()
+            // Toggle: clicking the chip mid-recording cancels (matches
+            // the design). Without this the only exits were Esc or
+            // closing the window — meanwhile the recording monitor
+            // swallows all plain typing app-wide.
+            if isRecording {
+                isRecording = false
+            } else {
+                isRecording = true
+                onStartRecording()
+            }
         } label: {
             // HIG Materials: vibrant `.primary` while recording (the
             // pulsing chip is the focal point); `.secondary` while idle

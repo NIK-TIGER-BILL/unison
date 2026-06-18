@@ -319,12 +319,24 @@ public final class PlaybackPacing: @unchecked Sendable {
         // progression are visible without flooding the user-facing
         // log. Bump to info if actively debugging pacing.
         if tickCount % 10 == 0 {
-            log.debug("[\(label)] pacing tick=\(tickCount) depth=\(String(format: "%.3fs", depth)) depth_smooth=\(String(format: "%.3fs", depthSmooth)) arrival_ema=\(String(format: "%.3fx", arrivalRateEMA)) consumption_ema=\(String(format: "%.3fx", consumptionRateEMA)) target=\(String(format: "%.3f", state.clampedTarget)) applied=\(String(format: "%.3f", appliedRate))")
+            let tickLine = "[\(label)] pacing tick=\(tickCount)"
+                + " depth=\(String(format: "%.3fs", depth))"
+                + " depth_smooth=\(String(format: "%.3fs", depthSmooth))"
+                + " arrival_ema=\(String(format: "%.3fx", arrivalRateEMA))"
+                + " consumption_ema=\(String(format: "%.3fx", consumptionRateEMA))"
+                + " target=\(String(format: "%.3f", state.clampedTarget))"
+                + " applied=\(String(format: "%.3f", appliedRate))"
+            log.debug(tickLine)
         }
 
         if abs(appliedRate - lastLoggedRate) >= Self.logHysteresis ||
             abs(depth - lastLoggedQueueSec) >= 0.5 {
-            log.debug("[\(label)] pacing — queue=\(String(format: "%.2fs", depth)) arrival=\(String(format: "%.2fx", arrivalRateEMA)) target=\(String(format: "%.3f", state.clampedTarget)) applied=\(String(format: "%.3f", appliedRate)) bufErr=\(String(format: "%+.2f", state.bufferError))")
+            let changeLine = "[\(label)] pacing — queue=\(String(format: "%.2fs", depth))"
+                + " arrival=\(String(format: "%.2fx", arrivalRateEMA))"
+                + " target=\(String(format: "%.3f", state.clampedTarget))"
+                + " applied=\(String(format: "%.3f", appliedRate))"
+                + " bufErr=\(String(format: "%+.2f", state.bufferError))"
+            log.debug(changeLine)
             lastLoggedRate = appliedRate
             lastLoggedQueueSec = depth
         }

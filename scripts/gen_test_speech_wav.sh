@@ -10,14 +10,20 @@
 
 set -euo pipefail
 
+cd "$(dirname "$0")/.."  # repo root — Tests/Fixtures path below is repo-relative
+
 OUT="Tests/Fixtures/test_speech_ru.wav"
-TMP_AIFF="$(mktemp -t test_speech_XXXXXX).aiff"
+# mktemp creates (and leaves behind) the extension-less file too, so
+# track BOTH paths and remove them in the trap — appending ".aiff" to
+# the mktemp result alone leaks the original temp file.
+TMP_BASE="$(mktemp -t test_speech)"
+TMP_AIFF="$TMP_BASE.aiff"
 TEXT="Привет, это тестовая запись для проверки перевода в Unison. Сегодня хорошая погода и мы пишем код."
 VOICE="${VOICE:-Milena}"
 
 mkdir -p Tests/Fixtures
 
-trap 'rm -f "$TMP_AIFF"' EXIT
+trap 'rm -f "$TMP_AIFF" "$TMP_BASE"' EXIT
 
 echo "Synthesizing via 'say' (voice=$VOICE)…"
 say -v "$VOICE" -o "$TMP_AIFF" "$TEXT"

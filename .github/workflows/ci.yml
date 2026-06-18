@@ -6,21 +6,33 @@ on:
   pull_request:
 
 jobs:
-  build-test:
+  swift-test:
+    # Package.swift needs swift-tools 6.2 + the macOS 26 SDK (Liquid
+    # Glass APIs), so the job must run on the macos-26 image. Its
+    # default Xcode is always a 26.x release — no xcode-select pin;
+    # pinning a specific minor breaks when the image rotates it out.
     runs-on: macos-26
+    # Backstop only — the suite runs in well under a minute. (It used to
+    # wedge until the 6 h limit: a deadlock in the mock WebSocket server's
+    # test helper parked a continuation that never resumed; fixed in
+    # MockOpenAIRealtimeServer with one-shot continuations.)
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Select Xcode 26
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: '26'
+      - name: Toolchain versions
+        run: |
+          xcode-select -p
+          swift --version
       - name: swift build
         run: swift build
       - name: swift test
-        run: swift test --parallel
-      # Smoke-test the release bundler on every push so packaging
-      # regressions surface here, not at `git tag` time. Ad-hoc signed,
-      # debug config (fast); no secrets required.
+        # `--no-parallel`: swift-testing parallelises by default (the
+        # `--parallel` flag is an XCTest-ism) and its parallel runner
+        # deadlocks this suite. Serial runs the full suite in ~40 s.
+        run: swift test --no-parallel
+      # Smoke-test the release bundler so packaging breaks surface on
+      # push, not at `git tag` time. Ad-hoc, debug config (reuses the
+      # build above); no secrets required.
       - name: Bundle smoke (ad-hoc)
         run: CONFIG=debug ./scripts/bundle_app.sh
       - name: Verify bundle
@@ -32,10 +44,6 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - name: Select Xcode 26
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: '26'
       # `scripts/lint.sh` downloads SwiftLint + Periphery into
       # `scripts/.bin/` on first run, so no Homebrew install step
       # is needed. SwiftLint runs `--strict` and fails the job on

@@ -38,8 +38,13 @@ public struct TranscriptView: View {
             }
 
             if vm.showStopConfirmation {
+                // Entrance/exit runs through the transition (driven by the
+                // `glassAppear` animation below) — scale+fade in, reverse
+                // out. Reduce Motion keeps just the fade.
                 stopModal
-                    .transition(.opacity)
+                    .transition(reduceMotion
+                        ? .opacity
+                        : .scale(scale: 0.92).combined(with: .opacity))
                     .zIndex(50)
             }
         }
@@ -153,10 +158,6 @@ public struct TranscriptView: View {
             .padding(22)
             .frame(width: 340)
             .liquidGlass(cornerRadius: 18)
-            // Reduce Motion skips the entrance scale/offset — the
-            // modal still fades in via the outer `.transition(.opacity)`.
-            .scaleEffect(reduceMotion ? 1.0 : (vm.showStopConfirmation ? 1.0 : 0.92))
-            .offset(y: reduceMotion ? 0 : (vm.showStopConfirmation ? 0 : 8))
         }
     }
 }

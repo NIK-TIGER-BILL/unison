@@ -121,11 +121,19 @@ public final class HotkeyService {
         onCancel: @escaping @MainActor () -> Void = {}
     ) {
         endRecording()
+        // Teardown + callbacks run SYNCHRONOUSLY inside the handler
+        // (local monitors always fire on the main thread, so
+        // `assumeIsolated` is sound). The previous Task-deferred
+        // teardown left the monitor installed for a beat — a fast
+        // second keystroke or an auto-repeat could be captured again
+        // before the MainActor task dequeued.
         recordingMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            // Auto-repeats of a held combo must not re-capture.
+            if event.isARepeat { return nil }
             // Escape cancels.
             if event.keyCode == 53 {
-                Task { @MainActor in
+                MainActor.assumeIsolated {
                     self.endRecording()
                     onCancel()
                 }
@@ -135,7 +143,7 @@ public final class HotkeyService {
             guard let hotkey = Self.makeHotkey(from: event) else {
                 return nil // swallow keys without modifiers so they don't escape
             }
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 self.endRecording()
                 onCapture(hotkey)
             }
@@ -159,13 +167,22 @@ public final class HotkeyService {
     /// (their return value is ignored by AppKit).
     @discardableResult
     private func handleGlobalKeyDown(_ event: NSEvent) -> Bool {
+        // While a recording session is active, configured combos must
+        // not fire — pressing the currently-assigned combo to re-record
+        // it would otherwise toggle the translation session mid-Settings
+        // (and consume the event before the recording monitor sees it).
+        guard recordingMonitor == nil else { return false }
         guard let pressed = Self.makeHotkey(from: event) else { return false }
         if let target = startStopHotkey, target == pressed {
-            onStartStop?()
+            // Auto-repeat fires ~10-30×/s while the combo is held;
+            // start/stop are slow async pipelines, so acting on every
+            // repeat interleaves stop-during-start. Act once on the
+            // initial press, swallow the repeats.
+            if !event.isARepeat { onStartStop?() }
             return true
         }
         if let target = showTranscriptHotkey, target == pressed {
-            onShowTranscript?()
+            if !event.isARepeat { onShowTranscript?() }
             return true
         }
         return false

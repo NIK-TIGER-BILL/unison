@@ -30,7 +30,9 @@ ensure_tool tart    "brew install cirruslabs/cli/tart"
 ensure_tool sshpass "brew install hudochenkov/sshpass/sshpass"
 
 # `tart list` exits 0 even if VM is missing — match the name explicitly.
-if tart list --format json 2>/dev/null | grep -q "\"name\"[[:space:]]*:[[:space:]]*\"$VM_NAME\""; then
+# NB: tart's JSON keys are capitalized (`"Name" : "unison-test"`), same
+# casing vm-tap-benchmark.sh parses via `vm.get("Name")`.
+if tart list --format json 2>/dev/null | grep -q "\"Name\"[[:space:]]*:[[:space:]]*\"$VM_NAME\""; then
   log "VM \"$VM_NAME\" already exists — skipping clone."
 else
   log "Pulling and cloning base image: $BASE_IMAGE"

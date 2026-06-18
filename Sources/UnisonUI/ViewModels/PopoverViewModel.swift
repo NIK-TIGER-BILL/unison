@@ -30,6 +30,14 @@ public final class PopoverViewModel {
     private let deviceRegistry: any AudioDeviceRegistry
     public var settings: Settings
 
+    /// Fired by the popover's own mutators (`updateLanguagePair`,
+    /// `updateSessionMode`) so the host can persist the change through
+    /// the canonical settings pipeline. Without it the popover mutated
+    /// a local copy only: picks were lost on restart and silently
+    /// reverted by the next Settings-window save.
+    @ObservationIgnored
+    public var onSettingsChanged: ((Settings) -> Void)?
+
     /// Test-only override for the session state. When the VM is
     /// constructed via `previewing(...)` the state is sourced from this
     /// property instead of an orchestrator. Production code never
@@ -124,12 +132,6 @@ public final class PopoverViewModel {
         orchestrator?.connectivityHealth ?? previewConnectivityHealth
     }
 
-    public var languagePairDisplay: String {
-        let mine = settings.languagePair.mine
-        let peer = settings.languagePair.peer
-        return "\(mine.flagEmoji) \(mine.displayName) → \(peer.flagEmoji) \(peer.displayName)"
-    }
-
     public var runningTimeSeconds: TimeInterval {
         // Read through `sessionStartedAt` so the timer keeps ticking
         // during `.reconnecting` instead of snapping back to 00:00 every
@@ -139,14 +141,6 @@ public final class PopoverViewModel {
             return Date().timeIntervalSince(startedAt)
         }
         return 0
-    }
-
-    /// `true` while the popover should render the "Переподключение…"
-    /// affordance instead of the regular active state. Kept on the VM so
-    /// the view stays a thin renderer.
-    public var isReconnecting: Bool {
-        if case .reconnecting = state { return true }
-        return false
     }
 
     /// `mm:ss` formatted version of `runningTimeSeconds`.
@@ -346,15 +340,19 @@ public final class PopoverViewModel {
         Self.log.info("stop() returned — state=\(String(describing: self.state))")
     }
 
-    /// Toggle between Call and Listen modes. Convenience for the view.
-    public func toggleSessionMode() {
-        settings.sessionMode = settings.sessionMode == .call ? .listen : .call
+    /// Switch between Call and Listen. Persists via `onSettingsChanged`.
+    public func updateSessionMode(_ mode: SessionMode) {
+        guard settings.sessionMode != mode else { return }
+        settings.sessionMode = mode
+        onSettingsChanged?(settings)
     }
 
     /// Replace the current language pair. Centralising the write keeps
-    /// the view layer from poking at `settings.languagePair` directly.
+    /// the view layer from poking at `settings.languagePair` directly,
+    /// and routes the change into the persistent settings pipeline.
     public func updateLanguagePair(_ pair: LanguagePair) {
         settings.languagePair = pair
+        onSettingsChanged?(settings)
     }
 
     /// Russian user-facing message for a `TranslationError` surfaced via

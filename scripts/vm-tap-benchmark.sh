@@ -23,6 +23,10 @@ set -euo pipefail
 VM_NAME="${VM_NAME:-unison-test}"
 VM_USER="${VM_USER:-admin}"
 VM_PASS="${VM_PASS:-admin}"
+# Shell-quoted form for embedding in remote command lines — bare
+# interpolation would let quotes/spaces in the password break out of
+# (or inject into) the remote shell command.
+Q_VM_PASS="$(printf '%q' "$VM_PASS")"
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o LogLevel=ERROR -o PreferredAuthentications=password -o PubkeyAuthentication=no)
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PATH="$REPO_DIR/build/TapBenchmark.app"
@@ -169,8 +173,8 @@ case "$SCENARIO" in
   without-blackhole)
     log "Removing BlackHole 16ch from VM (if present)…"
     ssh_vm "
-      echo $VM_PASS | sudo -S rm -rf /Library/Audio/Plug-Ins/HAL/BlackHole16ch.driver 2>/dev/null || true
-      echo $VM_PASS | sudo -S launchctl kickstart -kp system/com.apple.audio.coreaudiod 2>/dev/null || true
+      printf '%s\n' $Q_VM_PASS | sudo -S rm -rf /Library/Audio/Plug-Ins/HAL/BlackHole16ch.driver 2>/dev/null || true
+      printf '%s\n' $Q_VM_PASS | sudo -S launchctl kickstart -kp system/com.apple.audio.coreaudiod 2>/dev/null || true
     " || true
     # Give coreaudiod time to come back up before we start the benchmark.
     sleep 5
@@ -185,8 +189,8 @@ log "Pre-granting TCC audio capture…"
 # Reset both services — macOS 14+ Process Tap uses AudioCapture, but
 # older paths and broader audio-input still go through Microphone.
 ssh_vm "
-  echo $VM_PASS | sudo -S tccutil reset Microphone   com.unison.tapbench 2>/dev/null || true
-  echo $VM_PASS | sudo -S tccutil reset AudioCapture com.unison.tapbench 2>/dev/null || true
+  printf '%s\n' $Q_VM_PASS | sudo -S tccutil reset Microphone   com.unison.tapbench 2>/dev/null || true
+  printf '%s\n' $Q_VM_PASS | sudo -S tccutil reset AudioCapture com.unison.tapbench 2>/dev/null || true
 " || true
 
 # --- 6. Run the benchmark --------------------------------------------------------
@@ -201,7 +205,7 @@ log "Running benchmark inside VM (scenario=$SCENARIO duration=${DURATION}s)…"
 run_in_user_session() {
   local cmd="$1"
   ssh_vm "
-    echo $VM_PASS | sudo -S launchctl asuser \$(id -u $VM_USER) \
+    printf '%s\n' $Q_VM_PASS | sudo -S launchctl asuser \$(id -u $VM_USER) \
       /bin/sh -c '$cmd > $LOG_FILE 2>&1'
     cat $LOG_FILE
   "

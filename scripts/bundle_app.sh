@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+cd "$(dirname "$0")/.."  # repo root — build/, Resources/, .build/ paths below are repo-relative
+
 TARGET="unison"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -63,8 +65,8 @@ cp "$INFO_PLIST" "$CONTENTS/Info.plist"
 
 # Stamp the version when the release pipeline provides it. The repo's
 # Info.plist keeps placeholder values (1.0 / 1); the real marketing
-# version comes from the git tag and the build number from the commit
-# count — see scripts/build_release.sh and .github/workflows/release.yml.
+# version comes from the git tag, the build number from the release run
+# — see scripts/build_release.sh and .github/workflows/release.yml.
 # Local `bundle_app.sh` runs without these vars keep the placeholders.
 # Must happen BEFORE codesign — signing seals the bundle contents.
 if [ -n "${MARKETING_VERSION:-}" ]; then

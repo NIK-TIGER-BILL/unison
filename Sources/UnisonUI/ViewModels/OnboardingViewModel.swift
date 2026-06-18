@@ -34,7 +34,10 @@ public enum OnboardingStepStatus: Equatable, Sendable {
 }
 
 public struct OnboardingStep: Identifiable, Sendable {
-    public let id = UUID()
+    /// Stable identity — each kind appears once, so the kind itself is
+    /// the id. A stored `UUID()` regenerated on every `refresh()` and
+    /// defeated SwiftUI diffing.
+    public var id: OnboardingStepKind { kind }
     public let kind: OnboardingStepKind
     public let isDone: Bool
 }
@@ -336,15 +339,6 @@ public final class OnboardingViewModel {
         } catch {
             status[.apiKey] = .error("Не удалось сохранить ключ в Keychain.")
         }
-    }
-
-    /// Backward-compatible overload accepting a raw string. Persists
-    /// the key without the strict validator (so existing tests using
-    /// short fixtures keep passing). Validated saves go through
-    /// `saveAPIKey()` and `apiKeyDraft`.
-    public func saveAPIKey(_ key: String) throws {
-        try keychain.saveAPIKey(key)
-        refresh()
     }
 
     /// Clears any error for the given step. Used when the user edits

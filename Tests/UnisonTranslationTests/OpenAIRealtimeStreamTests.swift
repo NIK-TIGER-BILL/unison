@@ -385,32 +385,43 @@ import Testing
     // Per OpenAI cookbook: "send `session.close`, then continue reading
     // events until `session.closed` confirmation — system flushes pending
     // audio." Our `close()` parks on a grace continuation that wakes when
-    // a `session.closed` event arrives. Push one in flight to confirm the
-    // graceful path resolves promptly instead of riding the 500ms timeout.
+    // a `session.closed` event arrives.
+    //
+    // The discriminator here is STRUCTURAL, not wall-clock: the stream
+    // gets a clock whose `sleep` parks forever, so the 0.5 s grace
+    // timeout can never fire. `close()` therefore completes ONLY via
+    // the `session.closed` wake-up path — no timing assertion that a
+    // loaded parallel test runner could flake (the previous version
+    // asserted `< 0.4 s` of wall time against a 50 ms settle sleep).
     let ws = FakeWSClient()
-    let stream = OpenAIRealtimeStream(apiKey: "sk-test", client: ws, clock: SystemClock())
+    let parkedClock = ParkedClock()
+    let stream = OpenAIRealtimeStream(apiKey: "sk-test", client: ws, clock: parkedClock)
     try await stream.connect(target: .en)
 
-    // Push `session.closed` *before* calling close — the receive task will
-    // process it ahead of close()'s grace wait and resolve the waiter
-    // immediately.
     ws.push(.text(#"{"type":"session.closed"}"#))
-    // Give the receive task a moment to consume the event.
-    try? await Task.sleep(nanoseconds: 50_000_000)
 
-    // Wall-clock the close() call using stdlib `ContinuousClock` —
-    // avoids importing Foundation/Date here so we don't trigger the
-    // missing `_Testing_Foundation` cross-import overlay on Command
-    // Line Tools setups (same trick `Helpers.swift` uses).
-    let clock = ContinuousClock()
-    let start = clock.now
-    await stream.close()
-    let elapsed = start.duration(to: clock.now)
-    // Should finish well before the 500ms grace timeout when the server
-    // confirms closure ahead of time. `Duration` only exposes
-    // `components.seconds + attoseconds`; cast to Double via the seconds
-    // component since 400ms ≪ 1s never overflows.
-    let elapsedSec = Double(elapsed.components.seconds) +
-        Double(elapsed.components.attoseconds) / 1e18
-    #expect(elapsedSec < 0.4, "close() should resolve quickly when session.closed already arrived (took \(elapsedSec)s)")
+    let closeTask = Task { await stream.close() }
+    let completed = await withTaskGroup(of: Bool.self) { group -> Bool in
+        group.addTask { await closeTask.value; return true }
+        group.addTask {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            return false
+        }
+        let first = await group.next() ?? false
+        group.cancelAll()
+        return first
+    }
+    if !completed {
+        // Unstick the parked close() so the suite doesn't leak a
+        // suspended task, then fail.
+        parkedClock.releaseAll()
+        await closeTask.value
+        Issue.record("close() stayed parked — session.closed did not resolve the grace waiter")
+        return
+    }
+    let hasClose = ws.sentMessages.contains { msg in
+        if case .text(let s) = msg, s.contains("session.close") { return true } else { return false }
+    }
+    #expect(hasClose)
+    #expect(ws.closeCalls == 1)
 }

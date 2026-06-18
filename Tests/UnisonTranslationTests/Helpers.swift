@@ -1,5 +1,6 @@
 import Foundation
 @testable import UnisonTranslation
+import UnisonDomain
 
 // Helpers in this file deliberately avoid `import Testing` so the
 // `_Testing_Foundation` cross-import overlay (missing from the
@@ -36,3 +37,25 @@ func posixOperationCanceledError() -> Error {
 }
 
 struct GenericSendError: Error {}
+
+/// Clock whose `sleep` parks forever (until `releaseAll`). Lets tests
+/// prove a code path completes WITHOUT a timeout firing — a structural
+/// assertion immune to machine load, unlike wall-clock budgets.
+final class ParkedClock: UnisonDomain.Clock, @unchecked Sendable {
+    private let lock = NSLock()
+    private var parked: [CheckedContinuation<Void, Error>] = []
+
+    func now() -> Date { Date() }
+
+    func sleep(for seconds: TimeInterval) async throws {
+        try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+            lock.lock(); parked.append(c); lock.unlock()
+        }
+    }
+
+    /// Resume every parked sleeper (used to unstick a failing test).
+    func releaseAll() {
+        lock.lock(); let ps = parked; parked = []; lock.unlock()
+        ps.forEach { $0.resume() }
+    }
+}

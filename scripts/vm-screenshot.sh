@@ -85,9 +85,21 @@ fi
 
 # --- 2. Boot the VM if not already running -----------------------------------
 start_vm_if_needed() {
-  if tart_ip="$(tart ip "$VM_NAME" 2>/dev/null)" && [ -n "${tart_ip:-}" ]; then
-    log "VM \"$VM_NAME\" already running at $tart_ip"
-    return 0
+  # `tart ip` returns the last-known IP even when the VM is stopped, so we
+  # can't trust it alone — check the actual VM state from `tart list`.
+  local state
+  state="$(tart list --format json 2>/dev/null \
+            | python3 -c 'import json,sys
+for vm in json.load(sys.stdin):
+    if vm.get("Name")=="'"$VM_NAME"'":
+        print(vm.get("State","unknown")); break' 2>/dev/null || echo unknown)"
+  if [ "$state" = "running" ]; then
+    local tart_ip
+    tart_ip="$(tart ip "$VM_NAME" 2>/dev/null || true)"
+    if [ -n "$tart_ip" ]; then
+      log "VM \"$VM_NAME\" already running at $tart_ip"
+      return 0
+    fi
   fi
   log "Starting VM \"$VM_NAME\" in background (graphics mode)…"
   # Background run lets us SSH into the VM while it owns its own

@@ -74,9 +74,19 @@ public final class NetworkMonitor: NetworkPathMonitoring, @unchecked Sendable {
             // Subscribers attaching after the first real update do
             // get the cached value as their first yield, fulfilling
             // the protocol contract.
-            let initial: NetworkPathStatus? = self.didReceiveFirstUpdate ? self._currentStatus : nil
+            // Yield the initial value while STILL holding the lock.
+            // Yielding after unlock raced the pathUpdateHandler: it
+            // could take the lock, snapshot this just-registered
+            // continuation and push the NEW status first — then this
+            // thread delivered the STALE initial as the last word,
+            // leaving the subscriber believing an outdated state until
+            // the next real transition. AsyncStream.yield only buffers
+            // (it never runs consumer code synchronously), so holding
+            // the lock across it is safe.
+            if self.didReceiveFirstUpdate {
+                continuation.yield(self._currentStatus)
+            }
             self.lock.unlock()
-            if let initial { continuation.yield(initial) }
             continuation.onTermination = { [weak self] _ in
                 guard let self else { return }
                 self.lock.lock()

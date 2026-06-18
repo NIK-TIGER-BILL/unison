@@ -46,6 +46,11 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
     /// AVCaptureSession requires a serial queue here; we make a
     /// dedicated one so capture work doesn't get queued behind main.
     private let captureQueue = DispatchQueue(label: "com.unison.app.AVAudioEngineMicrophone.capture", qos: .userInitiated)
+    /// First-buffer log latch. Per capture session — reset in `start()`
+    /// so every session's delivered format lands in the diagnostic, not
+    /// just the first one after app launch.
+    private let firstBufferLogLock = NSLock()
+    private var firstBufferLogged = false
 
     public override init() {
         super.init()
@@ -57,6 +62,9 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
             stop()
         }
         Self.log.info("start(deviceUID=\(deviceUID ?? "<default>"))")
+        firstBufferLogLock.lock()
+        firstBufferLogged = false
+        firstBufferLogLock.unlock()
         return AsyncStream { [weak self] c in
             guard let self else { c.finish(); return }
             self.continuation = c
@@ -175,9 +183,9 @@ extension AVAudioEngineMicrophone: AVCaptureAudioDataOutputSampleBufferDelegate 
         let channels = Int(asbd.mChannelsPerFrame)
 
         // First-buffer log so the diagnostic shows the actual delivered
-        // format. Latched per-instance so the per-frame hot path stays
-        // log-free.
-        Self.logFirstBufferIfNeeded(sampleRate: sampleRate, channels: channels, asbd: asbd, sampleBuffer: sampleBuffer)
+        // format. Latched per capture session so the per-frame hot path
+        // stays log-free.
+        logFirstBufferIfNeeded(sampleRate: sampleRate, channels: channels, asbd: asbd, sampleBuffer: sampleBuffer)
 
         guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
         var totalLength = 0
@@ -203,20 +211,32 @@ extension AVAudioEngineMicrophone: AVCaptureAudioDataOutputSampleBufferDelegate 
             format = .int16
         }
 
-        let data = Data(bytes: p, count: totalLength)
+        // Multi-channel handling. Interleaved buffers pass through with
+        // their channel tag — `Resampler.toOpenAIWire` averages
+        // interleaved channels into mono. Planar (non-interleaved)
+        // buffers lay the channel planes back-to-back in the block
+        // buffer, which the resampler cannot know about, so we take
+        // the first plane (= channel 0) right here.
+        let isPlanar = asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
+        let data: Data
+        let outChannels: Int
+        if channels > 1, isPlanar {
+            data = Data(bytes: p, count: totalLength / channels)
+            outChannels = 1
+        } else {
+            data = Data(bytes: p, count: totalLength)
+            outChannels = channels
+        }
         let frame = AudioFrame(
             pcm: data,
             sampleRate: sampleRate,
-            channels: channels,
+            channels: outChannels,
             format: format
         )
         continuation?.yield(frame)
     }
 
-    nonisolated(unsafe) private static var firstBufferLogged = false
-    private static let firstBufferLogLock = NSLock()
-
-    private static func logFirstBufferIfNeeded(
+    private func logFirstBufferIfNeeded(
         sampleRate: Int,
         channels: Int,
         asbd: AudioStreamBasicDescription,
@@ -229,7 +249,7 @@ extension AVAudioEngineMicrophone: AVCaptureAudioDataOutputSampleBufferDelegate 
         guard shouldLog else { return }
         let nSamples = CMSampleBufferGetNumSamples(sampleBuffer)
         let isFloat = asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0
-        log.info("first sample buffer — sampleRate=\(sampleRate)Hz channels=\(channels) format=\(isFloat ? "float32" : "int16") frames=\(nSamples) bitsPerChan=\(asbd.mBitsPerChannel)")
+        Self.log.info("first sample buffer — sampleRate=\(sampleRate)Hz channels=\(channels) format=\(isFloat ? "float32" : "int16") frames=\(nSamples) bitsPerChan=\(asbd.mBitsPerChannel)")
     }
 }
 

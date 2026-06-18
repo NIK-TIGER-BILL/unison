@@ -18,7 +18,8 @@ import UnisonDomain
 /// - `bubbleGroups` for the bubble list;
 /// - `elapsedSecondsString` (driven by the host's TimelineView refresh) for
 ///   the pill timer;
-/// - `sizeLabel` / `bubbleScale` / `originalVolume` for the popover;
+/// - `bubbleScale` / `originalVolume` for the popover (the XS…XL label
+///   lives in `TranscriptSettingsPopover`);
 /// - `isHidden` / `showStopConfirmation` for visibility / modal.
 @MainActor
 @Observable
@@ -134,9 +135,10 @@ public final class TranscriptViewModel {
     /// (started via `PopoverViewModel.startTest()`). The transcript view
     /// uses this to switch the status dot and bubble tint to a yellow
     /// palette so the user can visually tell a calibration test apart
-    /// from a real translation session.
+    /// from a real translation session. Reads `effectiveState` so the
+    /// `previewState` override works like its sibling properties.
     public var isTestMode: Bool {
-        orchestrator?.state.activeMode == .test
+        effectiveState.activeMode == .test
     }
 
     // MARK: - Preview / snapshot overrides
@@ -205,7 +207,7 @@ public final class TranscriptViewModel {
         case .connecting: return .active
         case .reconnecting: return .warn
         case .paused: return .paused
-        case .error: return .warn
+        case .error: return .error
         case .translating:
             switch connectivityHealth {
             case .slow: return .warn
@@ -219,14 +221,6 @@ public final class TranscriptViewModel {
 
     public func updateSizeIndex(_ value: Double) {
         sizeIndex = max(0.0, min(4.0, value))
-    }
-
-    public func updateBubbleScale(_ value: Double) {
-        // Inverse of `bubbleScale(forSizeIndex:)` so callers can write
-        // either side of the conversion. Internally we always store the
-        // slider index because the popover binds to it.
-        let clamped = max(0.75, min(1.30, value))
-        sizeIndex = (clamped - 0.75) / (1.30 - 0.75) * 4.0
     }
 
     /// Update the original-track volume (0-100). Propagates the change to
@@ -302,12 +296,6 @@ public final class TranscriptViewModel {
     }
 
     // MARK: - Pure helpers (tested without an instance)
-
-    /// Map the slider's `0 ... 4` index to a discrete XS/S/M/L/XL label.
-    public nonisolated static func sizeLabel(forSizeIndex index: Double) -> String {
-        let idx = max(0, min(4, Int(index.rounded())))
-        return ["XS", "S", "M", "L", "XL"][idx]
-    }
 
     /// Map the slider's `0 ... 4` index to a continuous bubble-scale
     /// multiplier in `0.75 ... 1.30`. Mirrors the JS interpolation
