@@ -12,10 +12,11 @@ jobs:
     # default Xcode is always a 26.x release — no xcode-select pin;
     # pinning a specific minor breaks when the image rotates it out.
     runs-on: macos-26
-    # Backstop so a runner stall can never burn the full 6 h job budget;
-    # scripts/ci-test.sh handles stalls in-band (kill + retry) well under
-    # this, and the suite itself runs in <1 min.
-    timeout-minutes: 40
+    # Backstop only — the suite runs in well under a minute. (It used to
+    # wedge until the 6 h limit: a deadlock in the mock WebSocket server's
+    # test helper parked a continuation that never resumed; fixed in
+    # MockOpenAIRealtimeServer with one-shot continuations.)
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain versions
@@ -25,15 +26,10 @@ jobs:
       - name: swift build
         run: swift build
       - name: swift test
-        # Runs `swift test --no-parallel` (swift-testing parallelises by
-        # default — the `--parallel` flag is an XCTest-ism — and its
-        # PARALLEL runner deadlocks this suite outright). Even serial, the
-        # runner intermittently STALLS: the suite stops progressing with
-        # the main thread idle in `swift_task_asyncMainDrainQueue` (a
-        # scheduler heisenbug in the runner, not our code — a clean re-run
-        # passes). scripts/ci-test.sh caps each attempt and retries only on
-        # a stall, never on a real failure. See the script header.
-        run: scripts/ci-test.sh
+        # `--no-parallel`: swift-testing parallelises by default (the
+        # `--parallel` flag is an XCTest-ism) and its parallel runner
+        # deadlocks this suite. Serial runs the full suite in ~40 s.
+        run: swift test --no-parallel
 
   lint:
     runs-on: macos-26
