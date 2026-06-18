@@ -61,6 +61,21 @@ mkdir -p "$MACOS" "$RESOURCES"
 cp "$EXEC_PATH" "$MACOS/$EXEC_NAME"
 cp "$INFO_PLIST" "$CONTENTS/Info.plist"
 
+# Stamp the version when the release pipeline provides it. The repo's
+# Info.plist keeps placeholder values (1.0 / 1); the real marketing
+# version comes from the git tag and the build number from the commit
+# count — see scripts/build_release.sh and .github/workflows/release.yml.
+# Local `bundle_app.sh` runs without these vars keep the placeholders.
+# Must happen BEFORE codesign — signing seals the bundle contents.
+if [ -n "${MARKETING_VERSION:-}" ]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $MARKETING_VERSION" "$CONTENTS/Info.plist" \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $MARKETING_VERSION" "$CONTENTS/Info.plist"
+fi
+if [ -n "${BUILD_VERSION:-}" ]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" "$CONTENTS/Info.plist" \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $BUILD_VERSION" "$CONTENTS/Info.plist"
+fi
+
 # App icon (CFBundleIconFile = "AppIcon" → Contents/Resources/AppIcon.icns).
 if [ -n "${ICON_FILE:-}" ] && [ -f "$ICON_FILE" ]; then
   cp "$ICON_FILE" "$RESOURCES/AppIcon.icns"
