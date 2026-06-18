@@ -132,9 +132,18 @@ public struct PopoverView: View {
         }
     }
 
+    /// Locked while a session is active, mirroring `languageBar`: the
+    /// running session keeps the mode it was started with, so flipping
+    /// the segment mid-session would silently lie about what's running.
     private var modeToggle: some View {
-        SegmentedToggle(
-            selection: $vm.settings.sessionMode,
+        let locked = vm.state.isActive
+        return SegmentedToggle(
+            // Route through the VM mutator (not a direct settings write)
+            // so the pick persists across restarts.
+            selection: Binding(
+                get: { vm.settings.sessionMode },
+                set: { vm.updateSessionMode($0) }
+            ),
             segments: [
                 .init(
                     id: "call",
@@ -150,6 +159,9 @@ public struct PopoverView: View {
                 )
             ]
         )
+        .disabled(locked)
+        .opacity(locked ? 0.55 : 1.0)
+        .animation(UnisonAnimations.state, value: locked)
     }
 
     /// Two `Picker(.menu)` columns with a swap arrow between them.
@@ -299,4 +311,3 @@ public struct PopoverView: View {
 private enum PopoverLayout {
     static let width: CGFloat = 340
 }
-

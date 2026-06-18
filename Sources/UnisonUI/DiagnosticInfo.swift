@@ -126,18 +126,18 @@ public struct DiagnosticInfo: Sendable, Equatable {
         var out: [String] = []
         out.append("Unison Diagnostic — \(stamp)")
         out.append("")
-        out.append("System")
+        out.append("Система")
         for line in systemLines { out.append("  \(line)") }
         out.append("")
-        out.append("State")
+        out.append("Состояние")
         for line in statusLines { out.append("  \(line)") }
         if !recentErrors.isEmpty {
             out.append("")
-            out.append("Recent errors")
+            out.append("Последние ошибки")
             for line in recentErrors { out.append("  \(line)") }
         }
         out.append("")
-        out.append("Logs (subsystem com.unison.app, last 60s)")
+        out.append("Логи (последние 60 с)")
         if recentLogLines.isEmpty {
             out.append("  (нет записей)")
         } else {

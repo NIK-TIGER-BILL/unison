@@ -19,7 +19,7 @@ mkdir -p "$BIN_DIR"
 # Portable SwiftLint / Periphery dlopen system frameworks from
 # `$(xcode-select -p)/usr/lib`. On a Command Line Tools-only setup
 # the libraries ARE there, but the dynamic loader needs explicit
-# DYLD path hints to find them — full Xcode resolves these through
+# DYLD path hints to find them -- full Xcode resolves these through
 # its own toolchain plumbing.
 _dev_dir=$(xcode-select -p 2>/dev/null || true)
 if [[ "$_dev_dir" == *CommandLineTools ]]; then
@@ -39,7 +39,7 @@ swiftlint_bin() {
     fi
     local bin="$BIN_DIR/swiftlint"
     if [[ ! -x "$bin" ]]; then
-        echo "Downloading SwiftLint $SWIFTLINT_VERSION…" >&2
+        echo "Downloading SwiftLint $SWIFTLINT_VERSION..." >&2
         local tmp
         tmp=$(mktemp -d)
         curl -fsSL -o "$tmp/swiftlint.zip" \
@@ -61,7 +61,7 @@ periphery_bin() {
     fi
     local bin="$BIN_DIR/periphery"
     if [[ ! -x "$bin" ]]; then
-        echo "Downloading Periphery $PERIPHERY_VERSION…" >&2
+        echo "Downloading Periphery $PERIPHERY_VERSION..." >&2
         local tmp
         tmp=$(mktemp -d)
         curl -fsSL -o "$tmp/periphery.zip" \
@@ -102,7 +102,7 @@ run_periphery() {
     # Periphery's bundled binary loads `libIndexStore.dylib` via
     # `@rpath`. macOS strips DYLD env vars for hardened binaries,
     # so the only place dyld will find the lib is alongside the
-    # binary itself — symlink it from the CLT toolchain.
+    # binary itself -- symlink it from the CLT toolchain.
     if [[ ! -e "$BIN_DIR/libIndexStore.dylib" && -e "/Library/Developer/CommandLineTools/usr/lib/libIndexStore.dylib" ]]; then
         ln -sf /Library/Developer/CommandLineTools/usr/lib/libIndexStore.dylib "$BIN_DIR/libIndexStore.dylib"
     fi
@@ -110,10 +110,10 @@ run_periphery() {
     # tries to compile tests that need the `Testing` module from a
     # full Xcode toolchain, so we feed it the pre-built index.
     if [[ ! -d ".build/debug/index/store" ]]; then
-        echo "Building project so Periphery has an index to scan…" >&2
+        echo "Building project so Periphery has an index to scan..." >&2
         swift build >/dev/null
     fi
-    echo "--- Periphery (informational — does not fail the lint) ---"
+    echo "--- Periphery (informational -- does not fail the lint) ---"
     # `--strict` is intentionally OFF: tests don't build on a
     # Command Line Tools-only toolchain (no `Testing` module), so the
     # index excludes them and Periphery flags preview-only API as

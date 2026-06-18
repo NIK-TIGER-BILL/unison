@@ -49,6 +49,52 @@ private func makeEntry(
     #expect(b.secondaryText == "Hello")
 }
 
+// Regression: a single peer entry whose ORIGINAL has already streamed two
+// sentences (splits into 2 chunks) while the TRANSLATION is still one
+// short chunk must NOT render the translation duplicated across both
+// bubbles. The old `?? primaryParts.last` fallback repeated the last
+// translation chunk for every extra original chunk, producing the
+// reported "same translation in two consecutive bubbles" artifact that
+// resolved itself once the rest of the translation arrived.
+@Test func grouping_peerMismatchedSplit_doesNotDuplicateTranslation() {
+    let s1 = String(repeating: "x", count: 200) + "."
+    let s2 = String(repeating: "y", count: 200) + "."
+    let translated = "Перевод реплики."
+    let e = makeEntry(.peer, original: s1 + " " + s2, translated: translated)
+
+    let groups = TranscriptGrouping.group(entries: [e], splitThreshold: 240)
+    #expect(groups.count == 1)
+    let bubbles = groups[0].bubbles
+    // Original split into two chunks → two bubbles.
+    #expect(bubbles.count == 2)
+    // The translation must appear in EXACTLY ONE bubble's primary slot,
+    // never repeated into the second.
+    let withTranslation = bubbles.filter { $0.primaryText == translated }.count
+    #expect(withTranslation == 1, "translation duplicated across \(withTranslation) bubbles")
+    // First bubble carries the translation; the extra bubble's primary is
+    // empty (it only shows its own slice of the original).
+    #expect(bubbles[0].primaryText == translated)
+    #expect(bubbles[1].primaryText.isEmpty)
+    // Both original slices are still present and distinct.
+    #expect(bubbles[0].secondaryText != bubbles[1].secondaryText)
+}
+
+// Inverse: translation longer than original must not duplicate the
+// original across bubbles either.
+@Test func grouping_peerMismatchedSplit_doesNotDuplicateOriginal() {
+    let t1 = String(repeating: "ы", count: 200) + "."
+    let t2 = String(repeating: "э", count: 200) + "."
+    let original = "Short original."
+    let e = makeEntry(.peer, original: original, translated: t1 + " " + t2)
+
+    let groups = TranscriptGrouping.group(entries: [e], splitThreshold: 240)
+    let bubbles = groups[0].bubbles
+    #expect(bubbles.count == 2)
+    let withOriginal = bubbles.filter { $0.secondaryText == original }.count
+    #expect(withOriginal == 1, "original duplicated across \(withOriginal) bubbles")
+    #expect(bubbles[1].secondaryText.isEmpty)
+}
+
 // MARK: - Same-speaker grouping
 
 @Test func grouping_consecutiveSameSpeaker_collapseIntoOneGroup() {
@@ -80,14 +126,17 @@ private func makeEntry(
     #expect(groups[0].bubbles.count == 1)
 }
 
-@Test func grouping_singleSentenceLongerThanThresholdStaysOne() {
-    // A single sentence (no `.!?` boundary inside) cannot be split — the
-    // splitter has nothing to break on, so it returns a single bubble even
-    // if it exceeds the threshold.
+@Test func grouping_singleSentenceLongerThanThresholdHardSplits() {
+    // A single sentence (no `.!?` boundary inside) used to flow through
+    // as one oversized bubble. The splitter now falls back to a length
+    // split at whitespace, so every bubble respects the threshold.
     let long = String(repeating: "слово ", count: 100) // ~600 chars, no terminator
     let e = makeEntry(.me, original: long, translated: long)
     let groups = TranscriptGrouping.group(entries: [e], splitThreshold: 240)
-    #expect(groups[0].bubbles.count == 1)
+    #expect(groups[0].bubbles.count >= 2)
+    for b in groups[0].bubbles {
+        #expect(b.primaryText.count <= 240)
+    }
 }
 
 @Test func grouping_multipleSentencesAtThresholdGetSplit() {
@@ -153,4 +202,49 @@ private func makeEntry(
     let text = s + s + s
     let parts = TranscriptGrouping.splitOnSentence(text, threshold: 100)
     #expect(parts.count == 3)
+}
+
+// MARK: - Hard length split (terminator-less fallback)
+
+@Test func splitOnSentence_terminatorless600Chars_allChunksWithinThreshold() {
+    let text = String(repeating: "слово ", count: 100) // 600 chars, no `.!?`
+    let parts = TranscriptGrouping.splitOnSentence(text, threshold: 240)
+    #expect(parts.count >= 2)
+    for p in parts {
+        #expect(!p.isEmpty)
+        #expect(p.count <= 240)
+    }
+    // No words lost or reordered by the split.
+    let originalWords = text.split(separator: " ").map(String.init)
+    let rejoinedWords = parts.joined(separator: " ").split(separator: " ").map(String.init)
+    #expect(rejoinedWords == originalWords)
+}
+
+@Test func splitOnSentence_unbrokenRun_hardCutsAtThreshold() {
+    // 500 identical characters with no whitespace anywhere — nothing to
+    // break on, so the splitter hard-cuts at the threshold boundary.
+    let text = String(repeating: "ы", count: 500)
+    let parts = TranscriptGrouping.splitOnSentence(text, threshold: 240)
+    #expect(parts.count == 3) // 240 + 240 + 20
+    for p in parts {
+        #expect(p.count <= 240)
+    }
+    #expect(parts.joined() == text)
+}
+
+@Test func splitOnSentence_oversizedSentenceAmongNormalOnes_isLengthSplit() {
+    // A normal short sentence followed by one oversized unterminated
+    // fragment: the short one keeps sentence-boundary behaviour, the
+    // oversized tail is captured (not dropped) and length-split so no
+    // chunk exceeds the threshold.
+    let short = "Коротко. "
+    let oversized = String(repeating: "слово ", count: 50) // 300 chars, no terminator
+    let parts = TranscriptGrouping.splitOnSentence(short + oversized, threshold: 240)
+    #expect(parts.count >= 2)
+    for p in parts {
+        #expect(p.count <= 240)
+    }
+    // No words lost: 1 ("Коротко.") + 50 ("слово").
+    let words = parts.joined(separator: " ").split(separator: " ")
+    #expect(words.count == 51)
 }

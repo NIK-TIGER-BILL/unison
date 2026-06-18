@@ -51,7 +51,7 @@ struct PlaybackOfflineRender {
         }
         in24.frameLength = AVAudioFrameCount(inputFrames)
         inputPCM24kInt16.withUnsafeBytes { raw in
-            memcpy(in24.int16ChannelData![0], raw.baseAddress!, inputPCM24kInt16.count)
+            _ = memcpy(in24.int16ChannelData![0], raw.baseAddress!, inputPCM24kInt16.count)
         }
         let upsampledFrames = AVAudioFrameCount(Double(inputFrames) * 48_000.0 / 24_000.0)
         guard let in48 = AVAudioPCMBuffer(pcmFormat: f48k, frameCapacity: upsampledFrames) else {
@@ -142,7 +142,7 @@ struct PlaybackOfflineRender {
         let f32buf = AVAudioPCMBuffer(pcmFormat: outF32, frameCapacity: outFrames)!
         f32buf.frameLength = outFrames
         collected.withUnsafeBytes { raw in
-            memcpy(f32buf.floatChannelData![0], raw.baseAddress!, collected.count)
+            _ = memcpy(f32buf.floatChannelData![0], raw.baseAddress!, collected.count)
         }
         let downsampledFrames = AVAudioFrameCount(Double(outFrames) * 24_000.0 / 48_000.0) + 64
         let i16buf = AVAudioPCMBuffer(pcmFormat: outI16, frameCapacity: downsampledFrames)!
@@ -164,7 +164,7 @@ struct PlaybackOfflineRender {
         let outBytes = Int(i16buf.frameLength) * 2
         var outData = Data(count: outBytes)
         outData.withUnsafeMutableBytes { dst in
-            memcpy(dst.baseAddress!, i16buf.int16ChannelData![0], outBytes)
+            _ = memcpy(dst.baseAddress!, i16buf.int16ChannelData![0], outBytes)
         }
         return Output(pcmInt16_24k: outData, renderedFrames: Int(renderedTotal))
     }

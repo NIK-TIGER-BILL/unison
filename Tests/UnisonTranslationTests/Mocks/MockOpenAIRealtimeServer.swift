@@ -3,6 +3,25 @@ import Network
 @testable import UnisonTranslation
 @testable import UnisonDomain
 
+/// A `CheckedContinuation` that resumes exactly once no matter how many
+/// callers race to resume it (frame-arrival vs. timeout vs. teardown).
+/// Without this, the mock server parked raw continuations inside a
+/// `withTaskGroup`; when the timeout branch won, `cancelAll()` could not
+/// resume the still-parked continuation and the group never returned —
+/// a deadlock that wedged the whole serial test run.
+private final class OneShotContinuation<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cont: CheckedContinuation<T, Never>?
+    init(_ cont: CheckedContinuation<T, Never>) { self.cont = cont }
+    func resume(_ value: T) {
+        lock.lock()
+        let c = cont
+        cont = nil
+        lock.unlock()
+        c?.resume(returning: value)
+    }
+}
+
 /// In-process WebSocket server that imitates just enough of the OpenAI
 /// realtime API to drive `OpenAIRealtimeStream` end-to-end through the
 /// real `URLSessionWSClient` transport.
@@ -54,9 +73,10 @@ public final class MockOpenAIRealtimeServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "MockOpenAIRealtimeServer")
     private let lock = NSLock()
     private var connection: NWConnection?
-    /// Continuation backing `nextClientMessage()` — tests await this
-    /// to know when the client has sent a frame the server can react to.
-    private var pendingFrameContinuations: [CheckedContinuation<String, Never>] = []
+    /// Waiters backing `nextClientMessage()`. Each is a one-shot wrapper
+    /// so it resumes exactly once — whether the frame arrives, the
+    /// timeout fires, or the server stops.
+    private var pendingFrameWaiters: [OneShotContinuation<String?>] = []
 
     /// Synchronous helpers so the async-context `NSLock` warning under
     /// Swift 6 strict concurrency doesn't fire. The actual lock primitive
@@ -105,15 +125,15 @@ public final class MockOpenAIRealtimeServer: @unchecked Sendable {
     /// Tear everything down. Idempotent.
     public func stop() {
         listener.cancel()
-        let (conn, pending) = locked { () -> (NWConnection?, [CheckedContinuation<String, Never>]) in
+        let (conn, pending) = locked { () -> (NWConnection?, [OneShotContinuation<String?>]) in
             let c = connection
             connection = nil
-            let p = pendingFrameContinuations
-            pendingFrameContinuations.removeAll()
+            let p = pendingFrameWaiters
+            pendingFrameWaiters.removeAll()
             return (c, p)
         }
         conn?.cancel()
-        for c in pending { c.resume(returning: "") }
+        for w in pending { w.resume(nil) }
     }
 
     // MARK: - Server-side actions used by tests
@@ -170,9 +190,19 @@ public final class MockOpenAIRealtimeServer: @unchecked Sendable {
         meta.closeCode = NWProtocolWebSocket.CloseCode.protocolCode(.init(rawValue: code) ?? .normalClosure)
         let ctx = NWConnection.ContentContext(identifier: "close", metadata: [meta])
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            // One-shot: `conn.send`'s completion handler may never fire if
+            // the peer already tore the socket down (common in the
+            // close-before-data race), which would orphan this
+            // continuation and hang the test. A 2 s fallback guarantees we
+            // always resume.
+            let once = OneShotContinuation<Void>(cont)
             conn.send(content: nil, contentContext: ctx, isComplete: true, completion: .contentProcessed({ _ in
-                cont.resume()
+                once.resume(())
             }))
+            Task {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                once.resume(())
+            }
         }
     }
 
@@ -189,24 +219,29 @@ public final class MockOpenAIRealtimeServer: @unchecked Sendable {
             return nil
         }
         if let queued { return queued }
-        // Otherwise park on a continuation and let `receive(...)`
-        // resume us when the next frame lands.
-        return await withTaskGroup(of: String?.self) { group in
-            group.addTask { [weak self] in
-                guard let self else { return nil }
-                return await withCheckedContinuation { (cont: CheckedContinuation<String, Never>) in
-                    self.locked {
-                        self.pendingFrameContinuations.append(cont)
-                    }
-                }
-            }
-            group.addTask {
+        // Otherwise park a one-shot waiter that `receiveLoop` resumes when
+        // the next frame lands, with a timeout Task that resumes it with
+        // nil if no frame arrives. (No `withTaskGroup`: a parked
+        // `withCheckedContinuation` there can't be cancelled, so the group
+        // would never return after the timeout branch won — the deadlock
+        // that wedged the suite.)
+        return await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
+            let waiter = OneShotContinuation<String?>(cont)
+            locked { pendingFrameWaiters.append(waiter) }
+            Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                return nil
+                guard let self else { return }
+                // Claim the waiter under the lock so we don't race
+                // `receiveLoop`; resume with nil only if still pending.
+                let claimed: Bool = self.locked {
+                    if let i = self.pendingFrameWaiters.firstIndex(where: { $0 === waiter }) {
+                        self.pendingFrameWaiters.remove(at: i)
+                        return true
+                    }
+                    return false
+                }
+                if claimed { waiter.resume(nil) }
             }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
         }
     }
 
@@ -236,10 +271,10 @@ public final class MockOpenAIRealtimeServer: @unchecked Sendable {
                 if let data, !data.isEmpty {
                     let text = String(data: data, encoding: .utf8) ?? ""
                     if meta.opcode == .text {
-                        let waiters: [CheckedContinuation<String, Never>] = self.locked {
+                        let waiters: [OneShotContinuation<String?>] = self.locked {
                             self.receivedTextFrames.append(text)
-                            let w = self.pendingFrameContinuations
-                            self.pendingFrameContinuations.removeAll()
+                            let w = self.pendingFrameWaiters
+                            self.pendingFrameWaiters.removeAll()
                             // Make sure the `nextClientMessage` cursor counts
                             // this frame as already-served when a waiter is
                             // about to resume.
@@ -248,7 +283,7 @@ public final class MockOpenAIRealtimeServer: @unchecked Sendable {
                             }
                             return w
                         }
-                        for c in waiters { c.resume(returning: text) }
+                        for w in waiters { w.resume(text) }
                     }
                 }
                 if meta.opcode == .close {

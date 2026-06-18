@@ -21,6 +21,12 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
     private let timePitch = AVAudioUnitTimePitch()
     private let registry: CoreAudioDeviceRegistry
     private var started = false
+    /// Latches on first `startIfNeeded()` so a stop-restart cycle doesn't
+    /// `engine.attach(_:)` already-attached nodes — same contract as
+    /// `AVAudioOutputMixer.attached` (attach-twice throws an Obj-C
+    /// exception, non-recoverable from Swift). `stop()` deliberately
+    /// does not detach.
+    private var attached = false
     /// Cached output format. Same instance used to connect the node
     /// graph and to build per-chunk `AVAudioPCMBuffer`s — sharing it
     /// avoids the tiny per-chunk allocation and guarantees the player
@@ -101,8 +107,11 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         }
         Self.log.info("startIfNeeded — found BlackHole 2ch device uid=\(bh2.uid)")
 
-        engine.attach(player)
-        engine.attach(timePitch)
+        if !attached {
+            engine.attach(player)
+            engine.attach(timePitch)
+            attached = true
+        }
 
         // CRITICAL: assign the output device BEFORE wiring graph connections.
         // AVAudioEngine resolves the implicit `mainMixerNode → outputNode`
@@ -233,7 +242,9 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
             openDumpFile(path: path, sampleRate: UInt32(frame.sampleRate), channels: UInt16(frame.channels))
         }
         guard let handle = dumpHandle else { return }
-        handle.write(frame.pcm)
+        // Throwing write — legacy `write(_:)` raises an uncatchable ObjC
+        // exception on I/O failure (crash mid-call over a test dump).
+        try? handle.write(contentsOf: frame.pcm)
         dumpedByteCount &+= UInt32(frame.pcm.count)
     }
 
@@ -261,7 +272,7 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
             // `stop()`). If the process is killed before stop runs,
             // host analysis still works by reading from offset 44 as
             // raw float32 LE.
-            handle.write(Self.buildWAVHeader(sampleRate: sampleRate, channels: channels, dataSize: 0xFFFF_FFFF))
+            try? handle.write(contentsOf: Self.buildWAVHeader(sampleRate: sampleRate, channels: channels, dataSize: 0xFFFF_FFFF))
             dumpedByteCount = 0
             Self.log.info("dump — opened \(path) for WAV capture (\(sampleRate)Hz × \(channels)ch float32 LE)")
         }
@@ -274,9 +285,9 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         let fileSize = dataSize &+ 36
         // Patch RIFF chunk size (offset 4) and data chunk size (offset 40).
         try? handle.seek(toOffset: 4)
-        handle.write(Self.uint32LE(fileSize))
+        try? handle.write(contentsOf: Self.uint32LE(fileSize))
         try? handle.seek(toOffset: 40)
-        handle.write(Self.uint32LE(dataSize))
+        try? handle.write(contentsOf: Self.uint32LE(dataSize))
         try? handle.close()
         dumpHandle = nil
         let durationSec = Double(dataSize) / 4.0 / 48000.0
@@ -288,7 +299,8 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         let bitsPerSample: UInt16 = 32
         let byteRate = sampleRate * UInt32(channels) * UInt32(bitsPerSample / 8)
         let blockAlign = channels * (bitsPerSample / 8)
-        let fileSize = dataSize &+ 36
+        // Sentinel-aware RIFF size — see AVAudioOutputMixer.buildWAVHeader.
+        let fileSize = dataSize == 0xFFFF_FFFF ? dataSize : dataSize &+ 36
 
         header.append(contentsOf: "RIFF".utf8)
         header.append(uint32LE(fileSize))

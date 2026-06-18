@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+cd "$(dirname "$0")/.."  # repo root — build/, Resources/, .build/ paths below are repo-relative
+
 TARGET="unison"
 while [[ $# -gt 0 ]]; do
   case "$1" in

@@ -119,11 +119,18 @@ public struct Bubble: View {
         }
     }
 
+    /// For `.me` the primary slot is the original and the secondary is
+    /// the translation; for `.peer` it's inverted (primary = translation,
+    /// secondary = original) — the label must not claim the original was
+    /// "translated as" itself.
     private var accessibilityLabelText: String {
         if secondary.isEmpty {
             return primary
         }
-        return "\(primary), переведено как \(secondary)"
+        switch speaker {
+        case .me:   return "\(primary), переведено как \(secondary)"
+        case .peer: return "\(primary), оригинал: \(secondary)"
+        }
     }
 
     private var borderWidth: CGFloat {
@@ -184,6 +191,7 @@ public struct TypingDots: View {
     }
 
     @SwiftUI.State private var phase: Int = 0
+    @SwiftUI.State private var animationTask: Task<Void, Never>?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public var body: some View {
@@ -199,19 +207,23 @@ public struct TypingDots: View {
         .accessibilityHidden(true)
         .onAppear {
             guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: false)) {
-                phase = 2
-            }
-            Task {
-                while true {
-                    for i in 0..<3 {
-                        await MainActor.run {
-                            withAnimation(.easeInOut(duration: 0.4)) { phase = i }
-                        }
-                        try? await Task.sleep(nanoseconds: 200_000_000)
-                    }
+            // Single stored task drives the dot sequence; cancelled in
+            // `.onDisappear` so a live bubble going away doesn't leak a
+            // permanent 5Hz MainActor loop.
+            animationTask?.cancel()
+            animationTask = Task {
+                var i = 0
+                while !Task.isCancelled {
+                    withAnimation(.easeInOut(duration: 0.4)) { phase = i }
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    if Task.isCancelled { break }
+                    i = (i + 1) % 3
                 }
             }
+        }
+        .onDisappear {
+            animationTask?.cancel()
+            animationTask = nil
         }
     }
 }

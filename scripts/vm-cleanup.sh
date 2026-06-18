@@ -35,7 +35,9 @@ if ! command -v tart >/dev/null 2>&1; then
   exit 0
 fi
 
-if ! tart list --format json 2>/dev/null | grep -q "\"name\"[[:space:]]*:[[:space:]]*\"$VM_NAME\""; then
+# NB: tart's JSON keys are capitalized (`"Name" : "unison-test"`), same
+# casing vm-tap-benchmark.sh parses via `vm.get("Name")`.
+if ! tart list --format json 2>/dev/null | grep -q "\"Name\"[[:space:]]*:[[:space:]]*\"$VM_NAME\""; then
   log "VM \"$VM_NAME\" not found — nothing to clean up."
   exit 0
 fi

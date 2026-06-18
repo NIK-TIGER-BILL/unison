@@ -76,14 +76,18 @@ public final class WireDumper: @unchecked Sendable {
                 log.error("\(category) — failed to open \(path) for writing")
                 return
             }
-            h.write(Self.buildWAVHeader(sampleRate: 24_000,
-                                        channels: 1,
-                                        bitsPerSample: 16,
-                                        dataSize: 0xFFFF_FFFF))
+            try? h.write(contentsOf: Self.buildWAVHeader(sampleRate: 24_000,
+                                                         channels: 1,
+                                                         bitsPerSample: 16,
+                                                         dataSize: 0xFFFF_FFFF))
             handle = h
             log.info("\(category) — opened \(path) for raw 24kHz int16 PCM capture")
         }
-        handle?.write(pcm)
+        // `write(contentsOf:)` (throwing) — the legacy `write(_:)` raises
+        // an uncatchable ObjC exception on I/O failure (disk full,
+        // volume unmounted) and would crash the app mid-call over a
+        // diagnostics file.
+        try? handle?.write(contentsOf: pcm)
         writeCount += 1
         bytesWritten &+= UInt64(pcm.count)
         // Periodic heartbeat — debug-level so the per-session user log
@@ -105,9 +109,9 @@ public final class WireDumper: @unchecked Sendable {
         let dataSize = UInt32(truncatingIfNeeded: bytesWritten)
         let fileSize = dataSize &+ 36
         try? handle.seek(toOffset: 4)
-        handle.write(Self.uint32LE(fileSize))
+        try? handle.write(contentsOf: Self.uint32LE(fileSize))
         try? handle.seek(toOffset: 40)
-        handle.write(Self.uint32LE(dataSize))
+        try? handle.write(contentsOf: Self.uint32LE(dataSize))
         try? handle.close()
         self.handle = nil
         initialised = false
@@ -124,7 +128,12 @@ public final class WireDumper: @unchecked Sendable {
         var header = Data()
         let byteRate = sampleRate * UInt32(channels) * UInt32(bitsPerSample / 8)
         let blockAlign = channels * (bitsPerSample / 8)
-        let fileSize = dataSize &+ 36
+        // Streaming sentinel: when the data size is unknown
+        // (0xFFFF_FFFF), the RIFF size must carry the sentinel too —
+        // `&+ 36` would wrap it to 35 and strict parsers (afinfo,
+        // CoreAudio) would treat the whole container as 35 bytes if
+        // the process dies before `close()` patches the header.
+        let fileSize = dataSize == 0xFFFF_FFFF ? dataSize : dataSize &+ 36
         header.append(contentsOf: "RIFF".utf8)
         header.append(uint32LE(fileSize))
         header.append(contentsOf: "WAVE".utf8)

@@ -45,19 +45,6 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
 
 // MARK: - Pure helpers (size label, bubble scale, elapsed formatting)
 
-@Test func transcriptVM_sizeLabel_mapsRoundedIndexToXSthroughXL() {
-    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: 0) == "XS")
-    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: 0.4) == "XS")
-    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: 0.6) == "S")
-    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: 1) == "S")
-    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: 2) == "M")
-    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: 3) == "L")
-    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: 4) == "XL")
-    // Out-of-range inputs clamp to the nearest end.
-    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: -1) == "XS")
-    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: 100) == "XL")
-}
-
 @Test func transcriptVM_bubbleScale_interpolatesLinearlyBetween075and130() {
     // Endpoints
     #expect(TranscriptViewModel.bubbleScale(forSizeIndex: 0) == 0.75)
@@ -89,29 +76,14 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     let vm = TranscriptViewModel(store: TranscriptStore())
     vm.updateSizeIndex(2.8)
     #expect(vm.sizeIndex == 2.8)
-    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: vm.sizeIndex) == "L") // round(2.8) → 3 → "L"
+    #expect(abs(vm.sizeIndex - 2.8) < 0.0001)
     // Out-of-range
     vm.updateSizeIndex(10)
     #expect(vm.sizeIndex == 4)
-    #expect(TranscriptViewModel.sizeLabel(forSizeIndex: vm.sizeIndex) == "XL")
+    #expect(abs(vm.sizeIndex - 4.0) < 0.0001)
     vm.updateSizeIndex(-5)
     #expect(vm.sizeIndex == 0)
     #expect(vm.bubbleScale == 0.75)
-}
-
-@MainActor
-@Test func transcriptVM_updateBubbleScale_inverseMapsToSizeIndex() {
-    let vm = TranscriptViewModel(store: TranscriptStore())
-    vm.updateBubbleScale(1.30)
-    #expect(vm.sizeIndex == 4)
-    vm.updateBubbleScale(0.75)
-    #expect(vm.sizeIndex == 0)
-    // Midpoint
-    vm.updateBubbleScale((0.75 + 1.30) / 2.0)
-    #expect(abs(vm.sizeIndex - 2.0) < 1e-9)
-    // Out-of-range clamps
-    vm.updateBubbleScale(5.0)
-    #expect(vm.sizeIndex == 4)
 }
 
 @MainActor
@@ -322,5 +294,26 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     vm.previewConnectivityHealth = .healthy
     #expect(vm.pillStatusText == "")
     #expect(vm.pillDotState == .active)
+}
+
+@MainActor
+@Test func transcriptVM_errorState_pillDotIsError() {
+    // Mirrors PopoverViewModel.statusDotState: `.error` surfaces a red
+    // error dot, not a warning one.
+    let vm = TranscriptViewModel(store: TranscriptStore())
+    vm.previewState = .error(.networkLost)
+    #expect(vm.pillDotState == .error)
+}
+
+// MARK: - isTestMode honors previewState
+
+@MainActor
+@Test func transcriptVM_isTestMode_respectsPreviewState() {
+    let vm = TranscriptViewModel(store: TranscriptStore())
+    #expect(vm.isTestMode == false)
+    vm.previewState = .translating(mode: .test, startedAt: Date())
+    #expect(vm.isTestMode)
+    vm.previewState = .translating(mode: .call, startedAt: Date())
+    #expect(vm.isTestMode == false)
 }
 

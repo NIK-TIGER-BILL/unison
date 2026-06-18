@@ -47,6 +47,22 @@ public enum SnapshotRecordMode {
 /// size, lays it out synchronously, then captures the AppKit hierarchy
 /// via `bitmapImageRepForCachingDisplay`. The PNG is stored next to
 /// the test source so committed snapshots travel with the repo.
+/// Fraction of pixels that must fall within the per-channel tolerance
+/// for a snapshot to match. 0.91 ⇒ up to ~9% may differ.
+///
+/// Why not tighter: every surface here is Liquid Glass, whose backdrop
+/// blur/vibrancy is re-sampled by the compositor and varies a few
+/// percent across machine/GPU/compositor state — the SAME committed
+/// reference measured 0% drift on CI and on this machine earlier, then
+/// ~4.3% after the machine had been under load. That drift is DIFFUSE
+/// (thin coverage across the whole card), not a concentrated element
+/// change, so a generous ratio absorbs it while a real regression —
+/// a moved/removed/recoloured element or a layout shift — still blows
+/// well past 9%. Tightening this back to 0.96 reintroduces flaky
+/// boundary failures on the glassiest cards (popover error, diagnostic
+/// sheet) without catching anything a human would call a regression.
+private let snapshotPerceptualPrecision = 0.91
+
 @MainActor
 public func snap<V: View>(
     _ view: V,
@@ -59,22 +75,39 @@ public func snap<V: View>(
     let url = snapshotURL(file: file, test: test, named: name)
     let mode = SnapshotRecordMode.current
 
+    // A failed render must never become a reference or a silent pass.
+    guard !bitmap.isEmpty else {
+        Issue.record("Snapshot render produced no image data for \(url.lastPathComponent) — bitmap rep or PNG encode failed.")
+        return
+    }
+
     let fm = FileManager.default
     try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
 
     switch mode {
     case .all:
-        try? bitmap.write(to: url)
-    case .missing:
-        if !fm.fileExists(atPath: url.path) {
-            try? bitmap.write(to: url)
-            return // First run — recording, no diff to perform.
+        do {
+            try bitmap.write(to: url)
+            // Record mode is for refreshing references, not for proving
+            // anything — fail loudly so a leaked RECORD_SNAPSHOTS=1
+            // (especially on CI) can't turn the whole suite green.
+            Issue.record("Recorded \(url.lastPathComponent) (RECORD_SNAPSHOTS=1). Re-run without the flag to verify.")
+        } catch {
+            Issue.record("Failed to record snapshot \(url.lastPathComponent): \(error)")
         }
-        guard let existing = try? Data(contentsOf: url) else {
+    case .missing:
+        guard fm.fileExists(atPath: url.path), let existing = try? Data(contentsOf: url) else {
+            // Auto-recording a missing reference and passing would make
+            // every new/renamed test vacuously green (and on CI the
+            // recorded file is discarded, so it would assert nothing
+            // forever). Record the candidate, but fail the run.
             try? bitmap.write(to: url)
+            Issue.record(
+                "No reference snapshot for \(url.lastPathComponent) — recorded a new one. Inspect and commit it, then re-run."
+            )
             return
         }
-        if !imagesMatch(existing, bitmap, perceptualPrecision: 0.96) {
+        if !imagesMatch(existing, bitmap, perceptualPrecision: snapshotPerceptualPrecision) {
             // Persist the new render alongside the old one for inspection.
             let failURL = url.deletingPathExtension().appendingPathExtension("failed.png")
             try? bitmap.write(to: failURL)
@@ -82,6 +115,36 @@ public func snap<V: View>(
                 "Snapshot mismatch for \(url.lastPathComponent). New image written to \(failURL.lastPathComponent). Set RECORD_SNAPSHOTS=1 to overwrite."
             )
         }
+    }
+}
+
+/// Render-only smoke check — no reference comparison.
+///
+/// Use for surfaces whose offscreen capture is non-deterministic and so
+/// cannot carry a stable pixel reference. The transparent floating
+/// transcript panel is the case in point: `bitmapImageRepForCachingDisplay`
+/// of a `backgroundColor = .clear` window captures the same Liquid-Glass
+/// content BIMODALLY across process/compositor state — fully transparent
+/// (alpha 0) in one run, composited-onto-opaque-black in another — so no
+/// single committed PNG matches every run. The bubble-bearing transcript
+/// snapshots happen to be stable enough to keep as pixel references, but
+/// the near-empty `transcript_empty` has so little opaque content that the
+/// background mode dominates and it flip-flops (green in isolation, red in
+/// the full suite, and vice-versa). This still exercises the real value:
+/// the view builds, lays out at the requested size, and renders without
+/// crashing or producing an empty/degenerate buffer.
+@MainActor
+public func snapSmoke<V: View>(_ view: V, size: CGSize) {
+    let bitmap = renderToPNG(view: view, size: size)
+    #expect(!bitmap.isEmpty, "Render produced no image data (\(Int(size.width))×\(Int(size.height)))")
+    // Confirm it decodes to the expected dimensions — catches a layout
+    // collapse / wrong-size render that an emptiness check alone misses.
+    if let src = CGImageSourceCreateWithData(bitmap as CFData, nil),
+       let img = CGImageSourceCreateImageAtIndex(src, 0, nil) {
+        #expect(img.width == Int(size.width) && img.height == Int(size.height),
+                "Render size \(img.width)×\(img.height) != expected \(Int(size.width))×\(Int(size.height))")
+    } else {
+        Issue.record("Render output is not a decodable image")
     }
 }
 
@@ -113,8 +176,33 @@ private func renderToPNG<V: View>(view: V, size: CGSize) -> Data {
         return Data()
     }
     host.cacheDisplay(in: host.bounds, to: rep)
-    let image = NSImage(size: host.bounds.size)
-    image.addRepresentation(rep)
+
+    // Pin the output to 1x. `bitmapImageRepForCachingDisplay` renders at
+    // the offscreen window's backing scale (inherited from the main
+    // screen), but all committed references are 1x — on a Retina-main
+    // machine every render would come out 2x and fail the size guard
+    // wholesale. On 1x machines this branch is a no-op, so existing
+    // references stay bit-identical.
+    let wantW = Int(size.width)
+    let wantH = Int(size.height)
+    if rep.pixelsWide != wantW || rep.pixelsHigh != wantH, let cg = rep.cgImage {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        if let ctx = CGContext(
+            data: nil, width: wantW, height: wantH, bitsPerComponent: 8,
+            bytesPerRow: wantW * 4, space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) {
+            ctx.interpolationQuality = .high
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: wantW, height: wantH))
+            if let scaled = ctx.makeImage() {
+                let scaledRep = NSBitmapImageRep(cgImage: scaled)
+                scaledRep.size = size
+                return scaledRep.representation(using: .png, properties: [:]) ?? Data()
+            }
+        }
+        return Data()
+    }
+
     guard let png = rep.representation(using: .png, properties: [:]) else {
         return Data()
     }

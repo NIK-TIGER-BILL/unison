@@ -73,6 +73,13 @@ public actor OpenAIRealtimeStream: TranslationStream {
     /// `session.closed` confirmation — system flushes pending audio."
     private var sessionClosedContinuation: CheckedContinuation<Void, Never>?
     private var sawSessionClosed = false
+    /// Makes `close()` idempotent. The orchestrator can race two
+    /// `close()` calls onto the same stream (failure handling vs. a
+    /// user Stop landing in the same 0.5 s grace window); without this
+    /// guard the second call overwrites `sessionClosedContinuation`
+    /// while the first is parked on it — the first caller then hangs
+    /// forever on a leaked CheckedContinuation.
+    private var closeStarted = false
     /// Tracks whether the server ever sent us a translated chunk before
     /// closing. A close with `.normalClosure` *before* any data is the
     /// classic OpenAI "your request was rejected on the first message"
@@ -222,7 +229,7 @@ public actor OpenAIRealtimeStream: TranslationStream {
     /// response inside the same utterance is normal (5+ seconds is
     /// observed in production).
     private func rotateOnInputGap() {
-        let now = Date()
+        let now = clock.now()
         if let prev = lastInputDeltaAt, now.timeIntervalSince(prev) >= Self.turnGapSeconds {
             Self.log.info("[\(speaker)] input gap \(String(format: "%.2f", now.timeIntervalSince(prev)))s ≥ \(Self.turnGapSeconds)s → rotating entryId")
             currentEntryId = UUID()
@@ -240,6 +247,8 @@ public actor OpenAIRealtimeStream: TranslationStream {
     }
 
     public func close() async {
+        guard !closeStarted else { return }
+        closeStarted = true
         if let data = try? JSONEncoder().encode(RealtimeClientEvent.sessionClose),
            let str = String(data: data, encoding: .utf8) {
             try? await client.send(.text(str))

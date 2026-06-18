@@ -39,6 +39,12 @@ public final class TranscriptStore {
                 }
             }
         } else {
+            // Don't mint an entry for an empty delta with an unknown
+            // entryId — an empty `.translated` handshake/reconstruct
+            // chunk (see the at-risk note above) arriving first for a
+            // fresh id would otherwise create a permanently blank
+            // ghost bubble that nothing ever removes.
+            guard !delta.text.isEmpty else { return }
             let targetLang: Language = {
                 guard let pair = currentLanguagePair else { return .en }
                 return delta.speaker == .me ? pair.peer : pair.mine

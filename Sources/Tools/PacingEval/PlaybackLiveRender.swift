@@ -54,7 +54,7 @@ struct PlaybackLiveRender {
         }
         in24.frameLength = AVAudioFrameCount(inputFrames)
         inputPCM24kInt16.withUnsafeBytes { raw in
-            memcpy(in24.int16ChannelData![0], raw.baseAddress!, inputPCM24kInt16.count)
+            _ = memcpy(in24.int16ChannelData![0], raw.baseAddress!, inputPCM24kInt16.count)
         }
         let upsampledFrames = AVAudioFrameCount(Double(inputFrames) * 48_000.0 / 24_000.0)
         guard let in48 = AVAudioPCMBuffer(pcmFormat: playerFormat, frameCapacity: upsampledFrames) else {
@@ -119,7 +119,15 @@ struct PlaybackLiveRender {
         // node-graph processing is identical either way at rate=1.0.
         // We schedule everything upfront so the test isolates "long-
         // running live render" from any chunk-arrival-timing effects.
-        player.scheduleBuffer(in48, completionHandler: nil)
+        //
+        // Fire-and-forget via a sync helper: calling the
+        // completion-handler `scheduleBuffer` directly from this async
+        // function trips the "consider the async alternative" warning,
+        // but the async form (`await scheduleBuffer(_:)`) suspends until
+        // the buffer finishes PLAYING — wrong here, we schedule then run
+        // the engine for a fixed wall-clock window. The sync wrapper
+        // keeps the immediate-return semantics without the warning.
+        Self.scheduleNoWait(player, in48)
 
         // Let the engine run for renderDurationSec wall-clock seconds.
         // The render thread is driven by the audio device's clock —
@@ -135,6 +143,14 @@ struct PlaybackLiveRender {
             captureSampleRate: captureFormat.sampleRate,
             renderedSec: renderDurationSec
         )
+    }
+
+    /// Sync wrapper around the fire-and-forget `scheduleBuffer`. Lives in
+    /// a non-async function so the compiler doesn't suggest the async
+    /// alternative (which would block until playback completes — see the
+    /// call site).
+    private static func scheduleNoWait(_ player: AVAudioPlayerNode, _ buffer: AVAudioPCMBuffer) {
+        player.scheduleBuffer(buffer, completionHandler: nil)
     }
 }
 

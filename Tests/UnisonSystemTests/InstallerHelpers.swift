@@ -38,6 +38,39 @@ func latestReleaseURL() -> URL {
     BundledBlackHoleInstaller.latestReleaseURL
 }
 
+/// Canonical `pkgutil --check-signature` stdout for a correctly signed
+/// BlackHole pkg. The installer pins the `Developer ID Installer:
+/// Existential Audio Inc.` certificate-chain line — a 0 exit status
+/// alone is NOT enough (any Apple Developer ID pkg exits 0).
+let pkgutilSignedByExistentialAudio = """
+Package "Unison-BlackHole2ch.pkg":
+   Status: signed by a developer certificate issued by Apple for distribution
+   Signed with a trusted timestamp on: 2024-09-30 21:14:33 +0000
+   Certificate Chain:
+    1. Developer ID Installer: Existential Audio Inc. (Q5C99V536K)
+       Expires: 2027-02-01 22:12:15 +0000
+"""
+
+/// Same shape, valid Apple signature — but a different vendor. Must be
+/// rejected by the signer pin even though pkgutil exits 0.
+let pkgutilSignedByOtherVendor = """
+Package "Unison-BlackHole2ch.pkg":
+   Status: signed by a developer certificate issued by Apple for distribution
+   Certificate Chain:
+    1. Developer ID Installer: Acme Audio LLC (ABCDE12345)
+"""
+
+/// Writes `contents` to a fresh temp file and returns the production
+/// `sha256Hex` of it. Keeps `URL` / `Data` / `FileManager` out of the
+/// Testing-importing test file.
+func sha256HexOfTempFile(contents: String) throws -> String {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("sha-fixture-\(UUID().uuidString).bin")
+    try Data(contents.utf8).write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+    return try BundledBlackHoleInstaller.sha256Hex(of: url)
+}
+
 /// `NSLock`-backed mutex so tests can capture values from inside
 /// `@Sendable` closures without paying the cost of an actor or
 /// `DispatchQueue`.
@@ -156,24 +189,32 @@ func makeRunner(
 }
 
 /// A `runProcess` fake that records each invocation as
-/// `(executable, arguments)`. Returns `0` (success).
+/// `(executable, arguments)`. Returns `0` (success). Successful
+/// `pkgutil` calls emit the pinned-signer stdout, mirroring a real
+/// BlackHole pkg, so the signer pin in `verifySignature` passes.
 func makeRecordingRunner(into sink: Mutex<[(String, [String])]>) -> FakeRunner {
     return { executable, arguments in
         sink.withLock { $0.append((executable, arguments)) }
+        if executable.hasSuffix("pkgutil") {
+            return (0, pkgutilSignedByExistentialAudio, "")
+        }
         return (0, "", "")
     }
 }
 
 /// A `runProcess` fake whose exit code depends on the executable
 /// path. Useful for tests that want `pkgutil` to succeed and
-/// `osascript` to fail (or vice versa).
+/// `osascript` to fail (or vice versa). A succeeding `pkgutil`
+/// carries the pinned-signer stdout like the real BlackHole pkg.
 func makeStatusByExecutable(
     pkgutil: Int32,
     osascript: Int32,
     otherwise: Int32 = 0
 ) -> FakeRunner {
     return { executable, _ in
-        if executable.hasSuffix("pkgutil") { return (pkgutil, "", "") }
+        if executable.hasSuffix("pkgutil") {
+            return (pkgutil, pkgutil == 0 ? pkgutilSignedByExistentialAudio : "", "")
+        }
         if executable.hasSuffix("osascript") { return (osascript, "", "") }
         return (otherwise, "", "")
     }

@@ -48,9 +48,9 @@ struct RMSAnalysis {
         for i in 0..<binCount where binCt[i] > 0 {
             bins.append(Bin(
                 startSec: Double(i) * binSec,
-                endSec:   Double(i + 1) * binSec,
-                rmsMean:  Float(binSum[i] / Double(binCt[i])),
-                rmsMax:   binMax[i],
+                endSec: Double(i + 1) * binSec,
+                rmsMean: Float(binSum[i] / Double(binCt[i])),
+                rmsMax: binMax[i],
                 chunkCount: binCt[i]
             ))
         }

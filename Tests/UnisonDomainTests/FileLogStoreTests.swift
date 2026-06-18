@@ -88,15 +88,19 @@ private func waitForFlush() async {
 }
 
 @Test func unisonLog_writesToFileStoreUnderRightCategory() async throws {
-    // `UnisonLog` uses the shared singleton, so we can't redirect it
-    // per-test. Verify by writing a unique sentinel string and grepping
-    // the shared file for it.
+    // Redirect UnisonLog's file sink to a temp store so the test never
+    // touches the user's real `~/Library/Logs/Unison` (the shared store
+    // is muted under `swift test` anyway). Restore afterwards.
+    let temp = makeTempStore()
+    let saved = UnisonLog.fileSink
+    UnisonLog.fileSink = temp
+    defer { UnisonLog.fileSink = saved }
+
     let sentinel = makeSentinel()
-    let logger = UnisonLog(category: "TestProbe")
-    logger.info(sentinel)
+    UnisonLog(category: "TestProbe").info(sentinel)
     await waitForFlush()
 
-    let contents = FileLogStore.shared.readAll()
+    let contents = temp.readAll()
     #expect(contents.contains("[TestProbe:info]"))
     #expect(contents.contains(sentinel))
 }

@@ -9,10 +9,14 @@ import Testing
     #expect(e.speaker == .me)
 }
 
-@Test func transcriptDelta_partialAppend() {
+@Test @MainActor func transcriptDelta_partialAppend() {
+    // Two partial deltas for the same entry must CONCATENATE in the
+    // store (the earlier version only asserted back the initializer
+    // arguments and tested nothing about appending).
+    let store = TranscriptStore()
     let id = freshUUID()
-    let d1 = TranscriptDelta(entryId: id, speaker: .peer, kind: .translated, text: "Hello ", isFinal: false)
-    let d2 = TranscriptDelta(entryId: id, speaker: .peer, kind: .translated, text: "world", isFinal: true)
-    #expect(d1.isFinal == false)
-    #expect(d2.isFinal == true)
+    store.apply(TranscriptDelta(entryId: id, speaker: .peer, kind: .translated, text: "Hello ", isFinal: false))
+    store.apply(TranscriptDelta(entryId: id, speaker: .peer, kind: .translated, text: "world", isFinal: true))
+    #expect(store.entries.count == 1)
+    #expect(store.entries.first?.translatedText == "Hello world")
 }

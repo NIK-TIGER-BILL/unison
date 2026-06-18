@@ -32,7 +32,12 @@ private final class Triggered: @unchecked Sendable {
 
 @Test func watchdog_nonZeroSampleResetsTimer() async {
     let triggered = Triggered()
-    let watchdog = SilentFrameWatchdog(thresholdSeconds: 0.1) {
+    // 0.5 s threshold (vs ~0.05 s of real silence fed on each side of
+    // the reset) — the watchdog measures wall-clock Date() between
+    // observe() calls, and Task.sleep only overshoots; with the old
+    // 0.1 s threshold a loaded parallel test run could legitimately
+    // accumulate >0.1 s of real silence and trip a false failure.
+    let watchdog = SilentFrameWatchdog(thresholdSeconds: 0.5) {
         triggered.set()
     }
     watchdog.start()
