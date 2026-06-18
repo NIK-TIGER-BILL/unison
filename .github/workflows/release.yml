@@ -52,6 +52,10 @@ jobs:
           # interaction is not allowed"). 6 h timeout.
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
           security default-keychain -s "$KEYCHAIN"
+          # Add to the search list (preserving existing keychains) so codesign
+          # resolves the identity regardless of how it walks the list — setting
+          # the default keychain alone doesn't guarantee it's searched.
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
           security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PW" "$KEYCHAIN"

@@ -24,7 +24,7 @@ The git tag is the single source of truth — no manual `Info.plist` edits:
 | Field | Value | Source |
 | --- | --- | --- |
 | `CFBundleShortVersionString` | `1.0.0` | tag minus the `v` prefix |
-| `CFBundleVersion` | commit count | `git rev-list --count HEAD` (monotonic) |
+| `CFBundleVersion` | build number | CI run number (`$GITHUB_RUN_NUMBER`); a local build passes any monotonic integer as `BUILD_VERSION` |
 
 These are stamped into the bundled `Info.plist` at build time; the repo's
 [Resources/Info.plist](../Resources/Info.plist) keeps placeholder values
@@ -85,13 +85,17 @@ Omit the credentials for an ad-hoc DMG. The artifact lands at `build/Unison.dmg`
 
 ## Post-release verification
 
-On a clean macOS 26 (Tahoe) machine/VM, run
-[docs/qa/release-checklist.md](qa/release-checklist.md). Quick Gatekeeper check:
+On the build machine, both the app and the DMG carry a stapled ticket:
 
 ```sh
-spctl -a -vvv -t install build/Unison.app   # → accepted, source=Notarized Developer ID
-xcrun stapler validate build/Unison.app     # → The validate action worked!
+xcrun stapler validate build/Unison.app
+xcrun stapler validate build/Unison.dmg
+spctl -a -vvv build/Unison.app              # → accepted, source=Notarized Developer ID
 ```
+
+Then, on a clean macOS 26 (Tahoe) VM, run
+[docs/qa/release-checklist.md](qa/release-checklist.md) end-to-end against the
+downloaded DMG (which is the artifact that actually carries the quarantine flag).
 
 ## Not in scope yet
 

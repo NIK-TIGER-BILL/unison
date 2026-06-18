@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+cd "$(dirname "$0")/.."  # repo root — build/ and scripts/ paths below are repo-relative
+
 # Developer ID signing + notarization are OPTIONAL. When all four
 # credentials below are present the script produces a signed, hardened,
 # notarized, stapled DMG ready for public distribution. When any are
@@ -16,24 +18,32 @@ TEAM_ID="${TEAM_ID:-}"
 APP_PATH="build/Unison.app"
 DMG_PATH="build/Unison.dmg"
 
+# Notarize only with a complete credential set; otherwise degrade to ad-hoc.
+CAN_NOTARIZE=0
+if [ -n "$DEVELOPER_ID" ] && [ -n "$APPLE_ID" ] && [ -n "$APP_PASSWORD" ] && [ -n "$TEAM_ID" ]; then
+  CAN_NOTARIZE=1
+fi
+
+# Submit a path to Apple's notary service and block until it's done.
+notarize() {
+  xcrun notarytool submit "$1" \
+    --apple-id "$APPLE_ID" \
+    --password "$APP_PASSWORD" \
+    --team-id "$TEAM_ID" \
+    --wait
+}
+
 # 1. Build + bundle. bundle_app.sh signs with DEVELOPER_ID when set
 #    (ad-hoc otherwise) and stamps MARKETING_VERSION / BUILD_VERSION into
 #    the bundled Info.plist when those are exported.
 CONFIG=release ./scripts/bundle_app.sh
 
-# 2. Notarize + staple — only with a complete credential set.
-if [ -n "$DEVELOPER_ID" ] && [ -n "$APPLE_ID" ] && [ -n "$APP_PASSWORD" ] && [ -n "$TEAM_ID" ]; then
-  echo "Creating zip for notarization..."
+# 2. Notarize + staple the APP so the installed app launches offline — the
+#    ticket then travels inside the .app even when copied out of the DMG.
+if [ "$CAN_NOTARIZE" -eq 1 ]; then
+  echo "Notarizing app (this can take a few minutes)..."
   ditto -c -k --keepParent "$APP_PATH" "build/Unison.zip"
-
-  echo "Submitting to notarytool (this can take a few minutes)..."
-  xcrun notarytool submit "build/Unison.zip" \
-    --apple-id "$APPLE_ID" \
-    --password "$APP_PASSWORD" \
-    --team-id "$TEAM_ID" \
-    --wait
-
-  echo "Stapling ticket to app bundle..."
+  notarize "build/Unison.zip"
   xcrun stapler staple "$APP_PATH"
   rm -f "build/Unison.zip"
 else
@@ -53,7 +63,16 @@ rm -f "$DMG_PATH"
 hdiutil create -volname "Unison" -srcfolder "$STAGING" -ov -format UDZO "$DMG_PATH"
 rm -rf "$STAGING"
 
-# 4. Checksum so downloads can be integrity-verified.
+# 4. Notarize + staple the DMG itself — it's the artifact users download
+#    (and the one that carries the quarantine flag), so its first open
+#    should be clean offline, not just the app inside it.
+if [ "$CAN_NOTARIZE" -eq 1 ]; then
+  echo "Notarizing DMG (this can take a few minutes)..."
+  notarize "$DMG_PATH"
+  xcrun stapler staple "$DMG_PATH"
+fi
+
+# 5. Checksum — computed last, because stapling rewrites the DMG.
 shasum -a 256 "$DMG_PATH" | tee "${DMG_PATH}.sha256"
 
 echo "Build complete: $DMG_PATH"

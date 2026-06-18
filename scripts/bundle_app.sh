@@ -93,7 +93,7 @@ if [ "$TARGET" = "unison" ] && [ "${DEVELOPER_ID:-}" != "" ]; then
     "$BUNDLE_DIR"
 else
   echo "(Ad-hoc signing)"
-  codesign --force --sign - --entitlements "$ENTITLEMENTS" "$BUNDLE_DIR" 2>/dev/null || true
+  codesign --force --sign - --entitlements "$ENTITLEMENTS" "$BUNDLE_DIR"
 fi
 
 echo "Bundle ready: $BUNDLE_DIR"
