@@ -22,3 +22,16 @@ import Foundation
     let result = AudioProcessRegistry.processObjectID(forBundleID: "com.nonexistent.bundle.does.not.exist")
     #expect(result == nil)
 }
+
+@Test func bundleMatchesScope_exactAndHelperPrefix() {
+    // Exact match.
+    #expect(AudioProcessRegistry.bundleMatchesScope("ru.yandex.desktop.music", target: "ru.yandex.desktop.music"))
+    // Helper child — the real-world case: Yandex Music plays through
+    // `ru.yandex.desktop.music.helper`, so excluding the main app must catch it.
+    #expect(AudioProcessRegistry.bundleMatchesScope("ru.yandex.desktop.music.helper", target: "ru.yandex.desktop.music"))
+    #expect(AudioProcessRegistry.bundleMatchesScope("com.anthropic.claudefordesktop.helper", target: "com.anthropic.claudefordesktop"))
+    // Must NOT over-match a sibling that only shares a dotless prefix.
+    #expect(!AudioProcessRegistry.bundleMatchesScope("ru.yandex.desktop.musicbox", target: "ru.yandex.desktop.music"))
+    // Must NOT match an unrelated app.
+    #expect(!AudioProcessRegistry.bundleMatchesScope("com.tdesktop.Telegram", target: "ru.yandex.desktop.music"))
+}

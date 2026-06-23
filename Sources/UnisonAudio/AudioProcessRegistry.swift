@@ -51,15 +51,36 @@ public enum AudioProcessRegistry {
         return processes.sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
     }
 
-    /// Translate bundle ID → AudioObjectID via CoreAudio. Returns nil if
-    /// the process either is not running or has not produced audio yet.
-    public static func processObjectID(forBundleID bundleID: String) -> AudioObjectID? {
-        // Find the PID by matching bundle ID against running applications
-        let processes = runningAudioProcesses()
-        guard let process = processes.first(where: { $0.bundleID == bundleID }) else {
-            return nil
+    /// All audio process object IDs belonging to the app identified by
+    /// `bundleID` — its own audio object plus any audio-producing **helper**
+    /// processes. This is essential: many apps emit audio not from the main
+    /// process but from a helper whose bundle ID is a child of the app's,
+    /// e.g. Yandex Music plays through `ru.yandex.desktop.music.helper` and
+    /// Chromium/Electron apps through `<id>.helper`. Matching only the exact
+    /// bundle ID would miss them, so an excluded/included app would still be
+    /// tapped. Matched via CoreAudio's own `kAudioProcessPropertyBundleID`,
+    /// which reports the helper's real identifier (unlike `NSRunningApplication`,
+    /// which returns nil for helper PIDs).
+    public static func audioObjectIDs(forBundleID bundleID: String) -> [AudioObjectID] {
+        audioProcessObjectList().filter { obj in
+            guard let candidate = processBundleID(ofProcessObject: obj) else { return false }
+            return bundleMatchesScope(candidate, target: bundleID)
         }
-        return processObjectID(forPID: process.pid)
+    }
+
+    /// Whether an audio process's bundle ID `candidate` belongs to the app
+    /// identified by `target`: an exact match, or a dotted child (`target.`)
+    /// such as a `.helper`. The trailing dot prevents over-matching siblings
+    /// that merely share a prefix (e.g. `…music` must not match `…musicbox`).
+    static func bundleMatchesScope(_ candidate: String, target: String) -> Bool {
+        candidate == target || candidate.hasPrefix(target + ".")
+    }
+
+    /// Translate bundle ID → AudioObjectID via CoreAudio. Returns nil if the
+    /// app (or a helper of it) is not currently producing audio. Convenience
+    /// over `audioObjectIDs(forBundleID:)` when a single object suffices.
+    public static func processObjectID(forBundleID bundleID: String) -> AudioObjectID? {
+        audioObjectIDs(forBundleID: bundleID).first
     }
 
     /// Translate PID → AudioObjectID via CoreAudio. Returns nil if the
@@ -87,6 +108,11 @@ public enum AudioProcessRegistry {
     // MARK: - Private helpers
 
     private static func audioProcessPIDs() -> [pid_t] {
+        audioProcessObjectList().compactMap(pidOfProcessObject)
+    }
+
+    /// Raw list of every CoreAudio Audio Process Object currently known.
+    private static func audioProcessObjectList() -> [AudioObjectID] {
         var addr = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyProcessObjectList,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -102,7 +128,26 @@ public enum AudioProcessRegistry {
         guard AudioObjectGetPropertyData(
                 AudioObjectID(kAudioObjectSystemObject),
                 &addr, 0, nil, &size, &objIDs) == noErr else { return [] }
-        return objIDs.compactMap(pidOfProcessObject)
+        return objIDs
+    }
+
+    /// CoreAudio's own bundle ID for an Audio Process Object. For helper
+    /// processes this is the helper's identifier (e.g. `…music.helper`),
+    /// which is exactly what we need to match against an app's bundle ID.
+    private static func processBundleID(ofProcessObject obj: AudioObjectID) -> String? {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioProcessPropertyBundleID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size = UInt32(MemoryLayout<CFString?>.size)
+        var cf: CFString = "" as CFString
+        let status = withUnsafeMutablePointer(to: &cf) { ptr in
+            AudioObjectGetPropertyData(obj, &addr, 0, nil, &size, ptr)
+        }
+        guard status == noErr else { return nil }
+        let value = cf as String
+        return value.isEmpty ? nil : value
     }
 
     private static func pidOfProcessObject(_ obj: AudioObjectID) -> pid_t? {
