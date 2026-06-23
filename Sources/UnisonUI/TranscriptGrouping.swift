@@ -72,6 +72,19 @@ enum TranscriptGrouping {
         return groups
     }
 
+    /// Entries whose most-recent activity (`lastActivityAt`) is within
+    /// `within` seconds of `now`. The transcript recency window's time
+    /// filter — keys off activity, not creation, so a long continuous
+    /// utterance (one entry, many deltas) stays visible while still
+    /// being spoken. Pure; inject `now` in tests.
+    static func recentEntries(
+        _ entries: [TranscriptEntry],
+        now: Date,
+        within: TimeInterval
+    ) -> [TranscriptEntry] {
+        entries.filter { now.timeIntervalSince($0.lastActivityAt) <= within }
+    }
+
     // MARK: - Private
 
     /// Expand one `TranscriptEntry` into one or more bubbles.

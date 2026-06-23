@@ -248,3 +248,28 @@ private func makeEntry(
     let words = parts.joined(separator: " ").split(separator: " ")
     #expect(words.count == 51)
 }
+
+// MARK: - Recency window (recentEntries)
+
+@Test func recentEntries_keepsWithinWindow_dropsOlder() {
+    var fresh = makeEntry(.me, original: "new", translated: "новое")
+    fresh.lastActivityAt = epochDate(100)
+    var stale = makeEntry(.peer, original: "old", translated: "старое")
+    stale.lastActivityAt = epochDate(50)
+    let kept = TranscriptGrouping.recentEntries([stale, fresh], now: epochDate(120), within: 30)
+    #expect(kept.count == 1)
+    #expect(kept[0].id == fresh.id)
+}
+
+@Test func recentEntries_boundaryInclusive_atExactlyWithin() {
+    var e = makeEntry(.me, original: "edge", translated: "край")
+    e.lastActivityAt = epochDate(100)
+    // now - lastActivityAt == exactly 30 → kept (<=)
+    let kept = TranscriptGrouping.recentEntries([e], now: epochDate(130), within: 30)
+    #expect(kept.count == 1)
+}
+
+@Test func recentEntries_empty_returnsEmpty() {
+    let kept = TranscriptGrouping.recentEntries([], now: epochDate(0), within: 30)
+    #expect(kept.isEmpty)
+}
