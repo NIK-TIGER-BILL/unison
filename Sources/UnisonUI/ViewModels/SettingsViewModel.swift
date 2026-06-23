@@ -200,6 +200,24 @@ public final class SettingsViewModel {
         emitChange()
     }
 
+    public func setTapScopeMode(_ mode: TapScopeMode) {
+        settings.tapScopeMode = mode
+        emitChange()
+    }
+
+    /// The app list for the current mode (excluded list in `.allExcept`,
+    /// included list in `.onlySelected`).
+    public var activeTapBundleIDs: [String] { settings.activeTapBundleIDs }
+
+    public func setActiveTapBundleIDs(_ ids: [String]) {
+        if settings.tapScopeMode == .onlySelected {
+            settings.includedTapBundleIDs = ids
+        } else {
+            settings.excludedTapBundleIDs = ids
+        }
+        emitChange()
+    }
+
     /// Persist a new OpenAI API key. The in-memory value updates on
     /// every keystroke (so the field binding stays live), but the
     /// Keychain write happens only for an emptied field (= delete) or a

@@ -358,3 +358,35 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
     #expect(Hotkey.defaultStartStop.display == "⌃⌥U")
     #expect(Hotkey.defaultShowTranscript.display == "⌃⌥T")
 }
+
+// MARK: - Tap scope mode accessors
+
+@MainActor
+@Test func settingsVM_setTapScopeMode_persists() {
+    let vm = SettingsViewModel(
+        initial: .default,
+        deviceRegistry: MockAudioDeviceRegistry(),
+        onChange: { _ in }
+    )
+    vm.setTapScopeMode(.onlySelected)
+    #expect(vm.settings.tapScopeMode == .onlySelected)
+}
+
+@MainActor
+@Test func settingsVM_activeTapBundleIDs_routesByMode() {
+    let vm = SettingsViewModel(
+        initial: .default,
+        deviceRegistry: MockAudioDeviceRegistry(),
+        onChange: { _ in }
+    )
+    vm.setTapScopeMode(.allExcept)
+    vm.setActiveTapBundleIDs(["com.exclude.x"])
+    #expect(vm.settings.excludedTapBundleIDs == ["com.exclude.x"])
+    #expect(vm.settings.includedTapBundleIDs.isEmpty)
+
+    vm.setTapScopeMode(.onlySelected)
+    vm.setActiveTapBundleIDs(["com.include.y"])
+    #expect(vm.settings.includedTapBundleIDs == ["com.include.y"])
+    #expect(vm.settings.excludedTapBundleIDs == ["com.exclude.x"])  // untouched
+    #expect(vm.activeTapBundleIDs == ["com.include.y"])
+}
