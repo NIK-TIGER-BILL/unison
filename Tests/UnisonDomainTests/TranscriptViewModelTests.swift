@@ -317,3 +317,62 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     #expect(vm.isTestMode == false)
 }
 
+// MARK: - Recency window (visibleBubbleGroups)
+
+@MainActor
+@Test func transcriptVM_window_dropsEntriesOlderThanWindow() {
+    let clock = FakeClock(now: epochDate(1000))
+    let store = TranscriptStore(clock: clock)
+    let vm = TranscriptViewModel(store: store)
+    _ = appendMe(store, "старое", "old")        // lastActivityAt = 1000
+    clock.advance(by: 100)                        // t = 1100
+    _ = appendPeer(store, "new", "новое")        // lastActivityAt = 1100
+    let groups = vm.visibleBubbleGroups(at: clock.now())  // now = 1100
+    #expect(groups.count == 1)
+    #expect(groups[0].speaker == .peer)
+}
+
+@MainActor
+@Test func transcriptVM_window_emptyAfterSilence() {
+    let clock = FakeClock(now: epochDate(1000))
+    let store = TranscriptStore(clock: clock)
+    let vm = TranscriptViewModel(store: store)
+    _ = appendMe(store, "a", "x")
+    let groups = vm.visibleBubbleGroups(at: epochDate(1031)) // 31 s later, silence
+    #expect(groups.isEmpty)
+}
+
+@MainActor
+@Test func transcriptVM_window_capsToMaxVisibleBubbles() {
+    let clock = FakeClock(now: epochDate(1000))
+    let store = TranscriptStore(clock: clock)
+    let vm = TranscriptViewModel(store: store)
+    for i in 0..<6 { _ = appendMe(store, "m\(i)", "t\(i)") } // one me-run → 6 bubbles
+    let groups = vm.visibleBubbleGroups(at: clock.now())
+    #expect(groups.flatMap { $0.bubbles }.count == TranscriptViewModel.maxVisibleBubbles)
+}
+
+@MainActor
+@Test func transcriptVM_windowingDisabled_showsEverything() {
+    let clock = FakeClock(now: epochDate(1000))
+    let store = TranscriptStore(clock: clock)
+    let vm = TranscriptViewModel(store: store)
+    vm.windowingEnabled = false
+    for i in 0..<6 { _ = appendMe(store, "m\(i)", "t\(i)") }
+    let groups = vm.visibleBubbleGroups(at: epochDate(99_999)) // far future, silence
+    #expect(groups.flatMap { $0.bubbles }.count == 6)
+}
+
+@MainActor
+@Test func transcriptVM_bubbleGroups_usesNowProvider() {
+    let clock = FakeClock(now: epochDate(1000))
+    let store = TranscriptStore(clock: clock)
+    let vm = TranscriptViewModel(store: store)
+    vm.nowProvider = { clock.now() }
+    _ = appendMe(store, "старое", "old")
+    clock.advance(by: 100)
+    _ = appendPeer(store, "new", "новое")
+    #expect(vm.bubbleGroups.count == 1)          // windowed via nowProvider
+    #expect(vm.bubbleGroups[0].speaker == .peer)
+}
+
