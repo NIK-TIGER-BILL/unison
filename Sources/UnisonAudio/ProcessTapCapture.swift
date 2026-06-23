@@ -36,8 +36,21 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
             guard let self else { c.finish(); return }
             self.continuation = c
             do {
+                let (scope, ids) = self.resolveScope()
+                self.log.info("[tap.start] scope=\(scope) processObjectIDs=\(ids)")
+                // An allowlist that resolves to no audio objects (the chosen
+                // apps aren't producing audio yet) must NOT build a
+                // `monoMixdownOfProcesses:[]` tap of nothing — that device
+                // wedges CoreAudio on teardown and the Stop button hangs. Keep
+                // the stream open but idle: it captures nothing and tears down
+                // cleanly. The user restarts once an allowed app is playing.
+                if case .onlySelected = scope, ids.isEmpty {
+                    self.log.info("[tap.start] allowlist apps produce no audio yet — idle capture (stoppable)")
+                    self.started = true
+                    return
+                }
                 self.log.info("[tap.tcc] kTCCServiceAudioCapture status=notQueryable (silent-frame watchdog will verify at runtime)")
-                try self.createTap()
+                try self.createTap(scope: scope, ids: ids)
                 try self.createAggregateDevice()
                 try self.queryNativeSampleRate()
                 try self.installIOProc()
@@ -103,9 +116,7 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
         return desc
     }
 
-    private func createTap() throws {
-        let (scope, ids) = resolveScope()
-        log.info("[tap.start] scope=\(scope) processObjectIDs=\(ids)")
+    private func createTap(scope: TapScope, ids: [AudioObjectID]) throws {
         let desc = makeTapDescription(scope: scope, ids: ids)
         let status = AudioHardwareCreateProcessTap(desc, &tapObjectID)
         try check(status, "AudioHardwareCreateProcessTap")
