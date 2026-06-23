@@ -273,3 +273,53 @@ private func makeEntry(
     let kept = TranscriptGrouping.recentEntries([], now: epochDate(0), within: 30)
     #expect(kept.isEmpty)
 }
+
+// MARK: - Count cap (capTail)
+
+@Test func capTail_trimsSameSpeakerRunToLastN() {
+    let entries = (0..<5).map { i in makeEntry(.me, original: "m\(i)", translated: "t\(i)") }
+    let groups = TranscriptGrouping.group(entries: entries)
+    #expect(groups.count == 1)          // same speaker → one group
+    #expect(groups[0].bubbles.count == 5)
+
+    let capped = TranscriptGrouping.capTail(groups, max: 4)
+    #expect(capped.count == 1)
+    #expect(capped[0].bubbles.count == 4)
+    #expect(capped[0].bubbles.first?.primaryText == "m1")   // m0 dropped
+    #expect(capped[0].bubbles.first?.isFirstInGroup == true)
+    #expect(capped[0].bubbles.last?.primaryText == "m4")
+    #expect(capped[0].bubbles.last?.isLastInGroup == true)
+}
+
+@Test func capTail_noOpWhenWithinLimit() {
+    let entries = [makeEntry(.me, original: "a", translated: "x"),
+                   makeEntry(.peer, original: "b", translated: "y")]
+    let groups = TranscriptGrouping.group(entries: entries)
+    let capped = TranscriptGrouping.capTail(groups, max: 4)
+    #expect(capped.count == groups.count)
+    #expect(capped.flatMap { $0.bubbles }.count == 2)
+}
+
+@Test func capTail_reflagsFirstWhenCutLandsMidGroup() {
+    let me = makeEntry(.me, original: "hi", translated: "привет")
+    let longText = String(repeating: "Предложение раз. ", count: 30) // > 240 chars → splits
+    let peer = makeEntry(.peer, original: "x", translated: longText)
+    let groups = TranscriptGrouping.group(entries: [me, peer], splitThreshold: 240)
+    #expect(groups.flatMap { $0.bubbles }.count >= 3) // me + ≥2 peer chunks
+
+    let capped = TranscriptGrouping.capTail(groups, max: 1)
+    #expect(capped.count == 1)
+    #expect(capped[0].speaker == .peer)
+    #expect(capped[0].bubbles.count == 1)
+    #expect(capped[0].bubbles[0].isFirstInGroup == true)  // was a continuation, now first
+    #expect(capped[0].bubbles[0].isLastInGroup == true)
+}
+
+@Test func capTail_preservesLiveFlagOnLastBubble() {
+    let me = makeEntry(.me, original: "a", translated: "x")
+    let peerLive = makeEntry(.peer, original: "b", translated: "y")
+    let groups = TranscriptGrouping.group(entries: [me, peerLive], liveEntryId: peerLive.id)
+    #expect(groups.last?.bubbles.last?.isLive == true)
+    let capped = TranscriptGrouping.capTail(groups, max: 1)
+    #expect(capped.last?.bubbles.last?.isLive == true)
+}

@@ -85,6 +85,50 @@ enum TranscriptGrouping {
         entries.filter { now.timeIntervalSince($0.lastActivityAt) <= within }
     }
 
+    /// Keep only the last `max` bubbles across all groups (the recency
+    /// count-cap), re-assembling survivors into speaker-run groups and
+    /// re-deriving `isFirstInGroup` / `isLastInGroup`. `isLive`,
+    /// `translationLost`, `speaker` and bubble ids are preserved. When
+    /// the total bubble count is already ≤ `max`, the input is returned
+    /// unchanged (existing flags intact). Pure.
+    static func capTail(_ groups: [BubbleGroup], max: Int) -> [BubbleGroup] {
+        guard max > 0 else { return [] }
+        let flat = groups.flatMap { $0.bubbles }
+        guard flat.count > max else { return groups }
+        let kept = Array(flat.suffix(max))
+
+        var result: [BubbleGroup] = []
+        var run: [BubbleViewModel] = []
+
+        func flush() {
+            guard let head = run.first else { return }
+            let lastIdx = run.count - 1
+            let flagged = run.enumerated().map { i, b in
+                BubbleViewModel(
+                    id: b.id,
+                    speaker: b.speaker,
+                    primaryText: b.primaryText,
+                    secondaryText: b.secondaryText,
+                    isFirstInGroup: i == 0,
+                    isLastInGroup: i == lastIdx,
+                    isLive: b.isLive,
+                    translationLost: b.translationLost
+                )
+            }
+            result.append(BubbleGroup(id: head.id, speaker: head.speaker, bubbles: flagged))
+            run = []
+        }
+
+        for b in kept {
+            if let last = run.last, last.speaker != b.speaker {
+                flush()
+            }
+            run.append(b)
+        }
+        flush()
+        return result
+    }
+
     // MARK: - Private
 
     /// Expand one `TranscriptEntry` into one or more bubbles.
