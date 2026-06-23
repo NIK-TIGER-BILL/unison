@@ -133,4 +133,22 @@ struct PopoverViewSnapshotTests {
         let vm = makeVM(state: .paused(mode: .call, since: Date(), startedAt: started, reason: .awaitingNetwork))
         snap(darkFloor(PopoverView(vm: vm), size: size), size: size)
     }
+
+    /// Regression guard for the empty-allowlist hint: when `tapScopeMode`
+    /// is `.onlySelected` and `includedTapBundleIDs` is empty the popover
+    /// must show a `WarnRow` ("Выберите приложения для перевода") and block
+    /// the Start button via `.noAppsToTranslate`.
+    ///
+    /// Uses `.listen` mode so the mic-permission and BlackHole gates are
+    /// both skipped — the only blocker is the empty allowlist.
+    /// `LanguagePair.default` (`.ru` → `.en`) keeps the same-language
+    /// `WarnRow` silent, leaving exactly one warning row in the snapshot.
+    @Test func popover_blockedByEmptyAllowlist() throws {
+        var settings = Settings.default
+        settings.sessionMode = .listen
+        settings.tapScopeMode = .onlySelected
+        settings.includedTapBundleIDs = []
+        let vm = makeVM(state: .idle, settings: settings)
+        snap(darkFloor(PopoverView(vm: vm), size: SnapSize.popover), size: SnapSize.popover)
+    }
 }

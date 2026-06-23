@@ -2,15 +2,16 @@ import AppKit
 import SwiftUI
 import UnisonAudio
 
-/// Modal sheet for picking an app to add to the exclusion list.
+/// Modal sheet for picking an app to add to the active scope list (exclusions
+/// or inclusions, depending on mode).
 ///
 /// Lists every installed application (via `InstalledAppsRegistry`), unioned
 /// with anything currently producing audio so apps installed in non-standard
 /// locations are still reachable. Apps making sound right now are surfaced to
-/// the top with a speaker badge. The exclusion is stored as a bundle ID and
-/// resolved to a live audio object only when the tap starts, so picking a
-/// not-running app is valid.
-struct ExcludedAppsPicker: View {
+/// the top with a speaker badge. The chosen bundle ID is added to whichever
+/// list the current mode uses; the Process Tap resolves it to a live audio
+/// object only when the tap starts, so picking a not-running app is valid.
+struct AppScopePicker: View {
     let already: Set<String>
     let onSelect: (String) -> Void
     let onCancel: () -> Void

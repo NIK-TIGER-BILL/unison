@@ -195,11 +195,6 @@ public final class SettingsViewModel {
         emitChange()
     }
 
-    public func setExcludedTapBundleIDs(_ ids: [String]) {
-        settings.excludedTapBundleIDs = ids
-        emitChange()
-    }
-
     public func setTapScopeMode(_ mode: TapScopeMode) {
         settings.tapScopeMode = mode
         emitChange()
