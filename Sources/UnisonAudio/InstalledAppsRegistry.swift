@@ -149,7 +149,7 @@ public enum InstalledAppsRegistry {
             Source(url: URL(fileURLWithPath: "/Applications", isDirectory: true), recurse: true),
             Source(url: URL(fileURLWithPath: "/Applications/Utilities", isDirectory: true), recurse: false),
             Source(url: URL(fileURLWithPath: "/System/Applications", isDirectory: true), recurse: false),
-            Source(url: URL(fileURLWithPath: "/System/Applications/Utilities", isDirectory: true), recurse: false),
+            Source(url: URL(fileURLWithPath: "/System/Applications/Utilities", isDirectory: true), recurse: false)
         ]
         if let userApps = fm.urls(for: .applicationDirectory, in: .userDomainMask).first {
             sources.append(Source(url: userApps, recurse: true))
