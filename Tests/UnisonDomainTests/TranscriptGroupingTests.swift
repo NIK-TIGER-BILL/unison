@@ -248,3 +248,116 @@ private func makeEntry(
     let words = parts.joined(separator: " ").split(separator: " ")
     #expect(words.count == 51)
 }
+
+// MARK: - Recency window (recentEntries)
+
+@Test func recentEntries_keepsWithinWindow_dropsOlder() {
+    var fresh = makeEntry(.me, original: "new", translated: "новое")
+    fresh.lastActivityAt = epochDate(100)
+    var stale = makeEntry(.peer, original: "old", translated: "старое")
+    stale.lastActivityAt = epochDate(50)
+    let kept = TranscriptGrouping.recentEntries([stale, fresh], now: epochDate(120), within: 30)
+    #expect(kept.count == 1)
+    #expect(kept[0].id == fresh.id)
+}
+
+@Test func recentEntries_boundaryInclusive_atExactlyWithin() {
+    var e = makeEntry(.me, original: "edge", translated: "край")
+    e.lastActivityAt = epochDate(100)
+    // now - lastActivityAt == exactly 30 → kept (<=)
+    let kept = TranscriptGrouping.recentEntries([e], now: epochDate(130), within: 30)
+    #expect(kept.count == 1)
+}
+
+@Test func recentEntries_empty_returnsEmpty() {
+    let kept = TranscriptGrouping.recentEntries([], now: epochDate(0), within: 30)
+    #expect(kept.isEmpty)
+}
+
+// MARK: - Count cap (capTail)
+
+@Test func capTail_trimsSameSpeakerRunToLastN() {
+    let entries = (0..<5).map { i in makeEntry(.me, original: "m\(i)", translated: "t\(i)") }
+    let groups = TranscriptGrouping.group(entries: entries)
+    #expect(groups.count == 1)          // same speaker → one group
+    #expect(groups[0].bubbles.count == 5)
+
+    let capped = TranscriptGrouping.capTail(groups, max: 4)
+    #expect(capped.count == 1)
+    #expect(capped[0].bubbles.count == 4)
+    #expect(capped[0].bubbles.first?.primaryText == "m1")   // m0 dropped
+    #expect(capped[0].bubbles.first?.isFirstInGroup == true)
+    #expect(capped[0].bubbles.last?.primaryText == "m4")
+    #expect(capped[0].bubbles.last?.isLastInGroup == true)
+}
+
+@Test func capTail_noOpWhenWithinLimit() {
+    let entries = [makeEntry(.me, original: "a", translated: "x"),
+                   makeEntry(.peer, original: "b", translated: "y")]
+    let groups = TranscriptGrouping.group(entries: entries)
+    let capped = TranscriptGrouping.capTail(groups, max: 4)
+    #expect(capped.count == groups.count)
+    #expect(capped.flatMap { $0.bubbles }.count == 2)
+}
+
+@Test func capTail_reflagsFirstWhenCutLandsMidGroup() {
+    let me = makeEntry(.me, original: "hi", translated: "привет")
+    let longText = String(repeating: "Предложение раз. ", count: 30) // > 240 chars → splits
+    let peer = makeEntry(.peer, original: "x", translated: longText)
+    let groups = TranscriptGrouping.group(entries: [me, peer], splitThreshold: 240)
+    #expect(groups.flatMap { $0.bubbles }.count >= 3) // me + ≥2 peer chunks
+
+    let capped = TranscriptGrouping.capTail(groups, max: 1)
+    #expect(capped.count == 1)
+    #expect(capped[0].speaker == .peer)
+    #expect(capped[0].bubbles.count == 1)
+    #expect(capped[0].bubbles[0].isFirstInGroup == true)  // was a continuation, now first
+    #expect(capped[0].bubbles[0].isLastInGroup == true)
+}
+
+@Test func capTail_preservesLiveFlagOnLastBubble() {
+    let me = makeEntry(.me, original: "a", translated: "x")
+    let peerLive = makeEntry(.peer, original: "b", translated: "y")
+    let groups = TranscriptGrouping.group(entries: [me, peerLive], liveEntryId: peerLive.id)
+    #expect(groups.last?.bubbles.last?.isLive == true)
+    let capped = TranscriptGrouping.capTail(groups, max: 1)
+    #expect(capped.last?.bubbles.last?.isLive == true)
+}
+
+// Clock skew / NTP step-back: a `lastActivityAt` in the future yields a
+// negative interval, which is <= within → kept. Desired: a just-updated
+// entry should show, never vanish.
+@Test func recentEntries_futureTimestamp_isKept() {
+    var e = makeEntry(.me, original: "soon", translated: "скоро")
+    e.lastActivityAt = epochDate(200) // ahead of `now`
+    let kept = TranscriptGrouping.recentEntries([e], now: epochDate(150), within: 30)
+    #expect(kept.count == 1)
+}
+
+@Test func capTail_zeroMax_returnsEmpty() {
+    let groups = TranscriptGrouping.group(entries: [
+        makeEntry(.me, original: "a", translated: "x"),
+        makeEntry(.peer, original: "b", translated: "y")
+    ])
+    #expect(TranscriptGrouping.capTail(groups, max: 0).isEmpty)
+}
+
+// Accepted edge (design §Edge cases): when the time filter drops a middle
+// entry of a DIFFERENT speaker, the two same-speaker entries on either
+// side become adjacent and `group` merges them into one group. This
+// happens in the recentEntries→group path — NOT in capTail, which only
+// trims a contiguous tail. Pinned so any future change is deliberate.
+@Test func recentEntries_thenGroup_mergesSameSpeakerAcrossDroppedMiddle() {
+    var a = makeEntry(.me, original: "a", translated: "А")
+    a.lastActivityAt = epochDate(100)            // re-activated late → kept
+    var b = makeEntry(.peer, original: "b", translated: "Б")
+    b.lastActivityAt = epochDate(5)              // old → dropped by window
+    var c = makeEntry(.me, original: "c", translated: "В")
+    c.lastActivityAt = epochDate(105)            // recent → kept
+    let recent = TranscriptGrouping.recentEntries([a, b, c], now: epochDate(110), within: 30)
+    #expect(recent.map(\.id) == [a.id, c.id])    // middle peer dropped
+    let groups = TranscriptGrouping.group(entries: recent)
+    #expect(groups.count == 1)                   // two me-entries merged into one group
+    #expect(groups[0].speaker == .me)
+    #expect(groups[0].bubbles.count == 2)
+}

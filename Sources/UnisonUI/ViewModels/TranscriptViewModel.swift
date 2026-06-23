@@ -73,6 +73,23 @@ public final class TranscriptViewModel {
     /// JS `liveTimer` constant (`2500ms`).
     public static let liveFinalizeDelaySeconds: TimeInterval = 2.5
 
+    /// Recency window: a bubble is visible only if its source entry's
+    /// last activity was within this many seconds of "now". Older
+    /// bubbles dissolve; after this long of silence the transcript is
+    /// empty.
+    public static let windowSeconds: TimeInterval = 30
+
+    /// Hard cap on how many bubbles are visible at once, even within the
+    /// time window. Counts individual bubbles — a long split message can
+    /// crowd out older ones.
+    public static let maxVisibleBubbles: Int = 4
+
+    /// When `false`, the recency window is bypassed and the full
+    /// transcript renders (legacy behaviour). `seedTranscriptDemo` sets
+    /// this `false` so the screenshot harness shows all seeded bubbles
+    /// and doesn't empty out `windowSeconds` after launch.
+    public var windowingEnabled: Bool = true
+
     /// The entry currently in "live" state (renders typing dots on its last
     /// bubble). `nil` when no live entry is being tracked.
     public private(set) var activeLiveEntryId: UUID?
@@ -94,10 +111,31 @@ public final class TranscriptViewModel {
     /// boundaries, and the very last bubble carries the live flag when the
     /// last entry matches `activeLiveEntryId`.
     public var bubbleGroups: [BubbleGroup] {
-        TranscriptGrouping.group(
-            entries: store.entries,
+        visibleBubbleGroups(at: nowProvider())
+    }
+
+    /// The windowed slice of bubble groups at the given instant. A pure
+    /// projection over the full `store.entries` — the store is never
+    /// mutated, so the complete history stays available for export/save.
+    /// The view passes a `TimelineView` clock so bubbles expire on
+    /// schedule during silence, not only when new content arrives.
+    public func visibleBubbleGroups(at now: Date) -> [BubbleGroup] {
+        guard windowingEnabled else {
+            return TranscriptGrouping.group(
+                entries: store.entries,
+                liveEntryId: activeLiveEntryId
+            )
+        }
+        let recent = TranscriptGrouping.recentEntries(
+            store.entries,
+            now: now,
+            within: Self.windowSeconds
+        )
+        let groups = TranscriptGrouping.group(
+            entries: recent,
             liveEntryId: activeLiveEntryId
         )
+        return TranscriptGrouping.capTail(groups, max: Self.maxVisibleBubbles)
     }
 
     /// Seconds since the orchestrator first entered `.translating`. The

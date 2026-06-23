@@ -80,3 +80,24 @@ import Testing
     store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .translated, text: "Hi", isFinal: false))
     #expect(store.entries[0].translationAtRisk == false)
 }
+
+@Test @MainActor func transcriptStore_apply_stampsActivityFromClock() {
+    let clock = FakeClock(now: epochDate(1000))
+    let store = TranscriptStore(clock: clock)
+    let id = freshUUID()
+    store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .original, text: "Привет", isFinal: false))
+    #expect(store.entries[0].timestamp == epochDate(1000))
+    #expect(store.entries[0].lastActivityAt == epochDate(1000))
+}
+
+@Test @MainActor func transcriptStore_apply_bumpsLastActivityAtOnLaterDelta() {
+    let clock = FakeClock(now: epochDate(1000))
+    let store = TranscriptStore(clock: clock)
+    let id = freshUUID()
+    store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .original, text: "Привет", isFinal: false))
+    clock.advance(by: 7)
+    store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .translated, text: "Hi", isFinal: true))
+    #expect(store.entries.count == 1)
+    #expect(store.entries[0].lastActivityAt == epochDate(1007)) // bumped to latest delta
+    #expect(store.entries[0].timestamp == epochDate(1000))      // creation unchanged
+}
