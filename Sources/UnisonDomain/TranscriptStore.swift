@@ -15,7 +15,11 @@ public final class TranscriptStore {
     /// `TranscriptViewModel.extendLive(entryId:)`.
     public var onDeltaApplied: (@MainActor (UUID) -> Void)?
 
-    public init() {}
+    private let clock: Clock
+
+    public init(clock: Clock = SystemClock()) {
+        self.clock = clock
+    }
 
     public func apply(_ delta: TranscriptDelta) {
         if let idx = entries.firstIndex(where: { $0.id == delta.entryId }) {
@@ -38,6 +42,7 @@ public final class TranscriptStore {
                     entries[idx].translationAtRisk = false
                 }
             }
+            entries[idx].lastActivityAt = clock.now()
         } else {
             // Don't mint an entry for an empty delta with an unknown
             // entryId — an empty `.translated` handshake/reconstruct
@@ -56,7 +61,7 @@ public final class TranscriptStore {
                 translatedText: delta.kind == .translated ? delta.text : "",
                 sourceLanguage: nil,
                 targetLanguage: targetLang,
-                timestamp: Date()
+                timestamp: clock.now()
             )
             entries.append(entry)
         }
