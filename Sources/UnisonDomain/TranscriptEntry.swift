@@ -10,6 +10,12 @@ public struct TranscriptEntry: Identifiable, Sendable, Equatable {
     public let sourceLanguage: Language?
     public let targetLanguage: Language
     public let timestamp: Date
+    /// Time of the most recent delta folded into this entry. Defaults to
+    /// `timestamp` (creation). Bumped by `TranscriptStore.apply`. Drives
+    /// the transcript recency window so a long continuous utterance (one
+    /// entry, many deltas) stays visible while still being spoken, and a
+    /// finished one lingers for the window after its *last* delta.
+    public var lastActivityAt: Date
     /// True when the orchestrator transitioned through `.paused` /
     /// `.reconnecting` while this entry was still accumulating
     /// deltas. Used by `BubbleViewModel.translationLost` to decide
@@ -23,6 +29,7 @@ public struct TranscriptEntry: Identifiable, Sendable, Equatable {
         originalText: String? = nil, translatedText: String,
         sourceLanguage: Language?, targetLanguage: Language,
         timestamp: Date,
+        lastActivityAt: Date? = nil,
         translationAtRisk: Bool = false
     ) {
         self.id = id
@@ -32,6 +39,7 @@ public struct TranscriptEntry: Identifiable, Sendable, Equatable {
         self.sourceLanguage = sourceLanguage
         self.targetLanguage = targetLanguage
         self.timestamp = timestamp
+        self.lastActivityAt = lastActivityAt ?? timestamp
         self.translationAtRisk = translationAtRisk
     }
 }
