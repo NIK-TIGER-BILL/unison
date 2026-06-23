@@ -58,12 +58,22 @@ public struct TranscriptView: View {
     // MARK: - Bubbles
 
     private var bubbles: some View {
-        BubbleGroupView(
-            groups: vm.bubbleGroups,
-            scale: vm.bubbleScale,
-            isTestMode: vm.isTestMode
-        )
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // 1 s tick so the recency window re-evaluates during silence —
+        // bubbles cross the 30 s boundary and dissolve on the clock, not
+        // only when new content arrives. The dissolve itself is the
+        // existing removal transition in `BubbleGroupView`; the
+        // `.animation(value:)` just opens an animated transaction when
+        // the visible set changes.
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let groups = vm.visibleBubbleGroups(at: context.date)
+            BubbleGroupView(
+                groups: groups,
+                scale: vm.bubbleScale,
+                isTestMode: vm.isTestMode
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .animation(.default, value: groups.flatMap { $0.bubbles.map(\.id) })
+        }
     }
 
     // MARK: - Pill + popover
