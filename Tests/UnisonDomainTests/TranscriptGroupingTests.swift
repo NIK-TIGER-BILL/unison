@@ -323,3 +323,41 @@ private func makeEntry(
     let capped = TranscriptGrouping.capTail(groups, max: 1)
     #expect(capped.last?.bubbles.last?.isLive == true)
 }
+
+// Clock skew / NTP step-back: a `lastActivityAt` in the future yields a
+// negative interval, which is <= within → kept. Desired: a just-updated
+// entry should show, never vanish.
+@Test func recentEntries_futureTimestamp_isKept() {
+    var e = makeEntry(.me, original: "soon", translated: "скоро")
+    e.lastActivityAt = epochDate(200) // ahead of `now`
+    let kept = TranscriptGrouping.recentEntries([e], now: epochDate(150), within: 30)
+    #expect(kept.count == 1)
+}
+
+@Test func capTail_zeroMax_returnsEmpty() {
+    let groups = TranscriptGrouping.group(entries: [
+        makeEntry(.me, original: "a", translated: "x"),
+        makeEntry(.peer, original: "b", translated: "y")
+    ])
+    #expect(TranscriptGrouping.capTail(groups, max: 0).isEmpty)
+}
+
+// Accepted edge (design §Edge cases): when the time filter drops a middle
+// entry of a DIFFERENT speaker, the two same-speaker entries on either
+// side become adjacent and `group` merges them into one group. This
+// happens in the recentEntries→group path — NOT in capTail, which only
+// trims a contiguous tail. Pinned so any future change is deliberate.
+@Test func recentEntries_thenGroup_mergesSameSpeakerAcrossDroppedMiddle() {
+    var a = makeEntry(.me, original: "a", translated: "А")
+    a.lastActivityAt = epochDate(100)            // re-activated late → kept
+    var b = makeEntry(.peer, original: "b", translated: "Б")
+    b.lastActivityAt = epochDate(5)              // old → dropped by window
+    var c = makeEntry(.me, original: "c", translated: "В")
+    c.lastActivityAt = epochDate(105)            // recent → kept
+    let recent = TranscriptGrouping.recentEntries([a, b, c], now: epochDate(110), within: 30)
+    #expect(recent.map(\.id) == [a.id, c.id])    // middle peer dropped
+    let groups = TranscriptGrouping.group(entries: recent)
+    #expect(groups.count == 1)                   // two me-entries merged into one group
+    #expect(groups[0].speaker == .me)
+    #expect(groups[0].bubbles.count == 2)
+}

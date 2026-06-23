@@ -165,6 +165,7 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
 @Test func transcriptVM_bubbleGroups_reflectsStoreEntries() {
     let store = TranscriptStore()
     let vm = TranscriptViewModel(store: store)
+    vm.windowingEnabled = false   // testing group() delegation, not the recency window
     _ = appendMe(store, "Привет.", "Hi.")
     _ = appendPeer(store, "Hello.", "Привет.")
     #expect(vm.bubbleGroups.count == 2)
@@ -176,6 +177,7 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
 @Test func transcriptVM_bubbleGroups_setLive_marksLastBubbleLive() {
     let store = TranscriptStore()
     let vm = TranscriptViewModel(store: store)
+    vm.windowingEnabled = false   // testing live-flag delegation, not the recency window
     _ = appendMe(store, "Привет.", "Hi.")
     let liveEntry = appendPeer(store, "Hello.", "Привет.")
     vm.setLive(entryId: liveEntry.id)
@@ -192,6 +194,7 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .original, text: "Тест", isFinal: false))
     store.markActiveEntriesAtRisk()
     let vm = TranscriptViewModel(store: store)
+    vm.windowingEnabled = false   // testing translationLost surfacing, not the recency window
     let groups = vm.bubbleGroups
     #expect(groups.first?.bubbles.first?.translationLost == true)
 }
@@ -204,6 +207,7 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     store.markActiveEntriesAtRisk()
     store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .translated, text: "Test", isFinal: true))
     let vm = TranscriptViewModel(store: store)
+    vm.windowingEnabled = false   // testing translationLost clearing, not the recency window
     #expect(vm.bubbleGroups.first?.bubbles.first?.translationLost == false)
 }
 

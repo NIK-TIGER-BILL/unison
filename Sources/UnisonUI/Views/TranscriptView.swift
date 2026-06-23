@@ -15,6 +15,12 @@ public struct TranscriptView: View {
     @SwiftUI.State private var isSettingsOpen: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// Cadence at which the recency window is re-evaluated so bubbles
+    /// expire during silence (not only on new content). Finer than
+    /// `TranscriptViewModel.windowSeconds` — 1 s gives ≤ 1 s visual
+    /// latency on expiry at trivial cost.
+    private static let windowTickInterval: TimeInterval = 1
+
     public var body: some View {
         ZStack {
             ScrollView {
@@ -64,7 +70,7 @@ public struct TranscriptView: View {
         // existing removal transition in `BubbleGroupView`; the
         // `.animation(value:)` just opens an animated transaction when
         // the visible set changes.
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        TimelineView(.periodic(from: .now, by: Self.windowTickInterval)) { context in
             let groups = vm.visibleBubbleGroups(at: context.date)
             BubbleGroupView(
                 groups: groups,
