@@ -5,29 +5,22 @@ import UnisonAudio
 /// Modal sheet for picking an app to add to the exclusion list.
 ///
 /// Lists every installed application (via `InstalledAppsRegistry`), unioned
-/// with anything currently producing audio (via `AudioProcessRegistry`) so
-/// apps installed in non-standard locations are still reachable. Apps making
-/// sound right now are surfaced to the top with a speaker badge. The
-/// exclusion is stored as a bundle ID and resolved to a live audio object
-/// only when the tap starts, so picking a not-running app is valid.
+/// with anything currently producing audio so apps installed in non-standard
+/// locations are still reachable. Apps making sound right now are surfaced to
+/// the top with a speaker badge. The exclusion is stored as a bundle ID and
+/// resolved to a live audio object only when the tap starts, so picking a
+/// not-running app is valid.
 struct ExcludedAppsPicker: View {
     let already: Set<String>
     let onSelect: (String) -> Void
     let onCancel: () -> Void
 
-    @State private var apps: [AppItem] = []
+    @State private var apps: [ExcludableApp] = []
     @State private var query = ""
     @State private var loaded = false
+    @FocusState private var searchFocused: Bool
 
-    private struct AppItem: Identifiable, Hashable {
-        let bundleID: String
-        let name: String
-        let path: String?
-        let isProducingAudio: Bool
-        var id: String { bundleID }
-    }
-
-    private var filtered: [AppItem] {
+    private var filtered: [ExcludableApp] {
         let available = apps.filter { !already.contains($0.bundleID) }
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return available }
@@ -47,7 +40,7 @@ struct ExcludedAppsPicker: View {
                     .keyboardShortcut(.cancelAction)
             }
 
-            SearchField(text: $query)
+            searchField
 
             if !loaded {
                 ProgressView()
@@ -61,22 +54,7 @@ struct ExcludedAppsPicker: View {
                     Button {
                         onSelect(app.bundleID)
                     } label: {
-                        HStack {
-                            icon(for: app)
-                                .frame(width: 20, height: 20)
-                            VStack(alignment: .leading) {
-                                Text(app.name)
-                                Text(app.bundleID)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if app.isProducingAudio {
-                                Image(systemName: "speaker.wave.2.fill")
-                                    .foregroundStyle(.secondary)
-                                    .font(.caption)
-                            }
-                        }
+                        row(for: app)
                     }
                     .buttonStyle(.plain)
                 }
@@ -84,49 +62,62 @@ struct ExcludedAppsPicker: View {
         }
         .padding()
         .frame(width: 380, height: 460)
-        .onAppear(perform: loadIfNeeded)
+        .task { await loadIfNeeded() }
     }
 
-    /// Builds the candidate list once: all installed apps, with the
-    /// audio-active set merged in for badges, top-sorting, and to cover apps
-    /// running from non-standard locations.
-    private func loadIfNeeded() {
+    // A self-drawn search field rather than the shared `SearchField`: that
+    // component's underline is tuned for dark liquid-glass dropdowns, whereas
+    // this sheet follows the (possibly light) system appearance. `.quaternary`
+    // and `.secondary` are adaptive, so the field stays visible either way.
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Найти…", text: $query)
+                .textFieldStyle(.plain)
+                .focused($searchFocused)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func row(for app: ExcludableApp) -> some View {
+        HStack {
+            icon(for: app)
+                .frame(width: 20, height: 20)
+            VStack(alignment: .leading) {
+                Text(app.name)
+                Text(app.bundleID)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if app.isProducingAudio {
+                Image(systemName: "speaker.wave.2.fill")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+        }
+    }
+
+    /// Builds the candidate list once, off the main thread — the disk scan
+    /// plus CoreAudio enumeration is too heavy to run while the sheet is
+    /// animating in. The `ProgressView` covers the brief gather.
+    private func loadIfNeeded() async {
         guard !loaded else { return }
-
-        var byID: [String: AppItem] = [:]
-        for app in InstalledAppsRegistry.installedApplications() {
-            byID[app.bundleID] = AppItem(
-                bundleID: app.bundleID, name: app.name,
-                path: app.path, isProducingAudio: false
-            )
-        }
-        for proc in AudioProcessRegistry.runningAudioProcesses() {
-            if let existing = byID[proc.bundleID] {
-                byID[proc.bundleID] = AppItem(
-                    bundleID: existing.bundleID, name: existing.name,
-                    path: existing.path ?? proc.bundlePath,
-                    isProducingAudio: existing.isProducingAudio || proc.isProducingAudio
-                )
-            } else {
-                byID[proc.bundleID] = AppItem(
-                    bundleID: proc.bundleID, name: proc.name,
-                    path: proc.bundlePath, isProducingAudio: proc.isProducingAudio
-                )
-            }
-        }
-
-        apps = byID.values.sorted { a, b in
-            if a.isProducingAudio != b.isProducingAudio {
-                return a.isProducingAudio   // currently-playing apps first
-            }
-            return a.name.localizedCompare(b.name) == .orderedAscending
-        }
+        searchFocused = true
+        let result = await Task.detached(priority: .userInitiated) {
+            InstalledAppsRegistry.excludableApps()
+        }.value
+        apps = result
         loaded = true
     }
 
     @ViewBuilder
-    private func icon(for app: AppItem) -> some View {
-        if let path = app.path {
+    private func icon(for app: ExcludableApp) -> some View {
+        if let path = app.bundlePath {
             Image(nsImage: NSWorkspace.shared.icon(forFile: path))
                 .resizable()
         } else {

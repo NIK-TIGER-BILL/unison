@@ -1,5 +1,4 @@
 import AppKit
-import Foundation
 import SwiftUI
 import UnisonAudio
 import UnisonDomain
@@ -97,8 +96,7 @@ public struct ExcludedAppsSection: View {
             return running
         }
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            let raw = FileManager.default.displayName(atPath: url.path)
-            return raw.hasSuffix(".app") ? String(raw.dropLast(4)) : raw
+            return InstalledAppsRegistry.displayName(atPath: url.path)
         }
         return bundleID
     }
