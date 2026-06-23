@@ -179,17 +179,25 @@ Virtual mic для пира — выводит переведённый user aud
 
 ### Резолв bundle ID → audio objects (`AudioProcessRegistry.audioObjectIDs(forBundleID:)`)
 
-🔥 **Многие приложения издают звук из helper-процесса, а не из главного.** Матчить
-по точному bundle ID нельзя. Матчим audio process object, если:
+🔥 **Многие приложения издают звук из helper/XPC-процесса, а не из главного, и
+bundle ID хелпера ненадёжен** (Yandex Music → `…music.helper` — ребёнок; Dia →
+общий `company.thebrowser.browser.helper` — другое поддерево). Любые правила
+вида «префикс bundle ID» или «путь внутри бандла» приходится чинить под каждое
+новое приложение.
 
-1. его `kAudioProcessPropertyBundleID` (родной CoreAudio, не `NSRunningApplication`,
-   который для helper-PID отдаёт nil) == target **или** имеет префикс `target + "."`
-   — ловит детей вроде Yandex Music → `ru.yandex.desktop.music.helper`;
-2. **или** исполняемый файл процесса (`proc_pidpath`) лежит **внутри** бандла
-   приложения (`NSWorkspace.urlForApplication(withBundleIdentifier:)`) — ловит
-   helper'ы из чужого поддерева bundle ID, напр. Dia (`company.thebrowser.dia`)
-   играет через `company.thebrowser.browser.helper`, который физически лежит в
-   `/Applications/Dia.app/…`.
+Поэтому матчим не по bundle ID, а спрашиваем у системы, **кто отвечает** за
+процесс — та же атрибуция app↔helper, что использует TCC и группировка
+процессов в Activity Monitor:
+
+1. **Основной, универсальный:** `responsibility_get_pid_responsible_for_pid(pid)`
+   (SPI libsystem, берём через `dlsym` — нет символа → деградирует в nil, не
+   ломая линковку) → responsible PID → `NSRunningApplication(...).bundleIdentifier`.
+   Разрешает **любой** helper/renderer/XPC в его приложение-владельца без
+   правил-под-каждое-приложение. Проверено: Claude/Yandex/Dia-хелперы все
+   маппятся в свой главный bundle ID.
+2. **Фоллбэк** (только если SPI недоступен): исполняемый файл процесса
+   (`proc_pidpath`) лежит **внутри** бандла приложения
+   (`NSWorkspace.urlForApplication(withBundleIdentifier:)`).
 
 Возвращаем **все** совпавшие объекты (у приложения может быть несколько
 audio-хелперов). Без этого исключённое/включённое приложение таппится мимо —

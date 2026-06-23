@@ -52,34 +52,31 @@ public enum AudioProcessRegistry {
     }
 
     /// All audio process object IDs belonging to the app identified by
-    /// `bundleID` — its own audio object plus any audio-producing **helper**
-    /// processes. This is essential: many apps emit audio not from the main
-    /// process but from a helper. Two cases, both handled:
+    /// `bundleID`. Many apps emit audio from a helper/XPC process rather than
+    /// the main one, and the helper's own bundle ID is no reliable guide —
+    /// Yandex Music uses `ru.yandex.desktop.music.helper` (a child), but the
+    /// Dia browser (`company.thebrowser.dia`) uses the shared
+    /// `company.thebrowser.browser.helper` (a different subtree entirely).
     ///
-    /// 1. Helper bundle ID is a dotted child of the app's, e.g. Yandex Music
-    ///    plays through `ru.yandex.desktop.music.helper`.
-    /// 2. Helper bundle ID lives in an unrelated subtree, e.g. the Dia browser
-    ///    (`company.thebrowser.dia`) plays through `company.thebrowser.browser.helper`.
-    ///    The link is on disk: the helper's executable sits **inside** the app
-    ///    bundle (`/Applications/Dia.app/…/Browser Helper`).
+    /// So instead of pattern-matching bundle IDs, we ask the system who is
+    /// **responsible** for each audio process — the same app↔helper attribution
+    /// macOS uses for TCC permissions and Activity Monitor's process grouping —
+    /// and match that owning app's bundle ID. This is universal: it resolves
+    /// any helper, XPC service, or renderer to its app without per-app rules.
     ///
-    /// Without this, an excluded/included app's real audio stream is missed —
-    /// the app is still tapped (blocklist) or, worse, an allowlist mixdown taps
-    /// only the silent main process. Bundle IDs come from CoreAudio's own
-    /// `kAudioProcessPropertyBundleID` (reports the helper's real identifier,
-    /// unlike `NSRunningApplication`, which returns nil for helper PIDs).
+    /// Falls back to executable-path containment in the app bundle only if the
+    /// responsibility SPI is ever unavailable. Returns every match (an app may
+    /// run several audio helpers).
     public static func audioObjectIDs(forBundleID bundleID: String) -> [AudioObjectID] {
         let appDir = NSWorkspace.shared
             .urlForApplication(withBundleIdentifier: bundleID)?
             .standardizedFileURL.path
         return audioProcessObjectList().filter { obj in
-            if let candidate = processBundleID(ofProcessObject: obj),
-               bundleMatchesScope(candidate, target: bundleID) {
+            guard let pid = pidOfProcessObject(obj) else { return false }
+            if responsibleAppBundleID(ofPID: pid) == bundleID {
                 return true
             }
-            if let appDir,
-               let pid = pidOfProcessObject(obj),
-               let exe = executablePath(ofPID: pid),
+            if let appDir, let exe = executablePath(ofPID: pid),
                isPath(exe, inside: appDir) {
                 return true
             }
@@ -87,13 +84,26 @@ public enum AudioProcessRegistry {
         }
     }
 
-    /// Whether an audio process's bundle ID `candidate` belongs to the app
-    /// identified by `target`: an exact match, or a dotted child (`target.`)
-    /// such as a `.helper`. The trailing dot prevents over-matching siblings
-    /// that merely share a prefix (e.g. `…music` must not match `…musicbox`).
-    static func bundleMatchesScope(_ candidate: String, target: String) -> Bool {
-        candidate == target || candidate.hasPrefix(target + ".")
+    /// The bundle ID of the application the system holds **responsible** for
+    /// `pid` — i.e. the owning app of a helper/XPC process. Resolved via the
+    /// `responsibility_get_pid_responsible_for_pid` SPI (looked up with
+    /// `dlsym`, so a missing symbol degrades to nil rather than failing to
+    /// link), then mapped to a bundle ID through the responsible PID.
+    static func responsibleAppBundleID(ofPID pid: pid_t) -> String? {
+        guard let resolve = responsibleForPID else { return nil }
+        let responsible = resolve(pid)
+        guard responsible > 0 else { return nil }
+        return NSRunningApplication(processIdentifier: responsible)?.bundleIdentifier
     }
+
+    /// Cached pointer to the responsibility SPI; nil if the symbol can't be
+    /// found. A bare C function pointer carries no state, so it is safe to
+    /// share across threads.
+    private static let responsibleForPID: (@convention(c) (pid_t) -> pid_t)? = {
+        guard let sym = dlsym(dlopen(nil, RTLD_NOW), "responsibility_get_pid_responsible_for_pid")
+        else { return nil }
+        return unsafeBitCast(sym, to: (@convention(c) (pid_t) -> pid_t).self)
+    }()
 
     /// Whether `path` is the directory `dir` or lives inside it. Used to
     /// attribute a helper process to the app whose bundle contains its
@@ -156,25 +166,6 @@ public enum AudioProcessRegistry {
                 AudioObjectID(kAudioObjectSystemObject),
                 &addr, 0, nil, &size, &objIDs) == noErr else { return [] }
         return objIDs
-    }
-
-    /// CoreAudio's own bundle ID for an Audio Process Object. For helper
-    /// processes this is the helper's identifier (e.g. `…music.helper`),
-    /// which is exactly what we need to match against an app's bundle ID.
-    private static func processBundleID(ofProcessObject obj: AudioObjectID) -> String? {
-        var addr = AudioObjectPropertyAddress(
-            mSelector: kAudioProcessPropertyBundleID,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var size = UInt32(MemoryLayout<CFString?>.size)
-        var cf: CFString = "" as CFString
-        let status = withUnsafeMutablePointer(to: &cf) { ptr in
-            AudioObjectGetPropertyData(obj, &addr, 0, nil, &size, ptr)
-        }
-        guard status == noErr else { return nil }
-        let value = cf as String
-        return value.isEmpty ? nil : value
     }
 
     /// Absolute path of a process's executable, or nil if it can't be read.
