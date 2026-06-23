@@ -111,6 +111,75 @@ private func makeOrchestrator(
             "audio teardown ran on the main thread — a blocking CoreAudio stop would freeze the UI")
 }
 
+// Regression (unison.log pid=13100 / pid=83933): the synchronous
+// CoreAudio HAL teardown (`AVAudioEngine.stop()`, Process-Tap
+// aggregate-device destroy) intermittently wedges for a long time —
+// especially on a Bluetooth output. Moving it off the main thread keeps
+// the UI alive, but `stopAllStreams()` still AWAITED that teardown
+// before `stop()` could set `state = .idle`, so a wedge pinned the
+// session in `.translating` forever: the Stop button looked dead, the
+// UI sat in its stopping state, and capture was already gone. The
+// session must reach `.idle` within a bounded budget regardless of the
+// HAL — the teardown finishes in the background if it ever recovers.
+@Test @MainActor func orchestrator_stop_reachesIdleEvenWhenAudioTeardownWedges() async throws {
+    let mixer = MockAudioOutputMixer()
+    mixer.blockStopUntilReleased = true   // simulate a wedged engine.stop()
+    let o = makeOrchestrator(mixer: mixer, clock: InstantClock())
+    await o.start(mode: .listen, languages: .default)
+
+    // Drive stop() concurrently — without the timeout it never returns
+    // (parked on the wedged teardown), so we must not `await` it inline.
+    let stopTask = Task { await o.stop() }
+
+    // Give the orchestrator bounded main-actor turns to settle to .idle.
+    // With the budget it bails the wedged teardown; without it, state
+    // stays .translating and this assertion fails fast (no hang).
+    for _ in 0..<1000 where o.state != .idle { await Task.yield() }
+    #expect(o.state == .idle,
+            "stop() never reached .idle — it is still awaiting a wedged CoreAudio teardown")
+
+    mixer.releaseStop()   // let the background teardown finish
+    await stopTask
+}
+
+// The session can return to `.idle` while a wedged teardown is still
+// draining in the background (above). A subsequent stop() must NOT spawn a
+// second teardown that calls `mixer.stop()` / Process-Tap destroy
+// concurrently with the wedged one — concurrent CoreAudio HAL destroy can
+// crash coreaudiod. `stopAllStreams()` chains each teardown behind the
+// previous, so the calls stay strictly sequential (where each component's
+// stop() is idempotent).
+@Test @MainActor func orchestrator_overlappingStops_serializeHALTeardown() async throws {
+    let mixer = MockAudioOutputMixer()
+    mixer.blockStopUntilReleased = true
+    let o = makeOrchestrator(mixer: mixer, clock: InstantClock())
+
+    // Stop #1 returns via the budget timeout; its teardown wedges in mixer.stop().
+    await o.start(mode: .listen, languages: .default)
+    await o.stop()
+    for _ in 0..<1000 where mixer.stopCalls < 1 { await Task.yield() }
+    #expect(mixer.stopCalls == 1)
+    #expect(o.state == .idle)
+
+    // Restart + stop again while teardown #1 is still wedged. Teardown #2
+    // must wait for #1 (chained) instead of calling mixer.stop() concurrently.
+    await o.start(mode: .listen, languages: .default)
+    await o.stop()
+    for _ in 0..<1000 where o.state != .idle { await Task.yield() }
+    #expect(o.state == .idle)
+    // Spin long enough that a (buggy) concurrent teardown #2 would have
+    // reached mixer.stop() on its detached thread. With chaining it stays
+    // blocked behind the wedged #1, so the count holds at 1.
+    for _ in 0..<1000 { await Task.yield() }
+    #expect(mixer.stopCalls == 1,
+            "second teardown ran mixer.stop() while the first was still wedged — HAL double-stop hazard")
+
+    // Releasing cascades through the chain → both teardowns run, sequentially.
+    mixer.releaseStop()
+    for _ in 0..<2000 where mixer.stopCalls < 2 { await Task.yield() }
+    #expect(mixer.stopCalls == 2, "chained teardowns should each run mixer.stop() exactly once")
+}
+
 @Test @MainActor func orchestrator_updateOriginalMixVolume_propagatesToMixer() async throws {
     let mixer = MockAudioOutputMixer()
     let o = makeOrchestrator(mixer: mixer)

@@ -162,6 +162,41 @@ Virtual mic для пира — выводит переведённый user aud
 - Та же node-цепочка что в outputMixer для translated path
 - AGC применяется на стороне peer'а тоже
 
+### 🔥 Известный баг — Stop зависает (teardown wedge)
+
+**Симптом:** кнопка Stop иногда «не срабатывает» / «зависает», звук
+пропадает. По логам `stop()` обрывается на `[tap.stop] reason=user` и
+никогда не доходит до `state … → idle` (см. `unison.log` pid=13100,
+pid=83933).
+
+**Причина:** синхронный CoreAudio HAL teardown — Process-Tap
+aggregate-device destroy (`ProcessTapCapture.teardown()`) и
+`AVAudioEngine.stop()` (`AVAudioOutputMixer`/`BlackHole2chPlayer`) —
+интермиттентно залипает в `coreaudiod` на много секунд или навсегда
+(хуже всего на **Bluetooth**-выходе). `stopAllStreams()` уносит эти
+вызовы в `Task.detached` (главный поток жив), но **ждал их `.value`**
+перед `state = .idle` — поэтому залипший HAL прибивал всю сессию в
+`.translating`: capture уже мёртв, Stop выглядит дохлым.
+
+**Фикс:** `TranslationOrchestrator.teardownFinished(_:within:)` —
+ограничивает ожидание teardown бюджетом `coreAudioTeardownBudgetSeconds`
+(2 с). По истечении сессия идёт в `.idle`, а осиротевший teardown
+доигрывает в фоне, если HAL оживёт. Плюс **сериализация**: каждый новый
+teardown сцеплен за предыдущим (`pendingTeardown` + `await
+previousTeardown?.value`), а `start()` ждёт незавершённый teardown перед
+переиспользованием общего `AVAudioEngine` — иначе осиротевший teardown и
+новый `start()`/`stop()` дёргали бы `engine.stop()`/Process-Tap destroy
+конкурентно на одних объектах (это может уронить `coreaudiod`; stop()
+компонентов идемпотентен только для *последовательных* вызовов).
+
+Не интермиттентный в тестах: ловится через мок с блокирующимся `stop()`
+(`MockAudioOutputMixer.blockStopUntilReleased`) + `InstantClock`.
+
+**Остаётся:** при *перманентном* залипании HAL (устройство физически
+исчезло) рестарт в том же процессе всё ещё переиспользует тот же
+движок. Полная изоляция — пересоздавать `AVAudioEngine`/ноды per-session
+(трекается отдельной задачей).
+
 ---
 
 ## Diagnostic env-vars
