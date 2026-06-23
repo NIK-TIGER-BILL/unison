@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 import SwiftUI
 import UnisonAudio
 import UnisonDomain
@@ -65,8 +66,7 @@ public struct ExcludedAppsSection: View {
 
     @ViewBuilder
     private func appIcon(for bundleID: String) -> some View {
-        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first,
-           let icon = app.icon {
+        if let icon = resolvedIcon(for: bundleID) {
             Image(nsImage: icon)
                 .resizable()
         } else {
@@ -75,8 +75,31 @@ public struct ExcludedAppsSection: View {
         }
     }
 
+    /// Icon for an excluded app, working whether or not it is running:
+    /// prefer the live running instance, then fall back to the installed
+    /// app on disk.
+    private func resolvedIcon(for bundleID: String) -> NSImage? {
+        if let running = NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleID).first?.icon {
+            return running
+        }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            return NSWorkspace.shared.icon(forFile: url.path)
+        }
+        return nil
+    }
+
+    /// Display name for an excluded app, falling back to the installed app's
+    /// Finder name and finally the bundle ID when the app can't be located.
     private func appDisplayName(for bundleID: String) -> String {
-        let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
-        return app?.localizedName ?? bundleID
+        if let running = NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleID).first?.localizedName {
+            return running
+        }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            let raw = FileManager.default.displayName(atPath: url.path)
+            return raw.hasSuffix(".app") ? String(raw.dropLast(4)) : raw
+        }
+        return bundleID
     }
 }
