@@ -180,6 +180,35 @@ private func makeOrchestrator(
     #expect(mixer.stopCalls == 2, "chained teardowns should each run mixer.stop() exactly once")
 }
 
+// The other half of the fix: start()'s wait on a still-draining teardown
+// is BOUNDED by the same budget. A regression to an unbounded
+// `await pendingTeardown?.value` would hang start() forever on a wedged
+// previous stop. start() must reach `.translating` even while teardown #1
+// is still wedged.
+@Test @MainActor func orchestrator_startAfterWedgedStop_doesNotHang() async throws {
+    let mixer = MockAudioOutputMixer()
+    mixer.blockStopUntilReleased = true
+    let o = makeOrchestrator(mixer: mixer, clock: InstantClock())
+
+    await o.start(mode: .listen, languages: .default)
+    await o.stop()
+    for _ in 0..<1000 where o.state != .idle { await Task.yield() }
+    #expect(o.state == .idle)
+
+    // Restart while teardown #1 is still wedged. Drive it concurrently so a
+    // regression (unbounded wait) fails the assertion instead of hanging.
+    let startTask = Task { await o.start(mode: .listen, languages: .default) }
+    var reached = false
+    for _ in 0..<1000 {
+        if case .translating = o.state { reached = true; break }
+        await Task.yield()
+    }
+    #expect(reached, "start() after a wedged stop did not reach .translating — blocked on the wedged teardown")
+
+    mixer.releaseStop()   // unblock so even a regressed unbounded wait can finish
+    await startTask
+}
+
 @Test @MainActor func orchestrator_updateOriginalMixVolume_propagatesToMixer() async throws {
     let mixer = MockAudioOutputMixer()
     let o = makeOrchestrator(mixer: mixer)

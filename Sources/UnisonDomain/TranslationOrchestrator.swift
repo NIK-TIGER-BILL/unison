@@ -157,6 +157,9 @@ public final class TranslationOrchestrator {
     /// calls, which this serialization guarantees. Never cleared: once a
     /// teardown completes, awaiting its `.value` returns instantly, so a
     /// finished task is a harmless no-op barrier for the next session.
+    /// On a *permanently*-wedged HAL the chain never drains, so one parked
+    /// task accrues per stop-click during that episode — bounded by the
+    /// clicks, and strictly better than the old whole-app hang.
     private var pendingTeardown: Task<Void, Never>?
     private var currentLanguages: LanguagePair = .default
     private var currentSettings: Settings = .default
