@@ -164,6 +164,56 @@ Virtual mic для пира — выводит переведённый user aud
 
 ---
 
+## Process Tap scope — исключения / «только выбранные»
+
+`ProcessTapCapture` решает, **что** захватывать, через `TapScope`:
+
+- `.allExcept(bundleIDs)` → `CATapDescription(monoGlobalTapButExcludeProcesses:)` —
+  захватываем весь системный звук, кроме выбранных (+ всегда сам Unison, анти-фидбек).
+- `.onlySelected(bundleIDs)` → `CATapDescription(monoMixdownOfProcesses:)` —
+  захватываем **только** выбранные процессы; себя не таппим.
+
+`muteBehavior = .mutedWhenTapped`: то, что попало в tap, глушится на устройстве,
+а Unison проигрывает перевод (+ тихий оригинал через `originalPlayer`, vol 0.2).
+Не-затаппленные приложения играют на 100 %.
+
+### Резолв bundle ID → audio objects (`AudioProcessRegistry.audioObjectIDs(forBundleID:)`)
+
+🔥 **Многие приложения издают звук из helper-процесса, а не из главного.** Матчить
+по точному bundle ID нельзя. Матчим audio process object, если:
+
+1. его `kAudioProcessPropertyBundleID` (родной CoreAudio, не `NSRunningApplication`,
+   который для helper-PID отдаёт nil) == target **или** имеет префикс `target + "."`
+   — ловит детей вроде Yandex Music → `ru.yandex.desktop.music.helper`;
+2. **или** исполняемый файл процесса (`proc_pidpath`) лежит **внутри** бандла
+   приложения (`NSWorkspace.urlForApplication(withBundleIdentifier:)`) — ловит
+   helper'ы из чужого поддерева bundle ID, напр. Dia (`company.thebrowser.dia`)
+   играет через `company.thebrowser.browser.helper`, который физически лежит в
+   `/Applications/Dia.app/…`.
+
+Возвращаем **все** совпавшие объекты (у приложения может быть несколько
+audio-хелперов). Без этого исключённое/включённое приложение таппится мимо —
+в blocklist всё переводится, а в allowlist mixdown берёт только тихий главный
+процесс (нет транскрипта, приложение не глушится).
+
+### Резолв — один раз при `start()`
+
+Область захвата резолвится **однократно** при старте сессии: приложение должно
+**уже издавать звук**, когда нажата «Начать», иначе у него ещё нет Audio Process
+Object и оно не попадёт в tap до перезапуска сессии.
+
+⚠️ **Не возвращать динамический слушатель.** Была попытка держать tap «живым»
+через listener на `kAudioHardwarePropertyProcessObjectList` + live-`AudioObjectSetPropertyData(kAudioTapPropertyDescription)` —
+**зависала кнопка Stop и приложение падало** (HAL-set на главном потоке +
+правка живого tap клинила teardown). Слушатель стоял только при непустом
+списке — ровно эти сессии и зависали. Удалено. Если динамика реально нужна —
+делать вне главного потока и через пересоздание tap, не правкой живого.
+
+⚠️ **Пустой allowlist-резолв → НЕ создавать tap.** `monoMixdownOfProcesses:[]`
+(или mixdown из процессов, не дающих звука) клинит CoreAudio на teardown (тот же
+Stop-hang). При пустом резолве `.onlySelected` держим поток открытым, но пустым
+(захвата нет, останавливается чисто).
+
 ## Diagnostic env-vars
 
 | Env var | Что делает |
@@ -221,4 +271,4 @@ swift run pacing-eval --audio /path/to/input.wav --playback-test
 
 ---
 
-*Last updated: 2026-05-28*
+*Last updated: 2026-06-23*

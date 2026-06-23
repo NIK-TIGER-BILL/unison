@@ -2,6 +2,18 @@
 
 Status: draft  •  Author: nvzamuldinov  •  Date: 2026-06-23
 
+> **Post-implementation note (2026-06-23).** Two parts of the original design
+> were revised during live testing — see `docs/audio-pipeline.md` → "Process
+> Tap scope":
+> - The **dynamic re-resolution** (a `kAudioHardwarePropertyProcessObjectList`
+>   listener re-pushing the tap description live) was **removed** — it hung Stop
+>   and crashed the app. Scope is resolved **once at start()**; an app must be
+>   producing audio when Start is pressed.
+> - Exclusion/inclusion matching is **helper-aware**: many apps emit audio from
+>   a helper process (Yandex `…music.helper`, Dia `company.thebrowser.browser.helper`).
+>   Matched by CoreAudio bundle ID (exact or `target.` child) **or** executable
+>   path inside the app bundle.
+
 ## Context
 
 Unison translates system audio captured via a CoreAudio Process Tap. Today
