@@ -5,7 +5,7 @@ import Foundation
 /// the exclusion picker. Unlike `AudioProcess`, this does not require the
 /// app to be running or to have produced audio; the Process Tap resolves
 /// a stored bundle ID to a live audio object only when it actually starts
-/// (see `ProcessTapCapture.resolveExcludedProcessObjects`).
+/// (see `ProcessTapCapture.resolveScope`).
 public struct InstalledApp: Sendable, Identifiable, Hashable {
     public var id: String { bundleID }
     public let bundleID: String

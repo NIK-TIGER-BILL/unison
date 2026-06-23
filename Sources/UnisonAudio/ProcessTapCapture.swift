@@ -8,11 +8,8 @@ import UnisonDomain
 /// set of processes by bundle ID (macOS 14.2+). Emits Float32 `AudioFrame`s
 /// at the tap's native sample rate over an `AsyncStream`.
 public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
-    /// Closure that returns the current list of bundle IDs to exclude from
-    /// the tap. Called at every `start()` so changes to Settings take effect
-    /// on the next session without app restart.
-    private let excludedBundleIDsProvider: @Sendable () -> [String]
-    private var processObjectIDs: [AudioObjectID] = []  // resolved at start()
+    private let scopeProvider: @Sendable () -> TapScope
+    private var tappedObjectIDs: [AudioObjectID] = []  // last-applied, for change detection
     private var tapObjectID: AudioObjectID = 0
     private var aggregateDeviceID: AudioObjectID = 0
     private var ioProcID: AudioDeviceIOProcID?
@@ -21,25 +18,25 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     private var started = false
     private let log: UnisonLog
 
-    /// Listener on the system audio-process list. Excluded apps that weren't
-    /// producing audio at `start()` have no Audio Process Object yet, so they
-    /// can't be resolved up front — but the global tap captures (and mutes)
-    /// them the moment they do start. This keeps the live tap's exclusion
-    /// list current so an excluded app always plays at its original volume.
+    /// Listener on the system audio-process list. Apps that weren't producing
+    /// audio at `start()` have no Audio Process Object yet, so they can't be
+    /// resolved up front. This keeps the live tap's scope list current so the
+    /// correct set of processes is always captured.
     private var processListListenerBlock: AudioObjectPropertyListenerBlock?
-    /// Guards `tapObjectID`/`processObjectIDs` mutation between the listener
+    /// Guards `tapObjectID`/`tappedObjectIDs` mutation between the listener
     /// (which sets the tap description) and `teardown()` (which destroys it).
     private let tapLock = NSLock()
 
-    /// Static-list init (mostly for tests).
-    public init(excludedBundleIDs: [String] = []) {
-        self.excludedBundleIDsProvider = { excludedBundleIDs }
+    /// Static-scope init (tests, benchmark, permission probe). Defaults to a
+    /// blocklist with no user exclusions = tap everything except self.
+    public init(scope: TapScope = .allExcept([])) {
+        self.scopeProvider = { scope }
         self.log = UnisonLog(category: "ProcessTapCapture")
     }
 
     /// Closure-based init (production — re-reads on every start).
-    public init(excludedBundleIDsProvider: @escaping @Sendable () -> [String]) {
-        self.excludedBundleIDsProvider = excludedBundleIDsProvider
+    public init(scopeProvider: @escaping @Sendable () -> TapScope) {
+        self.scopeProvider = scopeProvider
         self.log = UnisonLog(category: "ProcessTapCapture")
     }
 
@@ -49,7 +46,6 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
             guard let self else { c.finish(); return }
             self.continuation = c
             do {
-                self.resolveExcludedProcessObjects()
                 self.log.info("[tap.tcc] kTCCServiceAudioCapture status=notQueryable (silent-frame watchdog will verify at runtime)")
                 try self.createTap()
                 try self.createAggregateDevice()
@@ -89,59 +85,64 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
 
     // MARK: - Setup steps
 
-    private func resolveExcludedProcessObjects() {
-        processObjectIDs = resolvedExclusionObjectIDs()
-        let bundleIDsList = excludedBundleIDsProvider().joined(separator: ", ")
-        log.info("[tap.start] excluded=\(bundleIDsList.isEmpty ? "<self only>" : bundleIDsList) processObjectIDs=\(processObjectIDs)")
-    }
-
-    /// Resolves the current exclusion set (self + user bundle IDs) to live
-    /// Audio Process Object IDs. Apps not currently producing audio have no
-    /// object yet and are skipped — the process-list listener re-resolves
-    /// once they do, so the omission is temporary, not permanent.
-    private func resolvedExclusionObjectIDs() -> [AudioObjectID] {
+    /// Resolve the active scope's bundle IDs to live Audio Process Object
+    /// IDs. `.allExcept` always includes self (anti-feedback); `.onlySelected`
+    /// never taps self. Apps with no audio object yet are skipped — the
+    /// process-list listener re-resolves once they appear.
+    private func resolveScope() -> (scope: TapScope, ids: [AudioObjectID]) {
+        let scope = scopeProvider()
         var ids: [AudioObjectID] = []
-        // Always exclude ourselves to avoid feedback.
-        if let own = AudioProcessRegistry.processObjectID(forPID: getpid()) {
+        if case .allExcept = scope, let own = AudioProcessRegistry.processObjectID(forPID: getpid()) {
             ids.append(own)
         }
-        for bundleID in excludedBundleIDsProvider() {
+        for bundleID in scope.bundleIDs {
             if let obj = AudioProcessRegistry.processObjectID(forBundleID: bundleID) {
                 ids.append(obj)
             }
         }
-        return ids
+        return (scope, ids)
     }
 
-    // MARK: - Dynamic exclusions
+    private func makeTapDescription(scope: TapScope, ids: [AudioObjectID]) -> CATapDescription {
+        let desc: CATapDescription
+        switch scope {
+        case .allExcept:    desc = CATapDescription(monoGlobalTapButExcludeProcesses: ids)
+        case .onlySelected: desc = CATapDescription(monoMixdownOfProcesses: ids)
+        }
+        desc.isPrivate = true
+        desc.muteBehavior = .mutedWhenTapped
+        return desc
+    }
+
+    // MARK: - Dynamic scope updates
     //
     // A `monoGlobalTapButExcludeProcesses` tap captures every process — present
     // and future — except the ones in its description's list. That list is a
     // snapshot of object IDs taken at `start()`, so an excluded app that starts
     // producing audio later isn't in it and gets tapped (hence muted by
-    // `.mutedWhenTapped`). We watch the process list and re-push an updated
+    // `.mutedWhenTapped`). Similarly, a `monoMixdownOfProcesses` tap captures
+    // only the listed processes. We watch the process list and re-push an updated
     // description onto the live tap, which `kAudioTapPropertyDescription`
     // supports without recreating the tap.
 
     private func installProcessListListener() {
-        // Only the user's exclusions can appear/disappear over a session; with
-        // none configured there's nothing to keep current (self is stable).
-        guard !excludedBundleIDsProvider().isEmpty else { return }
+        // Install only when the user has a non-empty list whose resolution
+        // can change as apps come and go. (Empty `.allExcept` = self only,
+        // stable; empty `.onlySelected` is blocked from starting.)
+        guard !scopeProvider().bundleIDs.isEmpty else { return }
         var addr = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyProcessObjectList,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.refreshTapExclusions()
+            self?.refreshTapDescription()
         }
         processListListenerBlock = block
         AudioObjectAddPropertyListenerBlock(
             AudioObjectID(kAudioObjectSystemObject), &addr, .main, block
         )
-        // Close the gap between tap creation and listener registration: an
-        // excluded app may already have started in that window.
-        refreshTapExclusions()
+        refreshTapDescription()
     }
 
     private func removeProcessListListener() {
@@ -157,19 +158,16 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
         processListListenerBlock = nil
     }
 
-    /// Re-resolve exclusions and, if the set changed, update the live tap.
-    private func refreshTapExclusions() {
+    private func refreshTapDescription() {
         tapLock.lock()
         defer { tapLock.unlock() }
         guard started, tapObjectID != 0 else { return }
 
-        let newIDs = resolvedExclusionObjectIDs()
-        guard Set(newIDs) != Set(processObjectIDs) else { return }
-        processObjectIDs = newIDs
+        let (scope, ids) = resolveScope()
+        guard Set(ids) != Set(tappedObjectIDs) else { return }
+        tappedObjectIDs = ids
 
-        let desc = CATapDescription(monoGlobalTapButExcludeProcesses: newIDs)
-        desc.isPrivate = true
-        desc.muteBehavior = .mutedWhenTapped
+        let desc = makeTapDescription(scope: scope, ids: ids)
         var addr = AudioObjectPropertyAddress(
             mSelector: kAudioTapPropertyDescription,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -181,18 +179,17 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
             AudioObjectSetPropertyData(tapObjectID, &addr, 0, nil, size, ptr)
         }
         if status == noErr {
-            log.info("[tap.update] exclusions refreshed processObjectIDs=\(newIDs)")
+            log.info("[tap.update] scope refreshed tappedObjectIDs=\(ids)")
         } else {
             log.error("[tap.update] kAudioTapPropertyDescription set failed status=\(status)")
         }
     }
 
     private func createTap() throws {
-        let desc = CATapDescription(
-            monoGlobalTapButExcludeProcesses: processObjectIDs
-        )
-        desc.isPrivate = true
-        desc.muteBehavior = .mutedWhenTapped
+        let (scope, ids) = resolveScope()
+        tappedObjectIDs = ids
+        log.info("[tap.start] scope=\(scope) tappedObjectIDs=\(ids)")
+        let desc = makeTapDescription(scope: scope, ids: ids)
         let status = AudioHardwareCreateProcessTap(desc, &tapObjectID)
         try check(status, "AudioHardwareCreateProcessTap")
         guard tapObjectID != kAudioObjectUnknown else {
@@ -340,7 +337,7 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
             AudioHardwareDestroyProcessTap(tapObjectID)
             tapObjectID = 0
         }
-        processObjectIDs.removeAll()
+        tappedObjectIDs.removeAll()
     }
 
     // MARK: - Error helpers
