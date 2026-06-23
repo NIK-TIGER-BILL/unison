@@ -21,6 +21,16 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     private var started = false
     private let log: UnisonLog
 
+    /// Listener on the system audio-process list. Excluded apps that weren't
+    /// producing audio at `start()` have no Audio Process Object yet, so they
+    /// can't be resolved up front — but the global tap captures (and mutes)
+    /// them the moment they do start. This keeps the live tap's exclusion
+    /// list current so an excluded app always plays at its original volume.
+    private var processListListenerBlock: AudioObjectPropertyListenerBlock?
+    /// Guards `tapObjectID`/`processObjectIDs` mutation between the listener
+    /// (which sets the tap description) and `teardown()` (which destroys it).
+    private let tapLock = NSLock()
+
     /// Static-list init (mostly for tests).
     public init(excludedBundleIDs: [String] = []) {
         self.excludedBundleIDsProvider = { excludedBundleIDs }
@@ -47,6 +57,7 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
                 try self.installIOProc()
                 try self.startDevice()
                 self.started = true
+                self.installProcessListListener()
             } catch {
                 self.log.error("[tap.stop] reason=error: \(String(describing: error))")
                 c.finish()
@@ -79,23 +90,101 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     // MARK: - Setup steps
 
     private func resolveExcludedProcessObjects() {
-        let currentExclusions = excludedBundleIDsProvider()
+        processObjectIDs = resolvedExclusionObjectIDs()
+        let bundleIDsList = excludedBundleIDsProvider().joined(separator: ", ")
+        log.info("[tap.start] excluded=\(bundleIDsList.isEmpty ? "<self only>" : bundleIDsList) processObjectIDs=\(processObjectIDs)")
+    }
+
+    /// Resolves the current exclusion set (self + user bundle IDs) to live
+    /// Audio Process Object IDs. Apps not currently producing audio have no
+    /// object yet and are skipped — the process-list listener re-resolves
+    /// once they do, so the omission is temporary, not permanent.
+    private func resolvedExclusionObjectIDs() -> [AudioObjectID] {
         var ids: [AudioObjectID] = []
         // Always exclude ourselves to avoid feedback.
         if let own = AudioProcessRegistry.processObjectID(forPID: getpid()) {
             ids.append(own)
         }
-        // Resolve each excluded bundle ID. Apps that aren't running OR
-        // haven't produced audio yet won't have an Audio Process Object —
-        // silently skip them; they can't appear in the system tap anyway.
-        for bundleID in currentExclusions {
+        for bundleID in excludedBundleIDsProvider() {
             if let obj = AudioProcessRegistry.processObjectID(forBundleID: bundleID) {
                 ids.append(obj)
             }
         }
-        processObjectIDs = ids
-        let bundleIDsList = currentExclusions.joined(separator: ", ")
-        log.info("[tap.start] excluded=\(bundleIDsList.isEmpty ? "<self only>" : bundleIDsList) processObjectIDs=\(processObjectIDs)")
+        return ids
+    }
+
+    // MARK: - Dynamic exclusions
+    //
+    // A `monoGlobalTapButExcludeProcesses` tap captures every process — present
+    // and future — except the ones in its description's list. That list is a
+    // snapshot of object IDs taken at `start()`, so an excluded app that starts
+    // producing audio later isn't in it and gets tapped (hence muted by
+    // `.mutedWhenTapped`). We watch the process list and re-push an updated
+    // description onto the live tap, which `kAudioTapPropertyDescription`
+    // supports without recreating the tap.
+
+    private func installProcessListListener() {
+        // Only the user's exclusions can appear/disappear over a session; with
+        // none configured there's nothing to keep current (self is stable).
+        guard !excludedBundleIDsProvider().isEmpty else { return }
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            self?.refreshTapExclusions()
+        }
+        processListListenerBlock = block
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &addr, .main, block
+        )
+        // Close the gap between tap creation and listener registration: an
+        // excluded app may already have started in that window.
+        refreshTapExclusions()
+    }
+
+    private func removeProcessListListener() {
+        guard let block = processListListenerBlock else { return }
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &addr, .main, block
+        )
+        processListListenerBlock = nil
+    }
+
+    /// Re-resolve exclusions and, if the set changed, update the live tap.
+    private func refreshTapExclusions() {
+        tapLock.lock()
+        defer { tapLock.unlock() }
+        guard started, tapObjectID != 0 else { return }
+
+        let newIDs = resolvedExclusionObjectIDs()
+        guard Set(newIDs) != Set(processObjectIDs) else { return }
+        processObjectIDs = newIDs
+
+        let desc = CATapDescription(monoGlobalTapButExcludeProcesses: newIDs)
+        desc.isPrivate = true
+        desc.muteBehavior = .mutedWhenTapped
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioTapPropertyDescription,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var box = desc
+        let size = UInt32(MemoryLayout<CATapDescription>.size)
+        let status = withUnsafeMutablePointer(to: &box) { ptr in
+            AudioObjectSetPropertyData(tapObjectID, &addr, 0, nil, size, ptr)
+        }
+        if status == noErr {
+            log.info("[tap.update] exclusions refreshed processObjectIDs=\(newIDs)")
+        } else {
+            log.error("[tap.update] kAudioTapPropertyDescription set failed status=\(status)")
+        }
     }
 
     private func createTap() throws {
@@ -233,6 +322,11 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     // MARK: - Teardown
 
     private func teardown() {
+        // Stop new listener invocations before tearing the tap down; any
+        // already-dispatched block will see tapObjectID == 0 under the lock.
+        removeProcessListListener()
+        tapLock.lock()
+        defer { tapLock.unlock() }
         if let procID = ioProcID, aggregateDeviceID != 0 {
             AudioDeviceStop(aggregateDeviceID, procID)
             AudioDeviceDestroyIOProcID(aggregateDeviceID, procID)
