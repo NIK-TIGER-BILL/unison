@@ -5,6 +5,7 @@ import UnisonDomain
 public enum StartBlockedReason: Equatable, Sendable {
     case micPermissionRequired
     case blackHole2chMissing
+    case noAppsToTranslate
 }
 
 /// Tiny enum for the popover's primary button icon. Mapped at the view
@@ -271,6 +272,13 @@ public final class PopoverViewModel {
         // BlackHole 2ch only required by `.call` (virtual mic for peer).
         if mode == .call, deviceRegistry.findBlackHole2ch() == nil {
             return .blackHole2chMissing
+        }
+        // Allowlist mode with an empty list ⇒ nothing to translate. Only the
+        // peer-capturing modes use the tap; `.test` is mic-only, so skip it.
+        if mode != .test,
+           settings.tapScopeMode == .onlySelected,
+           settings.includedTapBundleIDs.isEmpty {
+            return .noAppsToTranslate
         }
         return nil
     }
