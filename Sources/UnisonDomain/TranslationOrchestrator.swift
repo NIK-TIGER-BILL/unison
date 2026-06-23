@@ -1263,15 +1263,21 @@ public final class TranslationOrchestrator {
         let peer = peerCapture
         let mixer = outputMixer
         let vmic = virtualMicPlayer
+        let log = Self.log
         await Task.detached(priority: .userInitiated) {
-            // `peer.stop()` (Process Tap aggregate-device + tap destroy) is the
-            // call that can wedge coreaudiod — tear it down LAST so the mic and
-            // both playback mixers are already stopped (audio silenced) even if
-            // it blocks.
+            // Per-call markers: a "only selected" (mixdown tap) session wedges
+            // coreaudiod somewhere in here. The last `[stop.detached] step=…`
+            // with no successor pins which stop() blocks; peer.stop() then logs
+            // its own `[tap.teardown] step=…` for the exact HAL call.
+            log.info("[stop.detached] step=mic.stop")
             mic.stop()
-            mixer.stop()
-            vmic.stop()
+            log.info("[stop.detached] step=peer.stop")
             peer.stop()
+            log.info("[stop.detached] step=mixer.stop")
+            mixer.stop()
+            log.info("[stop.detached] step=vmic.stop")
+            vmic.stop()
+            log.info("[stop.detached] step=done")
         }.value
         await meStream?.close()
         await peerStream?.close()
