@@ -247,19 +247,28 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     // MARK: - Teardown
 
     private func teardown() {
+        // Per-step markers: a `monoMixdownOfProcesses` tap has been observed to
+        // wedge one of these HAL calls on Stop (the global-exclude tap tears
+        // down in <1s). The last `step=…` line without a following one pins the
+        // blocking call. Timestamps come from FileLogStore.
         if let procID = ioProcID, aggregateDeviceID != 0 {
+            log.info("[tap.teardown] step=AudioDeviceStop")
             AudioDeviceStop(aggregateDeviceID, procID)
+            log.info("[tap.teardown] step=AudioDeviceDestroyIOProcID")
             AudioDeviceDestroyIOProcID(aggregateDeviceID, procID)
         }
         ioProcID = nil
         if aggregateDeviceID != 0 {
+            log.info("[tap.teardown] step=AudioHardwareDestroyAggregateDevice")
             AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
             aggregateDeviceID = 0
         }
         if tapObjectID != 0 {
+            log.info("[tap.teardown] step=AudioHardwareDestroyProcessTap")
             AudioHardwareDestroyProcessTap(tapObjectID)
             tapObjectID = 0
         }
+        log.info("[tap.teardown] step=done")
     }
 
     // MARK: - Error helpers

@@ -1264,10 +1264,14 @@ public final class TranslationOrchestrator {
         let mixer = outputMixer
         let vmic = virtualMicPlayer
         await Task.detached(priority: .userInitiated) {
+            // `peer.stop()` (Process Tap aggregate-device + tap destroy) is the
+            // call that can wedge coreaudiod — tear it down LAST so the mic and
+            // both playback mixers are already stopped (audio silenced) even if
+            // it blocks.
             mic.stop()
-            peer.stop()
             mixer.stop()
             vmic.stop()
+            peer.stop()
         }.value
         await meStream?.close()
         await peerStream?.close()
