@@ -376,3 +376,16 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     #expect(vm.bubbleGroups[0].speaker == .peer)
 }
 
+// Core requirement: the recency window is view-only. Even after every
+// bubble has dissolved from view (silence), the store retains the full
+// history — the foundation for a future save-meeting-transcript feature.
+@MainActor
+@Test func transcriptVM_window_keepsFullHistoryInStore() {
+    let clock = FakeClock(now: epochDate(1000))
+    let store = TranscriptStore(clock: clock)
+    let vm = TranscriptViewModel(store: store)
+    for i in 0..<6 { _ = appendMe(store, "m\(i)", "t\(i)") }
+    #expect(vm.visibleBubbleGroups(at: epochDate(9999)).isEmpty) // window emptied
+    #expect(store.entries.count == 6)                            // history intact
+}
+
