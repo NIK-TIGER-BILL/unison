@@ -43,7 +43,7 @@ public struct MeetingRecord: Identifiable, Sendable, Codable, Equatable {
     public var displayTitle: String { Self.displayTitle(title: title, mode: mode, startedAt: startedAt) }
 
     static func displayTitle(title: String?, mode: SessionMode, startedAt: Date) -> String {
-        if let title, !title.trimmingCharacters(in: .whitespaces).isEmpty { return title }
+        if let title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return title }
         return "\(modeWord(mode)) · \(titleDateFormatter.string(from: startedAt))"
     }
 
@@ -66,15 +66,15 @@ public struct MeetingRecord: Identifiable, Sendable, Codable, Equatable {
 /// Lightweight index row for list rendering without loading the full record.
 public struct MeetingSummary: Identifiable, Sendable, Codable, Equatable {
     public let id: UUID
-    public var title: String?
+    public let title: String?
     public let startedAt: Date
     public let durationSeconds: Int
     public let mode: SessionMode
     public let languagePair: LanguagePair
-    public var lineCount: Int
-    public var preview: String
-    public var pinned: Bool
-    public var sizeBytes: Int
+    public let lineCount: Int
+    public let preview: String
+    public let pinned: Bool
+    public let sizeBytes: Int
 
     public init(
         id: UUID, title: String?, startedAt: Date, durationSeconds: Int,

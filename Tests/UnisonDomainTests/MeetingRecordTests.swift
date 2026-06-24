@@ -42,3 +42,15 @@ import Testing
     #expect(s.preview.count == 81)        // 80 chars + ellipsis
     #expect(s.preview.hasSuffix("…"))
 }
+
+@Test func meetingSummary_preview_emptyEntries_isEmptyString() {
+    let s = MeetingSummary(record: sampleRecord(entries: []), sizeBytes: 0)
+    #expect(s.preview == "")
+}
+
+@Test func meetingSummary_codableRoundTrip() throws {
+    let rec = sampleRecord(title: "T", entries: [sampleEntry(), sampleEntry(.me, "Ок")])
+    let summary = MeetingSummary(record: rec, sizeBytes: 999)
+    let decoded: MeetingSummary = try encodeDecode(summary)
+    #expect(decoded == summary)
+}
