@@ -429,6 +429,12 @@ extension Composition {
         // Pin the elapsed-time pill at a recognisable value so the
         // screenshot is reproducible across captures.
         viewModel.previewElapsedSeconds = 47
+        // The recency window would trim these 6 seeded replies to the
+        // last 4 and empty the transcript 30 s after launch (their
+        // timestamps are fixed at seed time, and the screenshot harness
+        // captures at an arbitrary post-launch moment). Show the full
+        // seeded conversation deterministically instead.
+        viewModel.windowingEnabled = false
     }
 }
 

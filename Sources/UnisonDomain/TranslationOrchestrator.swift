@@ -146,6 +146,21 @@ public final class TranslationOrchestrator {
     private static let audioBufferFrames: Int = 30
     // Tasks not bound to a single stream (device observer, etc).
     private var globalTasks: [Task<Void, Never>] = []
+    /// The most recent off-main CoreAudio HAL teardown
+    /// (`mic/peer/mixer/vmic.stop()`). `stopAllStreams()` chains each new
+    /// teardown behind this one and `start()` waits on it before
+    /// re-starting the shared audio engine, so two teardowns — or a
+    /// teardown and a fresh `start()` — never touch the same reused
+    /// `AVAudioEngine` / Process-Tap aggregate device concurrently.
+    /// Concurrent HAL destroy can crash `coreaudiod`; each component's
+    /// `stop()`/`teardown()` is idempotent only across *sequential*
+    /// calls, which this serialization guarantees. Never cleared: once a
+    /// teardown completes, awaiting its `.value` returns instantly, so a
+    /// finished task is a harmless no-op barrier for the next session.
+    /// On a *permanently*-wedged HAL the chain never drains, so one parked
+    /// task accrues per stop-click during that episode — bounded by the
+    /// clicks, and strictly better than the old whole-app hang.
+    private var pendingTeardown: Task<Void, Never>?
     private var currentLanguages: LanguagePair = .default
     private var currentSettings: Settings = .default
     /// `clock.now()` at the moment `start()` first entered `.translating`.
@@ -272,6 +287,17 @@ public final class TranslationOrchestrator {
                 state = .error(.blackHole2chMissing)
                 return
             }
+        }
+
+        // If a previous session's HAL teardown is still draining (it can
+        // wedge on a bad/Bluetooth output device), let it finish before we
+        // re-start the *shared* engine — a concurrent `engine.start()` vs a
+        // wedged `engine.stop()` on one `AVAudioEngine` is unsafe. Bounded
+        // so a permanently-wedged HAL can't pin start() forever; a finished
+        // teardown returns instantly.
+        if let pending = pendingTeardown,
+           await teardownFinished(pending, within: Self.coreAudioTeardownBudgetSeconds) == false {
+            Self.log.error("start() — previous CoreAudio teardown still draining after \(Self.coreAudioTeardownBudgetSeconds)s; starting the shared engine anyway (audio may stutter until the old HAL stop unwedges)")
         }
 
         Self.log.info("start() — starting output mixer (outputDeviceUID=\(settings.outputDeviceUID ?? "default"))")
@@ -1263,28 +1289,38 @@ public final class TranslationOrchestrator {
         let peer = peerCapture
         let mixer = outputMixer
         let vmic = virtualMicPlayer
-        let log = Self.log
+        // Serialize the HAL teardown behind any still-running one so two
+        // teardowns never call `mixer.stop()` / `peer.stop()` — and thus
+        // `AVAudioEngine.stop()` / Process-Tap destroy — concurrently on
+        // the same reused CoreAudio objects (concurrent destroy can crash
+        // coreaudiod). `await previousTeardown?.value` makes the calls
+        // strictly sequential, where each component's stop() is idempotent.
+        let previousTeardown = pendingTeardown
         let teardown = Task.detached(priority: .userInitiated) {
+            await previousTeardown?.value
             mic.stop()
             peer.stop()
             mixer.stop()
             vmic.stop()
         }
-        // Bound the wait on the synchronous CoreAudio HAL teardown. The
-        // mixdown-tap Stop wedge is fixed at its source (AVAudioOutputMixer.stop
-        // resets rather than stops its players — `AVAudioPlayerNode.stop()`'s
-        // completion-handler flush hangs while a Process Tap is active), but a
-        // synchronous HAL call still can't be interrupted and coreaudiod IPC can
-        // stall system-wide for reasons outside our control. Proceed to .idle
-        // after 5s and let teardown finish (or stay abandoned) in the background
-        // rather than freezing Stop forever (which forced a kill via Activity Monitor).
-        let gate = StopTeardownGate()
-        let finished = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-            Task { await teardown.value; await gate.resume(cont, with: true) }
-            Task { try? await Task.sleep(for: .seconds(5)); await gate.resume(cont, with: false) }
-        }
-        if !finished {
-            log.error("stop — audio teardown exceeded 5s (coreaudiod IPC stalled); proceeding to idle, teardown continues in background")
+        pendingTeardown = teardown
+        // Bound the wait. The detached hop already keeps the main thread
+        // alive, but AWAITING `.value` unconditionally still chained the
+        // whole session lifecycle to a call that intermittently wedges for
+        // many seconds — or forever — inside coreaudiod (Process-Tap
+        // aggregate-device destroy / `AVAudioEngine.stop()`, worst on
+        // Bluetooth output). When it wedged, `state` never reached `.idle`:
+        // Stop looked dead, the UI sat stopping, capture was already gone
+        // (unison.log pid=13100 / pid=83933 both ended at `[tap.stop]
+        // reason=user`, never `→ idle`). Past the budget we proceed anyway;
+        // the orphaned teardown keeps running and the next start()/stop()
+        // serializes behind it. The mixdown-tap wedge itself is now fixed at
+        // the source (AVAudioOutputMixer.stop resets its players instead of
+        // calling AVAudioPlayerNode.stop(), whose completion-handler flush
+        // hangs while a Process Tap is active), so this budget is a pure
+        // safety net for coreaudiod-level stalls outside our control.
+        if await teardownFinished(teardown, within: Self.coreAudioTeardownBudgetSeconds) == false {
+            Self.log.error("stopAllStreams — CoreAudio HAL teardown exceeded \(Self.coreAudioTeardownBudgetSeconds)s; proceeding to idle without it (output device HAL likely wedged). Orphaned teardown continues in background.")
         }
         await meStream?.close()
         await peerStream?.close()
@@ -1303,6 +1339,53 @@ public final class TranslationOrchestrator {
         // No-op when the env vars aren't set.
         WireDumper.shared.close()
         WireDumper.sent.close()
+    }
+
+    /// How long `stopAllStreams()` waits on the off-main CoreAudio HAL
+    /// teardown before giving up and settling the session anyway. Normal
+    /// teardown is sub-100 ms; a healthy full stop (incl. the stream
+    /// close grace) was ~0.5 s in production logs. 2 s is comfortable
+    /// headroom for a slow-but-live HAL while still bailing promptly when
+    /// it has truly wedged.
+    private static let coreAudioTeardownBudgetSeconds: TimeInterval = 2.0
+
+    /// Await `teardown`, but stop waiting after `budget`. Returns `true`
+    /// if it finished in time, `false` on timeout. On timeout the task is
+    /// deliberately NOT cancelled — it's the synchronous CoreAudio HAL
+    /// teardown, which must still run to completion if the HAL ever
+    /// unblocks; we just refuse to let it pin the @MainActor session
+    /// lifecycle. The injected `clock` drives the budget so tests are
+    /// deterministic — but a manual clock (`ManualClock`/`FakeClock`)
+    /// paired with a *wedged* teardown must `advance(by:)` past `budget`
+    /// or this never resolves; `InstantClock` (auto-returning `sleep`)
+    /// sidesteps that and is what the wedge regression tests use. The
+    /// `Decision` box makes the race fire-once, so the loser's `resume` is
+    /// a no-op and nothing leaks the continuation — the same fire-once
+    /// shape as `OpenAIRealtimeStream.close()`'s grace wait. No stored
+    /// state, so overlapping `stop()` calls stay safe.
+    private func teardownFinished(_ teardown: Task<Void, Never>, within budget: TimeInterval) async -> Bool {
+        final class Decision: @unchecked Sendable {
+            private let lock = NSLock()
+            private var settled = false
+            func claim() -> Bool {
+                lock.lock(); defer { lock.unlock() }
+                if settled { return false }
+                settled = true
+                return true
+            }
+        }
+        let decision = Decision()
+        let clock = self.clock
+        return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            Task {
+                await teardown.value
+                if decision.claim() { cont.resume(returning: true) }
+            }
+            Task {
+                try? await clock.sleep(for: budget)
+                if decision.claim() { cont.resume(returning: false) }
+            }
+        }
     }
 
     public func updateOriginalMixVolume(_ v: Float) {
@@ -1581,17 +1664,5 @@ public final class TranslationOrchestrator {
             }
         }
         pipelineTasksBySpeaker[.peer, default: []].append(contentsOf: [splitter, sender, translatedPlay, originalPlay, transcripts])
-    }
-}
-
-/// One-shot gate for the stop-teardown-vs-timeout race: whichever finishes
-/// first resumes the continuation; the loser's call is a no-op. Ensures the
-/// continuation resumes exactly once.
-private actor StopTeardownGate {
-    private var resumed = false
-    func resume(_ cont: CheckedContinuation<Bool, Never>, with value: Bool) {
-        guard !resumed else { return }
-        resumed = true
-        cont.resume(returning: value)
     }
 }

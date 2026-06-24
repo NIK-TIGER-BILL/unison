@@ -162,6 +162,51 @@ Virtual mic для пира — выводит переведённый user aud
 - Та же node-цепочка что в outputMixer для translated path
 - AGC применяется на стороне peer'а тоже
 
+### 🔥 Известный баг — Stop зависает (teardown wedge)
+
+**Симптом:** кнопка Stop иногда «не срабатывает» / «зависает», звук
+пропадает. По логам `stop()` обрывается на `[tap.stop] reason=user` и
+никогда не доходит до `state … → idle` (см. `unison.log` pid=13100,
+pid=83933).
+
+**Корневая причина (найдена в VM, детерминированно):**
+`AVAudioOutputMixer.stop()` звал `translatedPlayer.stop()` /
+`originalPlayer.stop()`. **`AVAudioPlayerNode.stop()`** сбрасывает (flush)
+накопившиеся `.dataPlayedBack` completion-хендлеры из `scheduleTranslated`,
+и этот flush **никогда не возвращается**, если в сессии был активен
+Process Tap — залипает в `coreaudiod` (хуже всего на **Bluetooth**).
+Так как залипший `stop()` блокировал весь teardown, сессия не доходила
+до `.idle`. A/B на свежезагруженном `coreaudiod` (`scripts/vm-verify-fix.sh`,
+`Tools/TapBenchmark/ReproTeardown.swift`): продакшн-путь mixer'а клинит
+Stop 3/3 с `stop()` и чисто проходит 3/3 с `reset()`. Сам `AVAudioEngine.stop()`
+и все четыре HAL-destroy (`AudioDeviceStop`/`…DestroyIOProcID`/
+`…DestroyAggregateDevice`/`…DestroyProcessTap`) возвращаются мгновенно —
+это **не** они.
+
+**Корневой фикс:** `AVAudioOutputMixer.stop()` теперь `reset()` (а не
+`stop()`) на плеерах — очищает запланированные буферы без flush'а
+completion-хендлеров.
+
+**Защита в глубину (PR #7):** `TranslationOrchestrator.teardownFinished(_:within:)`
+ограничивает ожидание teardown бюджетом `coreAudioTeardownBudgetSeconds`
+(2 с) — на случай *системного* залипания `coreaudiod` вне нашего контроля.
+По истечении сессия идёт в `.idle`, осиротевший teardown доигрывает в фоне.
+Плюс **сериализация**: каждый новый teardown сцеплен за предыдущим
+(`pendingTeardown` + `await previousTeardown?.value`), а `start()` ждёт
+незавершённый teardown перед переиспользованием общего `AVAudioEngine` —
+иначе teardown и новый `start()`/`stop()` дёргали бы `engine.stop()`/
+Process-Tap destroy конкурентно на одних объектах (может уронить
+`coreaudiod`; stop() компонентов идемпотентен только для *последовательных*
+вызовов).
+
+Не интермиттентный в тестах: ловится через мок с блокирующимся `stop()`
+(`MockAudioOutputMixer.blockStopUntilReleased`) + `InstantClock`.
+
+**Остаётся:** корневой фикс (`reset()`) снимает залипание от нашего же
+teardown, поэтому отдельная пересборка `AVAudioEngine` per-session больше
+не нужна; бюджет + сериализация остаются как защита от перманентного
+залипания HAL (устройство физически исчезло).
+
 ---
 
 ## Process Tap scope — исключения / «только выбранные»

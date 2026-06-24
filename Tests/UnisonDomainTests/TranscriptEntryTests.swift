@@ -20,3 +20,22 @@ import Testing
     #expect(store.entries.count == 1)
     #expect(store.entries.first?.translatedText == "Hello world")
 }
+
+@Test func transcriptEntry_lastActivityAt_defaultsToTimestamp() {
+    let e = TranscriptEntry(
+        id: freshUUID(), speaker: .me, originalText: nil, translatedText: "Hi",
+        sourceLanguage: nil, targetLanguage: .en, timestamp: epochDate(42)
+    )
+    #expect(e.lastActivityAt == e.timestamp)
+    #expect(e.lastActivityAt == epochDate(42))
+}
+
+@Test func transcriptEntry_lastActivityAt_explicitOverride() {
+    let e = TranscriptEntry(
+        id: freshUUID(), speaker: .me, originalText: nil, translatedText: "Hi",
+        sourceLanguage: nil, targetLanguage: .en,
+        timestamp: epochDate(42), lastActivityAt: epochDate(99)
+    )
+    #expect(e.lastActivityAt == epochDate(99))
+    #expect(e.timestamp == epochDate(42))
+}

@@ -1,6 +1,14 @@
 # Unison Release QA Checklist
 
-Run before each release on a fresh macOS 14 VM.
+Run before each release on a fresh macOS 26 (Tahoe) VM.
+
+## Gatekeeper / notarization
+- [ ] Download the released .dmg via a browser (it gets a quarantine flag)
+- [ ] `xcrun stapler validate ~/Downloads/Unison.dmg` → "The validate action worked!"
+- [ ] `spctl -a -vvv -t open --context context:primary-signature ~/Downloads/Unison.dmg` → "accepted, source=Notarized Developer ID"
+- [ ] Mount the .dmg, drag Unison.app to /Applications, launch → no "Apple could not verify…" dialog
+- [ ] `xcrun stapler validate /Applications/Unison.app` → "The validate action worked!"
+- [ ] `spctl -a -vvv /Applications/Unison.app` → "accepted, source=Notarized Developer ID"
 
 ## Installation
 - [ ] Download .dmg, mount, drag Unison.app to Applications

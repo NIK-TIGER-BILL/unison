@@ -30,6 +30,15 @@ jobs:
         # `--parallel` flag is an XCTest-ism) and its parallel runner
         # deadlocks this suite. Serial runs the full suite in ~40 s.
         run: swift test --no-parallel
+      # Smoke-test the release bundler so packaging breaks surface on
+      # push, not at `git tag` time. Ad-hoc, debug config (reuses the
+      # build above); no secrets required.
+      - name: Bundle smoke (ad-hoc)
+        run: CONFIG=debug ./scripts/bundle_app.sh
+      - name: Verify bundle
+        run: |
+          test -f build/Unison.app/Contents/MacOS/Unison
+          codesign -dv build/Unison.app
 
   lint:
     runs-on: macos-26
