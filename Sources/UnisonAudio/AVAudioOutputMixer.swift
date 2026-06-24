@@ -11,20 +11,15 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// to `~/Library/Logs/Unison/unison.log` — see `UnisonLog`.
     private static let log = UnisonLog(category: "AudioOutput")
 
-    // Recreatable (var, not let): a `monoMixdownOfProcesses` ("only selected")
-    // session can wedge `engine.stop()` in coreaudiod, leaving the engine
-    // unusable for the next session (its output unit hangs on device binding).
-    // `start()` rebuilds these when the previous stop didn't complete — see
-    // `engineStoppedCleanly`.
-    private var engine = AVAudioEngine()
-    private var translatedPlayer = AVAudioPlayerNode()
-    private var originalPlayer = AVAudioPlayerNode()
+    private let engine = AVAudioEngine()
+    private let translatedPlayer = AVAudioPlayerNode()
+    private let originalPlayer = AVAudioPlayerNode()
     /// Time-stretch node inserted between `translatedPlayer` and the
     /// main mixer. Its `rate` is modulated by `pacing` based on queue
     /// depth so OpenAI Realtime's burst-rate audio doesn't accumulate
     /// unbounded latency on Bluetooth output.
-    private var timePitch = AVAudioUnitTimePitch()
-    private var mixer: AVAudioMixerNode
+    private let timePitch = AVAudioUnitTimePitch()
+    private let mixer: AVAudioMixerNode
     /// Cached 48k F32 mono format. We rebuild a new `AVAudioPCMBuffer`
     /// per scheduled chunk but stop rebuilding the `AVAudioFormat`
     /// — it's the same instance for every chunk and the connect-time
@@ -44,12 +39,6 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// does *not* detach (the engine reuses the same player instances
     /// on restart, so detach+reattach buys nothing but reset risk).
     private var attached = false
-    /// Set false at the top of `stop()`, true only once `engine.stop()`
-    /// returns. A `monoMixdownOfProcesses` session can wedge `engine.stop()`
-    /// in coreaudiod (abandoned by the orchestrator's Stop timeout), in which
-    /// case this stays false and the next `start()` rebuilds the engine rather
-    /// than reusing the dead one. Guarded by `counterLock`.
-    private var engineStoppedCleanly = true
     /// Frame counter for periodic RMS logging on the translated path —
     /// every 10th chunk (~1s at 100ms chunks) emits one debug line so
     /// diagnostics can see whether the source audio amplitude itself
@@ -78,29 +67,8 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         self.mixer = engine.mainMixerNode
     }
 
-    /// If the previous session's `engine.stop()` never returned (a mixdown-tap
-    /// coreaudiod wedge, abandoned by the Stop timeout), the engine's output
-    /// unit is dead and reusing it hangs the next start at the device binding.
-    /// Build a fresh engine + nodes. The old engine is retained by the
-    /// abandoned teardown call, so it leaks rather than hanging on deinit.
-    private func rebuildEngineIfPreviousStopWedged() {
-        counterLock.lock()
-        let wedged = !engineStoppedCleanly
-        counterLock.unlock()
-        guard wedged else { return }
-        Self.log.info("start — previous engine.stop() did not return (mixdown-tap wedge); rebuilding audio engine + nodes")
-        engine = AVAudioEngine()
-        translatedPlayer = AVAudioPlayerNode()
-        originalPlayer = AVAudioPlayerNode()
-        timePitch = AVAudioUnitTimePitch()
-        mixer = engine.mainMixerNode
-        attached = false
-        pacing = nil
-    }
-
     public func start(deviceUID: String?) async throws {
         Self.log.info("start(deviceUID=\(deviceUID ?? "<system default>"))")
-        rebuildEngineIfPreviousStopWedged()
         if !attached {
             engine.attach(translatedPlayer)
             engine.attach(originalPlayer)
@@ -318,19 +286,19 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     }
 
     public func stop() {
-        counterLock.lock(); engineStoppedCleanly = false; counterLock.unlock()
         pacing?.stop()
         closePlaybackDumpIfNeeded()
-        translatedPlayer.stop()
-        originalPlayer.stop()
-        // `engine.stop()` has been observed to wedge in coreaudiod after a
-        // `monoMixdownOfProcesses` ("only selected") session. If it returns,
-        // mark the engine reusable; if it wedges, the flag stays false and the
-        // next start() rebuilds (see `rebuildEngineIfPreviousStopWedged`).
-        Self.log.info("[mixer.stop] step=engine.stop")
+        // Reset (not stop) the players. `AVAudioPlayerNode.stop()` flushes the
+        // pending `.dataPlayedBack` completion handlers from `scheduleTranslated`,
+        // and that flush *wedges* whenever a CoreAudio Process Tap was active in
+        // the session — the tap's effect on the render thread makes it never
+        // return, hanging Stop (and, since the wedged stop blocked teardown, the
+        // whole session). `reset()` clears the scheduled buffers cleanly without
+        // that flush. Verified deterministically in the VM tap harness
+        // (scripts/vm-repro-teardown.sh): `stop()` wedges 3/3, `reset()` is 3/3 OK.
+        translatedPlayer.reset()
+        originalPlayer.reset()
         engine.stop()
-        Self.log.info("[mixer.stop] step=done")
-        counterLock.lock(); engineStoppedCleanly = true; counterLock.unlock()
     }
 
     /// Schedule a translated-track chunk: account for it in the pacing

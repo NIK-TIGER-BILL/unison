@@ -9,6 +9,7 @@ import UnisonDomain
 /// at the tap's native sample rate over an `AsyncStream`.
 public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     private let scopeProvider: @Sendable () -> TapScope
+    private let muteBehavior: CATapMuteBehavior
     private var tapObjectID: AudioObjectID = 0
     private var aggregateDeviceID: AudioObjectID = 0
     private var ioProcID: AudioDeviceIOProcID?
@@ -19,14 +20,18 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
 
     /// Static-scope init (tests, benchmark, permission probe). Defaults to a
     /// blocklist with no user exclusions = tap everything except self.
-    public init(scope: TapScope = .allExcept([])) {
+    public init(scope: TapScope = .allExcept([]),
+                muteBehavior: CATapMuteBehavior = .mutedWhenTapped) {
         self.scopeProvider = { scope }
+        self.muteBehavior = muteBehavior
         self.log = UnisonLog(category: "ProcessTapCapture")
     }
 
     /// Closure-based init (production — re-reads on every start).
-    public init(scopeProvider: @escaping @Sendable () -> TapScope) {
+    public init(scopeProvider: @escaping @Sendable () -> TapScope,
+                muteBehavior: CATapMuteBehavior = .mutedWhenTapped) {
         self.scopeProvider = scopeProvider
+        self.muteBehavior = muteBehavior
         self.log = UnisonLog(category: "ProcessTapCapture")
     }
 
@@ -112,7 +117,7 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
         case .onlySelected: desc = CATapDescription(monoMixdownOfProcesses: ids)
         }
         desc.isPrivate = true
-        desc.muteBehavior = .mutedWhenTapped
+        desc.muteBehavior = muteBehavior
         return desc
     }
 
@@ -247,28 +252,28 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     // MARK: - Teardown
 
     private func teardown() {
-        // Per-step markers: a `monoMixdownOfProcesses` tap has been observed to
-        // wedge one of these HAL calls on Stop (the global-exclude tap tears
-        // down in <1s). The last `step=…` line without a following one pins the
-        // blocking call. Timestamps come from FileLogStore.
+        // Synchronous HAL teardown. All four calls return promptly (verified in
+        // the VM tap harness — the Stop wedge was AVAudioPlayerNode.stop(), not
+        // any of these); log only on a genuine non-noErr status so a real
+        // destroy failure (which would leak an aggregate device) is visible.
         if let procID = ioProcID, aggregateDeviceID != 0 {
-            log.info("[tap.teardown] step=AudioDeviceStop")
-            AudioDeviceStop(aggregateDeviceID, procID)
-            log.info("[tap.teardown] step=AudioDeviceDestroyIOProcID")
-            AudioDeviceDestroyIOProcID(aggregateDeviceID, procID)
+            let stopStatus = AudioDeviceStop(aggregateDeviceID, procID)
+            let destroyProc = AudioDeviceDestroyIOProcID(aggregateDeviceID, procID)
+            if stopStatus != noErr || destroyProc != noErr {
+                log.error("[tap.teardown] AudioDeviceStop=\(stopStatus) DestroyIOProcID=\(destroyProc)")
+            }
         }
         ioProcID = nil
         if aggregateDeviceID != 0 {
-            log.info("[tap.teardown] step=AudioHardwareDestroyAggregateDevice")
-            AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
+            let status = AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
+            if status != noErr { log.error("[tap.teardown] DestroyAggregateDevice=\(status)") }
             aggregateDeviceID = 0
         }
         if tapObjectID != 0 {
-            log.info("[tap.teardown] step=AudioHardwareDestroyProcessTap")
-            AudioHardwareDestroyProcessTap(tapObjectID)
+            let status = AudioHardwareDestroyProcessTap(tapObjectID)
+            if status != noErr { log.error("[tap.teardown] DestroyProcessTap=\(status)") }
             tapObjectID = 0
         }
-        log.info("[tap.teardown] step=done")
     }
 
     // MARK: - Error helpers

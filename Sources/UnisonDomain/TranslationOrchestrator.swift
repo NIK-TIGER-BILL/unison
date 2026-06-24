@@ -1265,28 +1265,26 @@ public final class TranslationOrchestrator {
         let vmic = virtualMicPlayer
         let log = Self.log
         let teardown = Task.detached(priority: .userInitiated) {
-            log.info("[stop.detached] step=mic.stop")
             mic.stop()
-            log.info("[stop.detached] step=peer.stop")
             peer.stop()
-            log.info("[stop.detached] step=mixer.stop")
             mixer.stop()
-            log.info("[stop.detached] step=vmic.stop")
             vmic.stop()
-            log.info("[stop.detached] step=done")
         }
-        // A "only selected" (mixdown process tap) session can wedge
-        // AVAudioEngine.stop() in coreaudiod. A synchronous HAL call can't be
-        // interrupted, so bound the wait: proceed to .idle after 5s and let the
-        // teardown finish (or stay abandoned) in the background, rather than
-        // freezing Stop forever (which forced a kill via Activity Monitor).
+        // Bound the wait on the synchronous CoreAudio HAL teardown. The
+        // mixdown-tap Stop wedge is fixed at its source (AVAudioOutputMixer.stop
+        // resets rather than stops its players — `AVAudioPlayerNode.stop()`'s
+        // completion-handler flush hangs while a Process Tap is active), but a
+        // synchronous HAL call still can't be interrupted and coreaudiod IPC can
+        // stall system-wide for reasons outside our control. Proceed to .idle
+        // after 5s and let teardown finish (or stay abandoned) in the background
+        // rather than freezing Stop forever (which forced a kill via Activity Monitor).
         let gate = StopTeardownGate()
         let finished = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
             Task { await teardown.value; await gate.resume(cont, with: true) }
             Task { try? await Task.sleep(for: .seconds(5)); await gate.resume(cont, with: false) }
         }
         if !finished {
-            log.error("[stop.detached] TIMEOUT — audio teardown exceeded 5s (AVAudioEngine.stop wedged after a mixdown tap); proceeding to idle")
+            log.error("stop — audio teardown exceeded 5s (coreaudiod IPC stalled); proceeding to idle, teardown continues in background")
         }
         await meStream?.close()
         await peerStream?.close()

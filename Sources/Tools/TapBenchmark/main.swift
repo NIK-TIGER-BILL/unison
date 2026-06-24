@@ -36,6 +36,10 @@ func parseArgs() -> CLIOptions {
         case "-h", "--help":
             printUsage()
             exit(0)
+        case "--global", "--unmuted", "--timepitch", "--mixer", "--bind", "--dual", "--completions":
+            break  // consumed by the repro-teardown subcommand directly
+        case "--teardown", "--loops":
+            i += 1  // value read directly by the repro-teardown subcommand
         default:
             FileHandle.standardError.write("Unknown arg: \(a)\n".data(using: .utf8)!)
             exit(1)
@@ -115,6 +119,13 @@ func runMain() async throws {
 
     if opts.subcommand == "sanity-check" {
         await SanityCheck.run()
+        return
+    } else if opts.subcommand == "repro-teardown" {
+        // A/B: does a mixdown (only-selected) tap wedge a subsequent
+        // AVAudioEngine.stop() the way a global (all-except) tap does not?
+        let global = CommandLine.arguments.contains("--global")
+        let unmuted = CommandLine.arguments.contains("--unmuted")
+        await ReproTeardown.run(global: global, unmuted: unmuted)
         return
     } else if let sub = opts.subcommand {
         FileHandle.standardError.write("Unknown subcommand: \(sub)\n".data(using: .utf8)!)
