@@ -71,6 +71,7 @@ public struct MeetingHistoryView: View {
     private var detail: some View {
         if let record = vm.selectedRecord {
             MeetingDetailView(vm: vm, record: record, onExport: onExport)
+                .id(record.id)
         } else {
             Text("Выберите встречу")
                 .font(.system(size: 13))
@@ -106,7 +107,7 @@ private struct MeetingRow: View {
     private var subtitle: String {
         let pair = "\(summary.languagePair.mine.rawValue.uppercased()) → \(summary.languagePair.peer.rawValue.uppercased())"
         let mins = max(1, summary.durationSeconds / 60)
-        return "\(pair) · \(mins) мин · \(summary.lineCount) реплик"
+        return "\(pair) · \(mins) мин · \(summary.lineCount) \(pluralReplicas(summary.lineCount))"
     }
 }
 
@@ -247,4 +248,13 @@ private struct MeetingLineRow: View {
                 .fill(UnisonColors.whiteAlpha(0.04))
         )
     }
+}
+
+/// Russian plural form for "реплика" (line/utterance).
+private func pluralReplicas(_ n: Int) -> String {
+    let mod10 = n % 10
+    let mod100 = n % 100
+    if mod10 == 1 && mod100 != 11 { return "реплика" }
+    if (2...4).contains(mod10) && !(12...14).contains(mod100) { return "реплики" }
+    return "реплик"
 }
