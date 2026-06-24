@@ -53,6 +53,7 @@ public final class Composition {
     public let settingsVM: SettingsViewModel
     public let transcriptVM: TranscriptViewModel
     public let meetingStore: any MeetingStore
+    public let meetingHistoryVM: MeetingHistoryViewModel
     public let permissions: any PermissionsService
     public let installer: any BlackHoleInstaller
     public let keychain: any KeychainService
@@ -212,12 +213,14 @@ public final class Composition {
             keychain: keychain,
             installer: installer,
             hotkeyStore: UserDefaultsHotkeyStorage(),
-            togglesStore: UserDefaultsToggleStorage()
+            togglesStore: UserDefaultsToggleStorage(),
+            meetingStore: meetingStore
         )
         self.transcriptVM = TranscriptViewModel(
             store: orchestrator.transcript,
             orchestrator: orchestrator
         )
+        self.meetingHistoryVM = MeetingHistoryViewModel(store: meetingStore)
         // Wire the live-typing-dots pipeline. Without this, the bubble
         // group's `liveEntryId` is always nil → the animated dots that
         // mark "this bubble is still being received" never appear in

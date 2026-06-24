@@ -17,6 +17,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public var settingsWindow: SettingsWindowController!
     public var helpWindow: HelpWindowController!
     public var diagnosticWindow: DiagnosticWindowController!
+    public var historyWindow: MeetingHistoryWindowController!
     public var hotkeyService: HotkeyService!
 
     /// The last `MenubarState` we pushed to the status item. Cached so
@@ -94,6 +95,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         diagnosticWindow = DiagnosticWindowController(
             collector: DiagnosticCollector(composition: composition)
         )
+        historyWindow = MeetingHistoryWindowController(viewModel: composition.meetingHistoryVM)
 
         statusItem = StatusItemController(
             popoverVM: composition.popoverVM,
@@ -111,6 +113,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             onShowDiagnostic: { [weak self] in
                 self?.diagnosticWindow.show()
+            },
+            onShowHistory: { [weak self] in
+                self?.historyWindow.show()
             },
             onShowAbout: { [weak self] in
                 self?.showAbout()

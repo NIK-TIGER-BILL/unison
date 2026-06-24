@@ -27,6 +27,7 @@ public final class StatusItemController {
     public var onOpenSettings: (() -> Void)?
     public var onShowHelp: (() -> Void)?
     public var onShowDiagnostic: (() -> Void)?
+    public var onShowHistory: (() -> Void)?
     public var onShowAbout: (() -> Void)?
     public var onQuit: (() -> Void)?
 
@@ -56,6 +57,7 @@ public final class StatusItemController {
         onStartStop: @escaping () -> Void = {},
         onShowTranscript: @escaping () -> Void = {},
         onShowDiagnostic: @escaping () -> Void = {},
+        onShowHistory: @escaping () -> Void = {},
         onShowAbout: @escaping () -> Void = {},
         onQuit: @escaping () -> Void = { Task { @MainActor in NSApp.terminate(nil) } }
     ) {
@@ -65,6 +67,7 @@ public final class StatusItemController {
         self.onStartStop = onStartStop
         self.onShowTranscript = onShowTranscript
         self.onShowDiagnostic = onShowDiagnostic
+        self.onShowHistory = onShowHistory
         self.onShowAbout = onShowAbout
         self.onQuit = onQuit
 
@@ -280,6 +283,14 @@ public final class StatusItemController {
         showTranscript.target = self
         menu.addItem(showTranscript)
 
+        let history = NSMenuItem(
+            title: "История…",
+            action: #selector(menuShowHistory(_:)),
+            keyEquivalent: ""
+        )
+        history.target = self
+        menu.addItem(history)
+
         menu.addItem(.separator())
 
         let settings = NSMenuItem(
@@ -339,6 +350,7 @@ public final class StatusItemController {
     @objc private func menuShowTranscript(_ sender: NSMenuItem) { onShowTranscript?() }
     @objc private func menuOpenSettings(_ sender: NSMenuItem) { onOpenSettings?() }
     @objc private func menuShowDiagnostic(_ sender: NSMenuItem) { onShowDiagnostic?() }
+    @objc private func menuShowHistory(_ sender: NSMenuItem) { onShowHistory?() }
     @objc private func menuShowAbout(_ sender: NSMenuItem) { onShowAbout?() }
     @objc private func menuQuit(_ sender: NSMenuItem) { onQuit?() }
 
