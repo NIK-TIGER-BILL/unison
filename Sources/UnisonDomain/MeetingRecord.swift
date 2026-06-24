@@ -42,6 +42,22 @@ public struct MeetingRecord: Identifiable, Sendable, Codable, Equatable {
 
     public var displayTitle: String { Self.displayTitle(title: title, mode: mode, startedAt: startedAt) }
 
+    /// Plain-text rendering for file export. Speaker-labelled, original +
+    /// translated per line.
+    public func exportText() -> String {
+        var lines = [displayTitle, ""]
+        for e in entries {
+            let who = e.speaker == .me ? "Я" : "Собеседник"
+            lines.append(who + ":")
+            if let original = e.originalText, !original.isEmpty {
+                lines.append("  оригинал: " + original)
+            }
+            lines.append("  перевод: " + e.translatedText)
+            lines.append("")
+        }
+        return lines.joined(separator: "\n")
+    }
+
     static func displayTitle(title: String?, mode: SessionMode, startedAt: Date) -> String {
         if let title, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return title }
         return "\(modeWord(mode)) · \(titleDateFormatter.string(from: startedAt))"
