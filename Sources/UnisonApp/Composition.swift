@@ -52,6 +52,7 @@ public final class Composition {
     public let onboardingVM: OnboardingViewModel
     public let settingsVM: SettingsViewModel
     public let transcriptVM: TranscriptViewModel
+    public let meetingStore: any MeetingStore
     public let permissions: any PermissionsService
     public let installer: any BlackHoleInstaller
     public let keychain: any KeychainService
@@ -157,6 +158,10 @@ public final class Composition {
         self.virtualMicPlayer = bhPlayer
         self.outputMixer = mixer
 
+        let meetingStore = FileMeetingStore.applicationSupport(
+            sizeLimitMBProvider: { settingsStoreRef.load().historySizeLimitMB }
+        )
+        self.meetingStore = meetingStore
         self.orchestrator = TranslationOrchestrator(
             micCapture: mic,
             peerCapture: peerCap,
@@ -167,7 +172,8 @@ public final class Composition {
             deviceRegistry: registry,
             clock: SystemClock(),
             transformer: ResamplerAdapter(),
-            networkMonitor: NetworkMonitor()
+            networkMonitor: NetworkMonitor(),
+            meetingStore: meetingStore
         )
 
         let initialSettings = settingsStore.load()
@@ -269,6 +275,7 @@ public final class Composition {
                 viewModel: self.transcriptVM
             )
         }
+        meetingStore.enforceSizeLimit()
     }
 
     /// Cross-surface synchronisation between the three view-models.
