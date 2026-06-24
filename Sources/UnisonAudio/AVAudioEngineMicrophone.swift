@@ -42,6 +42,17 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
     /// (orchestrator's reconnect path) resets cleanly via `stop()`
     /// before reconfiguring instead of layering inputs.
     private var running = false
+    /// The device UID the active session was started with, replayed when the
+    /// session self-heals after a runtime error (re-resolves the device — falls
+    /// back to the system default input if the bound one vanished).
+    private var currentDeviceUID: String?
+    /// Serializes session-lifecycle transitions (start / stop / runtime-error
+    /// reconfigure) so the self-heal can't race a stop().
+    private let lifecycleLock = NSLock()
+    /// Observes `AVCaptureSessionRuntimeError` and restarts capture after a
+    /// device disconnect (the AVCaptureSession analogue of the output engines'
+    /// `AVAudioEngineConfigurationChange` self-heal).
+    private var configObserver: DebouncedNotificationObserver?
     /// Dispatch queue the delegate's `didOutput` callback fires on.
     /// AVCaptureSession requires a serial queue here; we make a
     /// dedicated one so capture work doesn't get queued behind main.
@@ -62,16 +73,30 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
             stop()
         }
         Self.log.info("start(deviceUID=\(deviceUID ?? "<default>"))")
+        currentDeviceUID = deviceUID
         firstBufferLogLock.lock()
         firstBufferLogged = false
         firstBufferLogLock.unlock()
         return AsyncStream { [weak self] c in
             guard let self else { c.finish(); return }
+            self.lifecycleLock.lock()
+            defer { self.lifecycleLock.unlock() }
             self.continuation = c
             do {
                 try self.configure(deviceUID: deviceUID)
                 self.session.startRunning()
                 self.running = self.session.isRunning
+                // Self-heal on a capture runtime error (e.g. the mic device
+                // disconnects when Bluetooth headphones drop) — restart on the
+                // current default input rather than dying until app relaunch.
+                if self.configObserver == nil {
+                    self.configObserver = DebouncedNotificationObserver(
+                        name: AVCaptureSession.runtimeErrorNotification, object: self.session
+                    ) { [weak self] in
+                        self?.handleRuntimeError()
+                    }
+                }
+                self.configObserver?.start()
                 Self.log.info("start() — session.isRunning=\(self.session.isRunning); awaiting sample buffer delegate callbacks")
             } catch {
                 let ns = error as NSError
@@ -82,6 +107,10 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
     }
 
     public func stop() {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        configObserver?.stop()
+        running = false
         if session.isRunning { session.stopRunning() }
         // Tear down inputs + outputs so the next start() builds a
         // fresh graph instead of accumulating layers on the same
@@ -92,8 +121,33 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
         session.commitConfiguration()
         continuation?.finish()
         continuation = nil
-        running = false
         Self.log.info("stop() — session stopped, inputs+outputs removed")
+    }
+
+    /// Self-heal after `AVCaptureSessionRuntimeError` (typically the input
+    /// device disconnected). Re-resolve the device (falls back to the system
+    /// default input if the bound one vanished), rebuild, and restart —
+    /// keeping the same `continuation` so the orchestrator's frame stream
+    /// stays alive. No-op once stopped. Runs on the observer's serial queue;
+    /// `lifecycleLock` serializes it with start()/stop().
+    private func handleRuntimeError() {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard running else {
+            Self.log.info("AVCaptureSessionRuntimeError ignored — mic already stopped")
+            return
+        }
+        Self.log.error("AVCaptureSessionRuntimeError — capture failed (likely input device disconnected); reconfiguring + restarting")
+        if session.isRunning { session.stopRunning() }
+        do {
+            try configure(deviceUID: currentDeviceUID)
+            session.startRunning()
+            running = session.isRunning
+            Self.log.info("reconfigure — capture session restarted (isRunning=\(session.isRunning))")
+        } catch {
+            running = false
+            Self.log.error("reconfigure — failed to restart capture session after runtime error: \(String(describing: error)); mic frames stopped")
+        }
     }
 
     private func configure(deviceUID: String?) throws {
@@ -104,6 +158,11 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
 
         session.beginConfiguration()
         defer { session.commitConfiguration() }
+
+        // Idempotent: drop any inputs/outputs from a previous configure so a
+        // runtime-error reconfigure rebuilds cleanly instead of layering.
+        session.inputs.forEach { session.removeInput($0) }
+        session.outputs.forEach { session.removeOutput($0) }
 
         guard session.canAddInput(input) else {
             throw NSError(domain: "AVAudioEngineMicrophone", code: -10,

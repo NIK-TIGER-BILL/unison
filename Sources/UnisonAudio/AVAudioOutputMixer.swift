@@ -39,6 +39,23 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// does *not* detach (the engine reuses the same player instances
     /// on restart, so detach+reattach buys nothing but reset risk).
     private var attached = false
+    /// Serializes engine-lifecycle transitions — `start`, `stop`, and the
+    /// device-change `reconfigure` — so a config-change self-heal on the main
+    /// queue can never mutate the engine concurrently with a stop() on the
+    /// orchestrator's detached teardown task. Distinct from `counterLock`
+    /// (the hot scheduling path) to avoid contention.
+    private let engineLock = NSLock()
+    /// True between a successful `start` and a `stop`. The config-change
+    /// handler restarts the engine only while this holds — a notification that
+    /// lands after stop() must not resurrect a torn-down session.
+    private var started = false
+    /// The device UID the active session was started with, replayed verbatim
+    /// when the engine self-heals after a device change (re-pin an explicit
+    /// device; `nil` follows the new system default — the BT-connect case).
+    private var currentDeviceUID: String?
+    /// Observes `AVAudioEngineConfigurationChange` on `engine` and drives the
+    /// self-heal. Created on first `start`, reused across stop-restart cycles.
+    private var configObserver: DebouncedNotificationObserver?
     /// Frame counter for periodic RMS logging on the translated path —
     /// every 10th chunk (~1s at 100ms chunks) emits one debug line so
     /// diagnostics can see whether the source audio amplitude itself
@@ -67,8 +84,43 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         self.mixer = engine.mainMixerNode
     }
 
+    /// Whether the underlying `AVAudioEngine` is currently running. Read-only
+    /// diagnostic state — used by the device-change repro/tests to detect the
+    /// engine stopping itself on an `AVAudioEngineConfigurationChange`.
+    public var isEngineRunning: Bool { engine.isRunning }
+
     public func start(deviceUID: String?) async throws {
         Self.log.info("start(deviceUID=\(deviceUID ?? "<system default>"))")
+        // Synchronous body: holding `engineLock` across an `async` boundary is
+        // disallowed under Swift 6 strict concurrency, and there is no await to
+        // make here anyway.
+        try startLocked(deviceUID: deviceUID)
+    }
+
+    private func startLocked(deviceUID: String?) throws {
+        engineLock.lock()
+        defer { engineLock.unlock() }
+        currentDeviceUID = deviceUID
+        try configureGraphAndStartLocked(deviceUID: deviceUID)
+        started = true
+        // Self-heal on output-device changes (e.g. Bluetooth headphones
+        // connect/disconnect mid-session): AVAudioEngine stops its graph and
+        // posts AVAudioEngineConfigurationChange; without restarting, audio
+        // dies until app relaunch. Created lazily, reused across restarts.
+        if configObserver == nil {
+            configObserver = DebouncedNotificationObserver(
+                name: .AVAudioEngineConfigurationChange, object: engine
+            ) { [weak self] in
+                self?.handleConfigurationChange()
+            }
+        }
+        configObserver?.start()
+    }
+
+    /// Attach (once), bind the output device, wire the graph, start the engine,
+    /// start the players, and (re-)prime pacing. Shared by `start(deviceUID:)`
+    /// and the device-change self-heal. Caller must hold `engineLock`.
+    private func configureGraphAndStartLocked(deviceUID: String?) throws {
         if !attached {
             engine.attach(translatedPlayer)
             engine.attach(originalPlayer)
@@ -79,26 +131,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         // Assign the requested output device before resolving formats so
         // AVAudioEngine can negotiate the mixer→output connection at the
         // device's native sample rate.
-        if let uid = deviceUID {
-            if let deviceID = audioDeviceID(forUID: uid) {
-                var id = deviceID
-                let status = AudioUnitSetProperty(
-                    engine.outputNode.audioUnit!,
-                    kAudioOutputUnitProperty_CurrentDevice,
-                    kAudioUnitScope_Global, 0,
-                    &id, UInt32(MemoryLayout<AudioDeviceID>.size)
-                )
-                if status == noErr {
-                    Self.log.info("start — output device bound to '\(uid)' (id=\(deviceID))")
-                } else {
-                    Self.log.error("start — AudioUnitSetProperty(CurrentDevice → \(uid)) FAILED status=\(status); engine will play to SYSTEM DEFAULT output instead of the user's selection")
-                }
-            } else {
-                Self.log.error("start — audioDeviceID(forUID: \(uid)) returned nil; user-selected device is unreachable, falling back to system default")
-            }
-        } else {
-            Self.log.info("start — no deviceUID set in Settings; using system default output")
-        }
+        applyOutputDevice(deviceUID)
 
         // Wiring: translatedPlayer → timePitch → mixer; originalPlayer → mixer.
         // AVAudioEngine inserts a rate converter between the mixer and the
@@ -143,6 +176,58 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         }
         pacing?.reset()
         pacing?.start()
+    }
+
+    /// Pin the output AUHAL to an explicit device UID, or leave it on the
+    /// system default when `deviceUID` is `nil` (so the engine follows the
+    /// current default after a restart — the BT-connect recovery path).
+    private func applyOutputDevice(_ deviceUID: String?) {
+        guard let uid = deviceUID else {
+            Self.log.info("start — no deviceUID set in Settings; using system default output")
+            return
+        }
+        guard let deviceID = audioDeviceID(forUID: uid) else {
+            Self.log.error("start — audioDeviceID(forUID: \(uid)) returned nil; user-selected device is unreachable, falling back to system default")
+            return
+        }
+        var id = deviceID
+        let status = AudioUnitSetProperty(
+            engine.outputNode.audioUnit!,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global, 0,
+            &id, UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+        if status == noErr {
+            Self.log.info("start — output device bound to '\(uid)' (id=\(deviceID))")
+        } else {
+            Self.log.error("start — AudioUnitSetProperty(CurrentDevice → \(uid)) FAILED status=\(status); engine will play to SYSTEM DEFAULT output instead of the user's selection")
+        }
+    }
+
+    /// Self-heal after an `AVAudioEngineConfigurationChange` (the engine has
+    /// already stopped itself — a default-device or format change). Rebuilds
+    /// the graph and restarts on the now-current device, replaying the
+    /// session's original `deviceUID`. No-op once stopped. Runs on the main
+    /// queue (the observer's debounce); `engineLock` serializes it with stop().
+    private func handleConfigurationChange() {
+        engineLock.lock()
+        defer { engineLock.unlock() }
+        guard started else {
+            Self.log.info("AVAudioEngineConfigurationChange ignored — mixer already stopped")
+            return
+        }
+        Self.log.info("AVAudioEngineConfigurationChange — output device/format changed; engine stopped itself, rebuilding graph and restarting")
+        // Reset players first: a `.dataPlayedBack` flush on the stopped engine
+        // can wedge the same way Stop did (see stop()); reset clears pending
+        // buffers cleanly before we reconnect and restart.
+        translatedPlayer.reset()
+        originalPlayer.reset()
+        do {
+            try configureGraphAndStartLocked(deviceUID: currentDeviceUID)
+            Self.log.info("reconfigure — engine restarted on the current device (isRunning=\(engine.isRunning))")
+        } catch {
+            Self.log.error("reconfigure — failed to restart engine after device change: \(String(describing: error))")
+        }
     }
 
     /// Test-only dump file handle for the pre-mixer tap. Format: float32
@@ -286,6 +371,13 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     }
 
     public func stop() {
+        engineLock.lock()
+        defer { engineLock.unlock() }
+        // Latch stopped + tear down the device-change observer FIRST so a
+        // config-change that lands during teardown can't restart the engine
+        // we're about to stop (the observer also cancels any pending debounce).
+        started = false
+        configObserver?.stop()
         pacing?.stop()
         closePlaybackDumpIfNeeded()
         // Reset (not stop) the players. `AVAudioPlayerNode.stop()` flushes the

@@ -127,6 +127,11 @@ func runMain() async throws {
         let unmuted = CommandLine.arguments.contains("--unmuted")
         await ReproTeardown.run(global: global, unmuted: unmuted)
         return
+    } else if opts.subcommand == "repro-devicechange" {
+        // Does a default-output-device change (what connecting BT headphones
+        // does) kill the production AVAudioOutputMixer engine?
+        await ReproDeviceChange.run()
+        return
     } else if let sub = opts.subcommand {
         FileHandle.standardError.write("Unknown subcommand: \(sub)\n".data(using: .utf8)!)
         exit(1)
