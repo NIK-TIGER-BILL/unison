@@ -53,8 +53,8 @@ public final class MeetingHistoryWindowController {
     }
 
     private func exportToFile(_ record: MeetingRecord) {
-        // Capture the export text before entering the save panel closure to
-        // avoid touching a non-Sendable type inside a non-isolated callback.
+        // Render the export text up front so the (nonisolated) save-panel
+        // completion closure only captures value types (`String` + `URL`).
         let text = record.exportText()
         let filename = record.displayTitle + ".txt"
         let panel = NSSavePanel()
