@@ -71,3 +71,18 @@ private func makeTempStore(limitMB: Int = 0) -> FileMeetingStore {
     #expect(ids == [rec.id])
     #expect(!ids.contains(danglingID))
 }
+
+@Test func fileStore_clearAll_removesOrphanFilesToo() throws {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("FileMeetingStoreTests-\(UUID().uuidString)", isDirectory: true)
+    let store = FileMeetingStore(directory: dir, sizeLimitMBProvider: { 0 })
+    store.save(sampleRecord(entries: [sampleEntry()]))
+    // Drop an orphan record file straight onto disk (never indexed).
+    let orphan = sampleRecord(entries: [sampleEntry()])
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try JSONEncoder().encode(orphan).write(to: dir.appendingPathComponent("\(orphan.id.uuidString).json"))
+    store.clearAll()
+    // A fresh store over the same dir must see nothing — no orphan re-adopted.
+    let reopened = FileMeetingStore(directory: dir, sizeLimitMBProvider: { 0 })
+    #expect(reopened.list().isEmpty)
+}

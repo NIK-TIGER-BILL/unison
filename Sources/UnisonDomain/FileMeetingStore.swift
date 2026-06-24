@@ -108,6 +108,8 @@ public final class FileMeetingStore: MeetingStore, @unchecked Sendable {
         writeIndex(index)
     }
 
+    /// Persists via `save`, so it may trigger size-limit enforcement
+    /// (eviction of the oldest non-pinned meetings) when over the limit.
     public func rename(_ id: UUID, title: String?) {
         lock.lock(); defer { lock.unlock() }
         guard var rec = try? decodeRecord(at: recordURL(id)) else { return }
@@ -115,6 +117,8 @@ public final class FileMeetingStore: MeetingStore, @unchecked Sendable {
         save(rec)
     }
 
+    /// Persists via `save`, so it may trigger size-limit enforcement
+    /// (eviction of the oldest non-pinned meetings) when over the limit.
     public func setPinned(_ id: UUID, _ pinned: Bool) {
         lock.lock(); defer { lock.unlock() }
         guard var rec = try? decodeRecord(at: recordURL(id)) else { return }
@@ -154,7 +158,10 @@ public final class FileMeetingStore: MeetingStore, @unchecked Sendable {
 
     public func clearAll() {
         lock.lock(); defer { lock.unlock() }
-        for s in loadIndex().meetings { try? fm.removeItem(at: recordURL(s.id)) }
+        let files = (try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        for url in files where url.pathExtension == "json" && url.lastPathComponent != "index.json" {
+            try? fm.removeItem(at: url)
+        }
         writeIndex(Index(schemaVersion: MeetingRecord.currentSchemaVersion, meetings: []))
     }
 }
