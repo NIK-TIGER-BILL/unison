@@ -25,8 +25,13 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
     /// reconfigure) so a config-change self-heal can't race a stop().
     private let engineLock = NSLock()
     /// Observes `AVAudioEngineConfigurationChange` on `engine` and restarts the
-    /// BlackHole 2ch route after a device/format change. Same self-heal the
-    /// speakers path (`AVAudioOutputMixer`) uses; created on first start.
+    /// BlackHole 2ch route. Same self-heal the speakers path
+    /// (`AVAudioOutputMixer`) uses; created on first start. NOTE: this engine is
+    /// pinned to the explicit BlackHole 2ch device (not the system default), so
+    /// a plain default-output change (the BT-connect case) usually won't notify
+    /// it — this covers a BlackHole *format renegotiation* and keeps the
+    /// self-heal uniform across the output engines; the BT fix proper lives in
+    /// `AVAudioOutputMixer`.
     private var configObserver: DebouncedNotificationObserver?
     /// Latches on first `startIfNeeded()` so a stop-restart cycle doesn't
     /// `engine.attach(_:)` already-attached nodes — same contract as

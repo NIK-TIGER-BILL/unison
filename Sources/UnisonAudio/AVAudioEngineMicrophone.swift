@@ -53,6 +53,15 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
     /// device disconnect (the AVCaptureSession analogue of the output engines'
     /// `AVAudioEngineConfigurationChange` self-heal).
     private var configObserver: DebouncedNotificationObserver?
+    /// Windowed cap on the runtime-error self-heal so a flapping device (one that
+    /// re-errors immediately after each restart) can't loop forever. Counted +
+    /// reset under `lifecycleLock`.
+    private var consecutiveRestarts = 0
+    private var lastRestartUptimeNanos: UInt64 = 0
+    private static let maxConsecutiveRestarts = 5
+    /// Restarts more than `restartWindowNanos` apart are treated as independent
+    /// (the device had stabilised), so the counter resets.
+    private static let restartWindowNanos: UInt64 = 10_000_000_000  // 10s
     /// Dispatch queue the delegate's `didOutput` callback fires on.
     /// AVCaptureSession requires a serial queue here; we make a
     /// dedicated one so capture work doesn't get queued behind main.
@@ -82,6 +91,7 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
             self.lifecycleLock.lock()
             defer { self.lifecycleLock.unlock() }
             self.continuation = c
+            self.consecutiveRestarts = 0
             do {
                 try self.configure(deviceUID: deviceUID)
                 self.session.startRunning()
@@ -137,7 +147,20 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
             Self.log.info("AVCaptureSessionRuntimeError ignored — mic already stopped")
             return
         }
-        Self.log.error("AVCaptureSessionRuntimeError — capture failed (likely input device disconnected); reconfiguring + restarting")
+        // Windowed cap: count consecutive restarts that happen close together
+        // (a device re-erroring right after each restart) and give up after the
+        // cap so we don't churn forever. A gap longer than the window means the
+        // device had stabilised, so the streak resets.
+        let now = DispatchTime.now().uptimeNanoseconds
+        if now &- lastRestartUptimeNanos > Self.restartWindowNanos { consecutiveRestarts = 0 }
+        lastRestartUptimeNanos = now
+        guard consecutiveRestarts < Self.maxConsecutiveRestarts else {
+            running = false
+            Self.log.error("AVCaptureSessionRuntimeError — gave up after \(consecutiveRestarts) restarts within \(Self.restartWindowNanos / 1_000_000_000)s (input device keeps failing); mic stays down until next start()")
+            return
+        }
+        consecutiveRestarts += 1
+        Self.log.error("AVCaptureSessionRuntimeError — capture failed (likely input device disconnected); reconfiguring + restarting (attempt \(consecutiveRestarts)/\(Self.maxConsecutiveRestarts))")
         if session.isRunning { session.stopRunning() }
         do {
             try configure(deviceUID: currentDeviceUID)

@@ -40,10 +40,17 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// on restart, so detach+reattach buys nothing but reset risk).
     private var attached = false
     /// Serializes engine-lifecycle transitions — `start`, `stop`, and the
-    /// device-change `reconfigure` — so a config-change self-heal on the main
-    /// queue can never mutate the engine concurrently with a stop() on the
-    /// orchestrator's detached teardown task. Distinct from `counterLock`
-    /// (the hot scheduling path) to avoid contention.
+    /// device-change `reconfigure` — so a config-change self-heal (on the
+    /// observer's private serial queue) can never mutate the engine concurrently
+    /// with a stop() on the orchestrator's detached teardown task. Distinct from
+    /// `counterLock` (the hot scheduling path) to avoid contention.
+    ///
+    /// `scheduleTranslated` deliberately does NOT take this lock: it runs on the
+    /// `playTranslated` task and could overlap a `reconfigure`'s `engine.connect`.
+    /// That's the same threading the existing `stop()` already had (player reset
+    /// off-main while scheduling may be in flight); `AVAudioPlayerNode`
+    /// scheduling is documented thread-safe and a buffer scheduled on the briefly
+    /// stopped player is simply queued until the restart's `play()`.
     private let engineLock = NSLock()
     /// True between a successful `start` and a `stop`. The config-change
     /// handler restarts the engine only while this holds — a notification that
@@ -207,8 +214,8 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// Self-heal after an `AVAudioEngineConfigurationChange` (the engine has
     /// already stopped itself — a default-device or format change). Rebuilds
     /// the graph and restarts on the now-current device, replaying the
-    /// session's original `deviceUID`. No-op once stopped. Runs on the main
-    /// queue (the observer's debounce); `engineLock` serializes it with stop().
+    /// session's original `deviceUID`. No-op once stopped. Runs on the
+    /// observer's private serial queue; `engineLock` serializes it with stop().
     private func handleConfigurationChange() {
         engineLock.lock()
         defer { engineLock.unlock() }
@@ -244,6 +251,15 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         // If we're called from a stop-restart cycle, tap may still be installed.
         timePitch.removeTap(onBus: 0)
 
+        // Reconfigure during an ACTIVE capture (device-change self-heal rebuilt
+        // the graph): re-arm the tap on the new timePitch output but keep the
+        // existing file + running byte count — don't truncate what we've already
+        // captured (which is exactly the window a device change is investigating).
+        if dumpHandle != nil {
+            installDumpTap()
+            return
+        }
+
         let url = URL(fileURLWithPath: path)
         FileManager.default.createFile(atPath: path, contents: nil)
         guard let handle = try? FileHandle(forWritingTo: url) else {
@@ -260,7 +276,10 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         dumpHandle = handle
         dumpedByteCount = 0
         Self.log.info("UNISON_DUMP_PLAYBACK_WAV — capturing post-timePitch audio to \(path)")
+        installDumpTap()
+    }
 
+    private func installDumpTap() {
         let tapFormat = timePitch.outputFormat(forBus: 0)
         timePitch.installTap(onBus: 0, bufferSize: 4096, format: tapFormat) { [weak self] buffer, _ in
             guard let self else { return }
