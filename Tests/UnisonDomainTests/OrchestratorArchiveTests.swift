@@ -65,3 +65,13 @@ private func seedOneEntry(_ orch: TranslationOrchestrator) {
     orch.archiveSession(mode: .call, startedAt: Date(), enabled: false)
     #expect(store.list().isEmpty)
 }
+
+@MainActor
+@Test func archiveSession_savesListenSession() {
+    let store = InMemoryMeetingStore()
+    let orch = makeOrchestrator(store: store)
+    seedOneEntry(orch)
+    orch.archiveSession(mode: .listen, startedAt: Date(timeIntervalSince1970: 1000), enabled: true)
+    #expect(store.list().count == 1)
+    #expect(store.list().first?.mode == .listen)
+}
