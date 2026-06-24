@@ -1419,6 +1419,15 @@ public final class TranslationOrchestrator {
         outputMixer.setOriginalGain(min(max(v, 0), 1))
     }
 
+    /// Live-update whether the active session will be archived on
+    /// stop/quit. Mirrors how `originalMixVolume` is propagated — without
+    /// this, toggling "save history" off mid-session wouldn't take effect
+    /// until the next `start()`, so the in-flight session would still be
+    /// archived against the user's intent.
+    public func updateSaveHistoryEnabled(_ enabled: Bool) {
+        currentSettings.saveHistoryEnabled = enabled
+    }
+
     /// Read per-speaker connectivity health for the diagnostic snapshot.
     /// Returns nil if the speaker's stream is not active.
     public func streamHealth(for speaker: Speaker) -> ConnectivityHealth? {

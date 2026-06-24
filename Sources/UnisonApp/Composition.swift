@@ -209,6 +209,7 @@ public final class Composition {
                 // next start() (the popover picker is .disabled while
                 // active to make that contract obvious).
                 orch.updateOriginalMixVolume(s.originalMixVolume)
+                orch.updateSaveHistoryEnabled(s.saveHistoryEnabled)
             },
             keychain: keychain,
             installer: installer,

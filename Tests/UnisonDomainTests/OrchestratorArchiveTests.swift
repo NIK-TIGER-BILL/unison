@@ -138,3 +138,14 @@ private func seedOneEntry(_ orch: TranslationOrchestrator) {
     orch.archiveActiveSession()
     #expect(store.list().isEmpty)
 }
+
+@MainActor
+@Test func archiveActiveSession_respectsLiveSaveHistoryToggle() async {
+    let store = InMemoryMeetingStore()
+    let orch = makeOrchestratorForE2E(store: store)
+    await orch.start(mode: .call, languages: .default)
+    seedOneEntry(orch)
+    orch.updateSaveHistoryEnabled(false)   // user disables history mid-session
+    orch.archiveActiveSession()
+    #expect(store.list().isEmpty)          // in-flight session must NOT be archived
+}
