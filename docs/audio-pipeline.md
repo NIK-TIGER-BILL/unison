@@ -169,35 +169,103 @@ Virtual mic для пира — выводит переведённый user aud
 никогда не доходит до `state … → idle` (см. `unison.log` pid=13100,
 pid=83933).
 
-**Причина:** синхронный CoreAudio HAL teardown — Process-Tap
-aggregate-device destroy (`ProcessTapCapture.teardown()`) и
-`AVAudioEngine.stop()` (`AVAudioOutputMixer`/`BlackHole2chPlayer`) —
-интермиттентно залипает в `coreaudiod` на много секунд или навсегда
-(хуже всего на **Bluetooth**-выходе). `stopAllStreams()` уносит эти
-вызовы в `Task.detached` (главный поток жив), но **ждал их `.value`**
-перед `state = .idle` — поэтому залипший HAL прибивал всю сессию в
-`.translating`: capture уже мёртв, Stop выглядит дохлым.
+**Корневая причина (найдена в VM, детерминированно):**
+`AVAudioOutputMixer.stop()` звал `translatedPlayer.stop()` /
+`originalPlayer.stop()`. **`AVAudioPlayerNode.stop()`** сбрасывает (flush)
+накопившиеся `.dataPlayedBack` completion-хендлеры из `scheduleTranslated`,
+и этот flush **никогда не возвращается**, если в сессии был активен
+Process Tap — залипает в `coreaudiod` (хуже всего на **Bluetooth**).
+Так как залипший `stop()` блокировал весь teardown, сессия не доходила
+до `.idle`. A/B на свежезагруженном `coreaudiod` (`scripts/vm-verify-fix.sh`,
+`Tools/TapBenchmark/ReproTeardown.swift`): продакшн-путь mixer'а клинит
+Stop 3/3 с `stop()` и чисто проходит 3/3 с `reset()`. Сам `AVAudioEngine.stop()`
+и все четыре HAL-destroy (`AudioDeviceStop`/`…DestroyIOProcID`/
+`…DestroyAggregateDevice`/`…DestroyProcessTap`) возвращаются мгновенно —
+это **не** они.
 
-**Фикс:** `TranslationOrchestrator.teardownFinished(_:within:)` —
+**Корневой фикс:** `AVAudioOutputMixer.stop()` теперь `reset()` (а не
+`stop()`) на плеерах — очищает запланированные буферы без flush'а
+completion-хендлеров.
+
+**Защита в глубину (PR #7):** `TranslationOrchestrator.teardownFinished(_:within:)`
 ограничивает ожидание teardown бюджетом `coreAudioTeardownBudgetSeconds`
-(2 с). По истечении сессия идёт в `.idle`, а осиротевший teardown
-доигрывает в фоне, если HAL оживёт. Плюс **сериализация**: каждый новый
-teardown сцеплен за предыдущим (`pendingTeardown` + `await
-previousTeardown?.value`), а `start()` ждёт незавершённый teardown перед
-переиспользованием общего `AVAudioEngine` — иначе осиротевший teardown и
-новый `start()`/`stop()` дёргали бы `engine.stop()`/Process-Tap destroy
-конкурентно на одних объектах (это может уронить `coreaudiod`; stop()
-компонентов идемпотентен только для *последовательных* вызовов).
+(2 с) — на случай *системного* залипания `coreaudiod` вне нашего контроля.
+По истечении сессия идёт в `.idle`, осиротевший teardown доигрывает в фоне.
+Плюс **сериализация**: каждый новый teardown сцеплен за предыдущим
+(`pendingTeardown` + `await previousTeardown?.value`), а `start()` ждёт
+незавершённый teardown перед переиспользованием общего `AVAudioEngine` —
+иначе teardown и новый `start()`/`stop()` дёргали бы `engine.stop()`/
+Process-Tap destroy конкурентно на одних объектах (может уронить
+`coreaudiod`; stop() компонентов идемпотентен только для *последовательных*
+вызовов).
 
 Не интермиттентный в тестах: ловится через мок с блокирующимся `stop()`
 (`MockAudioOutputMixer.blockStopUntilReleased`) + `InstantClock`.
 
-**Остаётся:** при *перманентном* залипании HAL (устройство физически
-исчезло) рестарт в том же процессе всё ещё переиспользует тот же
-движок. Полная изоляция — пересоздавать `AVAudioEngine`/ноды per-session
-(трекается отдельной задачей).
+**Остаётся:** корневой фикс (`reset()`) снимает залипание от нашего же
+teardown, поэтому отдельная пересборка `AVAudioEngine` per-session больше
+не нужна; бюджет + сериализация остаются как защита от перманентного
+залипания HAL (устройство физически исчезло).
 
 ---
+
+## Process Tap scope — исключения / «только выбранные»
+
+`ProcessTapCapture` решает, **что** захватывать, через `TapScope`:
+
+- `.allExcept(bundleIDs)` → `CATapDescription(monoGlobalTapButExcludeProcesses:)` —
+  захватываем весь системный звук, кроме выбранных (+ всегда сам Unison, анти-фидбек).
+- `.onlySelected(bundleIDs)` → `CATapDescription(monoMixdownOfProcesses:)` —
+  захватываем **только** выбранные процессы; себя не таппим.
+
+`muteBehavior = .mutedWhenTapped`: то, что попало в tap, глушится на устройстве,
+а Unison проигрывает перевод (+ тихий оригинал через `originalPlayer`, vol 0.2).
+Не-затаппленные приложения играют на 100 %.
+
+### Резолв bundle ID → audio objects (`AudioProcessRegistry.audioObjectIDs(forBundleID:)`)
+
+🔥 **Многие приложения издают звук из helper/XPC-процесса, а не из главного, и
+bundle ID хелпера ненадёжен** (Yandex Music → `…music.helper` — ребёнок; Dia →
+общий `company.thebrowser.browser.helper` — другое поддерево). Любые правила
+вида «префикс bundle ID» или «путь внутри бандла» приходится чинить под каждое
+новое приложение.
+
+Поэтому матчим не по bundle ID, а спрашиваем у системы, **кто отвечает** за
+процесс — та же атрибуция app↔helper, что использует TCC и группировка
+процессов в Activity Monitor:
+
+1. **Основной, универсальный:** `responsibility_get_pid_responsible_for_pid(pid)`
+   (SPI libsystem, берём через `dlsym` — нет символа → деградирует в nil, не
+   ломая линковку) → responsible PID → `NSRunningApplication(...).bundleIdentifier`.
+   Разрешает **любой** helper/renderer/XPC в его приложение-владельца без
+   правил-под-каждое-приложение. Проверено: Claude/Yandex/Dia-хелперы все
+   маппятся в свой главный bundle ID.
+2. **Фоллбэк** (только если SPI недоступен): исполняемый файл процесса
+   (`proc_pidpath`) лежит **внутри** бандла приложения
+   (`NSWorkspace.urlForApplication(withBundleIdentifier:)`).
+
+Возвращаем **все** совпавшие объекты (у приложения может быть несколько
+audio-хелперов). Без этого исключённое/включённое приложение таппится мимо —
+в blocklist всё переводится, а в allowlist mixdown берёт только тихий главный
+процесс (нет транскрипта, приложение не глушится).
+
+### Резолв — один раз при `start()`
+
+Область захвата резолвится **однократно** при старте сессии: приложение должно
+**уже издавать звук**, когда нажата «Начать», иначе у него ещё нет Audio Process
+Object и оно не попадёт в tap до перезапуска сессии.
+
+⚠️ **Не возвращать динамический слушатель.** Была попытка держать tap «живым»
+через listener на `kAudioHardwarePropertyProcessObjectList` + live-`AudioObjectSetPropertyData(kAudioTapPropertyDescription)` —
+**зависала кнопка Stop и приложение падало** (HAL-set на главном потоке +
+правка живого tap клинила teardown). Слушатель стоял только при непустом
+списке — ровно эти сессии и зависали. Удалено. Если динамика реально нужна —
+делать вне главного потока и через пересоздание tap, не правкой живого.
+
+⚠️ **Пустой allowlist-резолв → НЕ создавать tap.** `monoMixdownOfProcesses:[]`
+(или mixdown из процессов, не дающих звука) клинит CoreAudio на teardown (тот же
+Stop-hang). При пустом резолве `.onlySelected` держим поток открытым, но пустым
+(захвата нет, останавливается чисто).
 
 ## Diagnostic env-vars
 
@@ -256,4 +324,4 @@ swift run pacing-eval --audio /path/to/input.wav --playback-test
 
 ---
 
-*Last updated: 2026-05-28*
+*Last updated: 2026-06-23*

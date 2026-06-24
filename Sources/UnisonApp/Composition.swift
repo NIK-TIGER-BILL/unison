@@ -149,8 +149,11 @@ public final class Composition {
             return AVAudioEngineMicrophone()
         }()
         let settingsStoreRef = settingsStore
-        let peerCap = ProcessTapCapture(excludedBundleIDsProvider: {
-            settingsStoreRef.load().excludedTapBundleIDs
+        let peerCap = ProcessTapCapture(scopeProvider: {
+            let s = settingsStoreRef.load()
+            return s.tapScopeMode == .onlySelected
+                ? .onlySelected(s.includedTapBundleIDs)
+                : .allExcept(s.excludedTapBundleIDs)
         })
         let mixer = AVAudioOutputMixer()
         let bhPlayer = BlackHole2chPlayer(registry: registry)

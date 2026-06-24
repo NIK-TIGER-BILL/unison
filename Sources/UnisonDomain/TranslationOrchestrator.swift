@@ -1314,7 +1314,11 @@ public final class TranslationOrchestrator {
         // (unison.log pid=13100 / pid=83933 both ended at `[tap.stop]
         // reason=user`, never `→ idle`). Past the budget we proceed anyway;
         // the orphaned teardown keeps running and the next start()/stop()
-        // serializes behind it.
+        // serializes behind it. The mixdown-tap wedge itself is now fixed at
+        // the source (AVAudioOutputMixer.stop resets its players instead of
+        // calling AVAudioPlayerNode.stop(), whose completion-handler flush
+        // hangs while a Process Tap is active), so this budget is a pure
+        // safety net for coreaudiod-level stalls outside our control.
         if await teardownFinished(teardown, within: Self.coreAudioTeardownBudgetSeconds) == false {
             Self.log.error("stopAllStreams — CoreAudio HAL teardown exceeded \(Self.coreAudioTeardownBudgetSeconds)s; proceeding to idle without it (output device HAL likely wedged). Orphaned teardown continues in background.")
         }

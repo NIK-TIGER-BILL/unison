@@ -8,11 +8,8 @@ import UnisonDomain
 /// set of processes by bundle ID (macOS 14.2+). Emits Float32 `AudioFrame`s
 /// at the tap's native sample rate over an `AsyncStream`.
 public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
-    /// Closure that returns the current list of bundle IDs to exclude from
-    /// the tap. Called at every `start()` so changes to Settings take effect
-    /// on the next session without app restart.
-    private let excludedBundleIDsProvider: @Sendable () -> [String]
-    private var processObjectIDs: [AudioObjectID] = []  // resolved at start()
+    private let scopeProvider: @Sendable () -> TapScope
+    private let muteBehavior: CATapMuteBehavior
     private var tapObjectID: AudioObjectID = 0
     private var aggregateDeviceID: AudioObjectID = 0
     private var ioProcID: AudioDeviceIOProcID?
@@ -21,15 +18,20 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     private var started = false
     private let log: UnisonLog
 
-    /// Static-list init (mostly for tests).
-    public init(excludedBundleIDs: [String] = []) {
-        self.excludedBundleIDsProvider = { excludedBundleIDs }
+    /// Static-scope init (tests, benchmark, permission probe). Defaults to a
+    /// blocklist with no user exclusions = tap everything except self.
+    public init(scope: TapScope = .allExcept([]),
+                muteBehavior: CATapMuteBehavior = .mutedWhenTapped) {
+        self.scopeProvider = { scope }
+        self.muteBehavior = muteBehavior
         self.log = UnisonLog(category: "ProcessTapCapture")
     }
 
     /// Closure-based init (production — re-reads on every start).
-    public init(excludedBundleIDsProvider: @escaping @Sendable () -> [String]) {
-        self.excludedBundleIDsProvider = excludedBundleIDsProvider
+    public init(scopeProvider: @escaping @Sendable () -> TapScope,
+                muteBehavior: CATapMuteBehavior = .mutedWhenTapped) {
+        self.scopeProvider = scopeProvider
+        self.muteBehavior = muteBehavior
         self.log = UnisonLog(category: "ProcessTapCapture")
     }
 
@@ -39,9 +41,21 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
             guard let self else { c.finish(); return }
             self.continuation = c
             do {
-                self.resolveExcludedProcessObjects()
+                let (scope, ids) = self.resolveScope()
+                self.log.info("[tap.start] scope=\(scope) processObjectIDs=\(ids)")
+                // An allowlist that resolves to no audio objects (the chosen
+                // apps aren't producing audio yet) must NOT build a
+                // `monoMixdownOfProcesses:[]` tap of nothing — that device
+                // wedges CoreAudio on teardown and the Stop button hangs. Keep
+                // the stream open but idle: it captures nothing and tears down
+                // cleanly. The user restarts once an allowed app is playing.
+                if case .onlySelected = scope, ids.isEmpty {
+                    self.log.info("[tap.start] allowlist apps produce no audio yet — idle capture (stoppable)")
+                    self.started = true
+                    return
+                }
                 self.log.info("[tap.tcc] kTCCServiceAudioCapture status=notQueryable (silent-frame watchdog will verify at runtime)")
-                try self.createTap()
+                try self.createTap(scope: scope, ids: ids)
                 try self.createAggregateDevice()
                 try self.queryNativeSampleRate()
                 try self.installIOProc()
@@ -78,32 +92,37 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
 
     // MARK: - Setup steps
 
-    private func resolveExcludedProcessObjects() {
-        let currentExclusions = excludedBundleIDsProvider()
+    /// Resolve the active scope's bundle IDs to live Audio Process Object
+    /// IDs (including each app's audio-producing helper processes via
+    /// `AudioProcessRegistry.audioObjectIDs(forBundleID:)`). `.allExcept`
+    /// also excludes self (anti-feedback); `.onlySelected` never taps self.
+    /// Resolved once per session at `start()`: an app must be producing audio
+    /// at that moment to be matched.
+    private func resolveScope() -> (scope: TapScope, ids: [AudioObjectID]) {
+        let scope = scopeProvider()
         var ids: [AudioObjectID] = []
-        // Always exclude ourselves to avoid feedback.
-        if let own = AudioProcessRegistry.processObjectID(forPID: getpid()) {
+        if case .allExcept = scope, let own = AudioProcessRegistry.processObjectID(forPID: getpid()) {
             ids.append(own)
         }
-        // Resolve each excluded bundle ID. Apps that aren't running OR
-        // haven't produced audio yet won't have an Audio Process Object —
-        // silently skip them; they can't appear in the system tap anyway.
-        for bundleID in currentExclusions {
-            if let obj = AudioProcessRegistry.processObjectID(forBundleID: bundleID) {
-                ids.append(obj)
-            }
+        for bundleID in scope.bundleIDs {
+            ids.append(contentsOf: AudioProcessRegistry.audioObjectIDs(forBundleID: bundleID))
         }
-        processObjectIDs = ids
-        let bundleIDsList = currentExclusions.joined(separator: ", ")
-        log.info("[tap.start] excluded=\(bundleIDsList.isEmpty ? "<self only>" : bundleIDsList) processObjectIDs=\(processObjectIDs)")
+        return (scope, ids)
     }
 
-    private func createTap() throws {
-        let desc = CATapDescription(
-            monoGlobalTapButExcludeProcesses: processObjectIDs
-        )
+    private func makeTapDescription(scope: TapScope, ids: [AudioObjectID]) -> CATapDescription {
+        let desc: CATapDescription
+        switch scope {
+        case .allExcept:    desc = CATapDescription(monoGlobalTapButExcludeProcesses: ids)
+        case .onlySelected: desc = CATapDescription(monoMixdownOfProcesses: ids)
+        }
         desc.isPrivate = true
-        desc.muteBehavior = .mutedWhenTapped
+        desc.muteBehavior = muteBehavior
+        return desc
+    }
+
+    private func createTap(scope: TapScope, ids: [AudioObjectID]) throws {
+        let desc = makeTapDescription(scope: scope, ids: ids)
         let status = AudioHardwareCreateProcessTap(desc, &tapObjectID)
         try check(status, "AudioHardwareCreateProcessTap")
         guard tapObjectID != kAudioObjectUnknown else {
@@ -233,20 +252,28 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     // MARK: - Teardown
 
     private func teardown() {
+        // Synchronous HAL teardown. All four calls return promptly (verified in
+        // the VM tap harness — the Stop wedge was AVAudioPlayerNode.stop(), not
+        // any of these); log only on a genuine non-noErr status so a real
+        // destroy failure (which would leak an aggregate device) is visible.
         if let procID = ioProcID, aggregateDeviceID != 0 {
-            AudioDeviceStop(aggregateDeviceID, procID)
-            AudioDeviceDestroyIOProcID(aggregateDeviceID, procID)
+            let stopStatus = AudioDeviceStop(aggregateDeviceID, procID)
+            let destroyProc = AudioDeviceDestroyIOProcID(aggregateDeviceID, procID)
+            if stopStatus != noErr || destroyProc != noErr {
+                log.error("[tap.teardown] AudioDeviceStop=\(stopStatus) DestroyIOProcID=\(destroyProc)")
+            }
         }
         ioProcID = nil
         if aggregateDeviceID != 0 {
-            AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
+            let status = AudioHardwareDestroyAggregateDevice(aggregateDeviceID)
+            if status != noErr { log.error("[tap.teardown] DestroyAggregateDevice=\(status)") }
             aggregateDeviceID = 0
         }
         if tapObjectID != 0 {
-            AudioHardwareDestroyProcessTap(tapObjectID)
+            let status = AudioHardwareDestroyProcessTap(tapObjectID)
+            if status != noErr { log.error("[tap.teardown] DestroyProcessTap=\(status)") }
             tapObjectID = 0
         }
-        processObjectIDs.removeAll()
     }
 
     // MARK: - Error helpers

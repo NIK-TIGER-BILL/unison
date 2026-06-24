@@ -405,3 +405,56 @@ func popoverVM_statusText_marksOnlyReconnecting() {
     )
     #expect(preview.statusDotState == .recovering)
 }
+
+// MARK: - Allowlist gate (Task 3)
+
+@Test @MainActor func popover_allowlistEmpty_blocksStart() {
+    let perms = MockPermissionsService()
+    let orch = makeOrchestratorForVM(perms: perms)
+    let registry = MockAudioDeviceRegistry()
+    var settings = Settings.default
+    settings.sessionMode = .listen          // tap-using, no BlackHole/mic gate
+    settings.tapScopeMode = .onlySelected
+    settings.includedTapBundleIDs = []
+    let vm = PopoverViewModel(orchestrator: orch, permissions: perms, deviceRegistry: registry, settings: settings)
+    #expect(vm.startBlockedReason == .noAppsToTranslate)
+    #expect(vm.canStart == false)
+}
+
+@Test @MainActor func popover_allowlistWithApp_allowsStart() {
+    let perms = MockPermissionsService()
+    let orch = makeOrchestratorForVM(perms: perms)
+    let registry = MockAudioDeviceRegistry()
+    var settings = Settings.default
+    settings.sessionMode = .listen
+    settings.tapScopeMode = .onlySelected
+    settings.includedTapBundleIDs = ["us.zoom.xos"]
+    let vm = PopoverViewModel(orchestrator: orch, permissions: perms, deviceRegistry: registry, settings: settings)
+    #expect(vm.startBlockedReason == nil)
+}
+
+@Test @MainActor func popover_blocklistEmpty_doesNotBlockStart() {
+    let perms = MockPermissionsService()
+    let orch = makeOrchestratorForVM(perms: perms)
+    let registry = MockAudioDeviceRegistry()
+    var settings = Settings.default
+    settings.sessionMode = .listen
+    settings.tapScopeMode = .allExcept
+    settings.excludedTapBundleIDs = []
+    let vm = PopoverViewModel(orchestrator: orch, permissions: perms, deviceRegistry: registry, settings: settings)
+    #expect(vm.startBlockedReason == nil)
+}
+
+@Test @MainActor func popover_testModeEmptyAllowlist_doesNotBlockStart() {
+    // `.test` is mic-only and never starts the tap, so an empty allowlist
+    // must NOT block it — guards the `mode != .test` carve-out.
+    let perms = MockPermissionsService()
+    let orch = makeOrchestratorForVM(perms: perms)   // grants mic on perms
+    let registry = MockAudioDeviceRegistry()
+    var settings = Settings.default
+    settings.sessionMode = .test
+    settings.tapScopeMode = .onlySelected
+    settings.includedTapBundleIDs = []
+    let vm = PopoverViewModel(orchestrator: orch, permissions: perms, deviceRegistry: registry, settings: settings)
+    #expect(vm.startBlockedReason == nil)
+}
