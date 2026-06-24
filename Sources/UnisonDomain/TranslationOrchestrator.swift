@@ -1264,11 +1264,7 @@ public final class TranslationOrchestrator {
         let mixer = outputMixer
         let vmic = virtualMicPlayer
         let log = Self.log
-        await Task.detached(priority: .userInitiated) {
-            // Per-call markers: a "only selected" (mixdown tap) session wedges
-            // coreaudiod somewhere in here. The last `[stop.detached] step=…`
-            // with no successor pins which stop() blocks; peer.stop() then logs
-            // its own `[tap.teardown] step=…` for the exact HAL call.
+        let teardown = Task.detached(priority: .userInitiated) {
             log.info("[stop.detached] step=mic.stop")
             mic.stop()
             log.info("[stop.detached] step=peer.stop")
@@ -1278,7 +1274,20 @@ public final class TranslationOrchestrator {
             log.info("[stop.detached] step=vmic.stop")
             vmic.stop()
             log.info("[stop.detached] step=done")
-        }.value
+        }
+        // A "only selected" (mixdown process tap) session can wedge
+        // AVAudioEngine.stop() in coreaudiod. A synchronous HAL call can't be
+        // interrupted, so bound the wait: proceed to .idle after 5s and let the
+        // teardown finish (or stay abandoned) in the background, rather than
+        // freezing Stop forever (which forced a kill via Activity Monitor).
+        let gate = StopTeardownGate()
+        let finished = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            Task { await teardown.value; await gate.resume(cont, with: true) }
+            Task { try? await Task.sleep(for: .seconds(5)); await gate.resume(cont, with: false) }
+        }
+        if !finished {
+            log.error("[stop.detached] TIMEOUT — audio teardown exceeded 5s (AVAudioEngine.stop wedged after a mixdown tap); proceeding to idle")
+        }
         await meStream?.close()
         await peerStream?.close()
         meStream = nil
@@ -1574,5 +1583,17 @@ public final class TranslationOrchestrator {
             }
         }
         pipelineTasksBySpeaker[.peer, default: []].append(contentsOf: [splitter, sender, translatedPlay, originalPlay, transcripts])
+    }
+}
+
+/// One-shot gate for the stop-teardown-vs-timeout race: whichever finishes
+/// first resumes the continuation; the loser's call is a no-op. Ensures the
+/// continuation resumes exactly once.
+private actor StopTeardownGate {
+    private var resumed = false
+    func resume(_ cont: CheckedContinuation<Bool, Never>, with value: Bool) {
+        guard !resumed else { return }
+        resumed = true
+        cont.resume(returning: value)
     }
 }

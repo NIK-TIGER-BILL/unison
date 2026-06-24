@@ -290,7 +290,11 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         closePlaybackDumpIfNeeded()
         translatedPlayer.stop()
         originalPlayer.stop()
+        // `engine.stop()` has been observed to wedge in coreaudiod after a
+        // `monoMixdownOfProcesses` ("only selected") session — marker confirms.
+        Self.log.info("[mixer.stop] step=engine.stop")
         engine.stop()
+        Self.log.info("[mixer.stop] step=done")
     }
 
     /// Schedule a translated-track chunk: account for it in the pacing
