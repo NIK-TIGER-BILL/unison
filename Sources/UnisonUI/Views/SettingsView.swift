@@ -40,6 +40,7 @@ public struct SettingsView: View {
     private static let defaultDeviceTag = ""
 
     @SwiftUI.State private var saveIndicator = SaveIndicatorController()
+    @SwiftUI.State private var showClearHistoryConfirm = false
 
     public var body: some View {
         // `Form { }.formStyle(.grouped)` was the obvious choice but
@@ -433,7 +434,7 @@ public struct SettingsView: View {
                 .labelsHidden()
             }
             LabeledContent("Сейчас в архиве") {
-                Text("\(vm.historyMeetingCount) встреч · \(String(format: "%.1f", Double(vm.historyTotalBytes) / (1024 * 1024))) МБ")
+                Text("\(vm.historyMeetingCount) \(russianPlural(vm.historyMeetingCount, "встреча", "встречи", "встреч")) · \(String(format: "%.1f", Double(vm.historyTotalBytes) / (1024 * 1024))) МБ")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
@@ -443,11 +444,15 @@ public struct SettingsView: View {
                     icon: Image(systemName: "trash"),
                     variant: .base,
                     isLoading: false,
-                    action: { vm.clearHistory() }
+                    action: { showClearHistoryConfirm = true }
                 )
             } label: {
                 Text("Удалить все сохранённые встречи")
             }
+        }
+        .confirmationDialog("Очистить всю историю?", isPresented: $showClearHistoryConfirm) {
+            Button("Очистить", role: .destructive) { vm.clearHistory() }
+            Button("Отмена", role: .cancel) {}
         }
     }
 

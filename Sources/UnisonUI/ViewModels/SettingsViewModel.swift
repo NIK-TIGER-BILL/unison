@@ -336,7 +336,6 @@ public final class SettingsViewModel {
     public func clearHistory() {
         meetingStore?.clearAll()
         refreshHistoryUsage()
-        bumpSavedTimestamp()
     }
 
     // MARK: - Private
