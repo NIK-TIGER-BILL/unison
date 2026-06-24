@@ -55,7 +55,6 @@ public final class MeetingHistoryViewModel {
 
     public func deleteMeeting(_ id: UUID) {
         store.delete(id)
-        if selectedID == id { selectedID = nil }
         reload()
     }
 
@@ -77,7 +76,6 @@ public final class MeetingHistoryViewModel {
 
     public func clearAll() {
         store.clearAll()
-        selectedID = nil
         reload()
     }
 

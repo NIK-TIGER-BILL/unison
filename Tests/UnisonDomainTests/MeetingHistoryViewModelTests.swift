@@ -103,3 +103,36 @@ private func storeWith(_ records: [MeetingRecord]) -> InMemoryMeetingStore {
     #expect(vm.summaries.isEmpty)
     #expect(vm.selectedRecord == nil)
 }
+
+@MainActor
+@Test func historyVM_search_clearQuery_restoresList() {
+    let a = recordAt(daysAgo: 1, entries: [sampleEntry(.peer, "обсудили деплой")])
+    let b = recordAt(daysAgo: 2, entries: [sampleEntry(.peer, "разговор о найме")])
+    let vm = MeetingHistoryViewModel(store: storeWith([a, b]))
+    vm.query = "деплой"
+    #expect(vm.summaries.count == 1)
+    vm.query = ""
+    #expect(vm.summaries.count == 2)
+}
+
+@MainActor
+@Test func historyVM_deleteNonSelected_keepsSelection() {
+    let a = recordAt(daysAgo: 1, entries: [sampleEntry()])   // newest → selected
+    let b = recordAt(daysAgo: 2, entries: [sampleEntry()])
+    let vm = MeetingHistoryViewModel(store: storeWith([a, b]))
+    #expect(vm.selectedID == a.id)
+    vm.deleteMeeting(b.id)                  // delete the NON-selected one
+    #expect(vm.selectedID == a.id)          // selection stays put
+    #expect(vm.selectedRecord?.id == a.id)
+    #expect(vm.summaries.map(\.id) == [a.id])
+}
+
+@MainActor
+@Test func historyVM_deleteLast_selectionGoesNil() {
+    let only = recordAt(daysAgo: 1, entries: [sampleEntry()])
+    let vm = MeetingHistoryViewModel(store: storeWith([only]))
+    vm.deleteMeeting(only.id)
+    #expect(vm.selectedID == nil)
+    #expect(vm.selectedRecord == nil)
+    #expect(vm.summaries.isEmpty)
+}
