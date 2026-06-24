@@ -32,6 +32,9 @@ public final class InMemoryMeetingStore: MeetingStore, @unchecked Sendable {
     private var records: [UUID: MeetingRecord] = [:]
     private let sizeLimitMBProvider: () -> Int
 
+    /// - Note: `sizeLimitMBProvider` is called while the store's internal
+    ///   lock is held — it must be fast, non-blocking, and must NOT call
+    ///   back into this store.
     public init(sizeLimitMBProvider: @escaping () -> Int = { 0 }) {
         self.sizeLimitMBProvider = sizeLimitMBProvider
     }

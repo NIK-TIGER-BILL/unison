@@ -55,3 +55,25 @@ import Testing
     store.clearAll()
     #expect(store.list().isEmpty)
 }
+
+@Test func inMemoryStore_delete_removesRecord() {
+    let store = InMemoryMeetingStore()
+    let rec = sampleRecord(entries: [sampleEntry()])
+    store.save(rec)
+    store.delete(rec.id)
+    #expect(store.list().isEmpty)
+    store.delete(UUID())            // unknown id → silent no-op
+    #expect(store.list().isEmpty)
+}
+
+@Test func inMemoryStore_save_enforcesSizeLimit_evictsOldestKeepsNewest() {
+    let store = InMemoryMeetingStore(sizeLimitMBProvider: { 1 })   // 1 MB cap
+    let big = String(repeating: "слово ", count: 200_000)          // ~2 MB encoded per record
+    let old = recordAt(daysAgo: 5, entries: [sampleEntry(.peer, big)])
+    let new = recordAt(daysAgo: 1, entries: [sampleEntry(.peer, big)])
+    store.save(old)    // newest at this point → protected, kept
+    store.save(new)    // now newest; old becomes evictable → evicted
+    let ids = store.list().map(\.id)
+    #expect(ids.contains(new.id))
+    #expect(!ids.contains(old.id))
+}
