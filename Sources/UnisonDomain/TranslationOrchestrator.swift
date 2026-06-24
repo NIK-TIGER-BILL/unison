@@ -103,6 +103,7 @@ public final class TranslationOrchestrator {
     /// domain layer; production wires the `NWPathMonitor`-backed
     /// `NetworkMonitor` from `UnisonSystem`.
     private let networkMonitor: any NetworkPathMonitoring
+    private let meetingStore: any MeetingStore
     /// Task draining `networkMonitor.statusStream`. Spawned in `start`,
     /// cancelled in `stopAllStreams` so a stopped orchestrator doesn't
     /// keep observing the network.
@@ -235,7 +236,8 @@ public final class TranslationOrchestrator {
         deviceRegistry: any AudioDeviceRegistry,
         clock: any Clock,
         transformer: any AudioFormatTransformer,
-        networkMonitor: any NetworkPathMonitoring
+        networkMonitor: any NetworkPathMonitoring,
+        meetingStore: any MeetingStore = InMemoryMeetingStore()
     ) {
         self.transcript = TranscriptStore()
         self.micCapture = micCapture
@@ -248,6 +250,7 @@ public final class TranslationOrchestrator {
         self.clock = clock
         self.transformer = transformer
         self.networkMonitor = networkMonitor
+        self.meetingStore = meetingStore
     }
 
     public func start(mode: SessionMode, languages: LanguagePair, settings: Settings = .default) async {
@@ -1327,6 +1330,8 @@ public final class TranslationOrchestrator {
 
     public func stop() async {
         Self.log.info("stop() — tearing down session from state=\(String(describing: self.state))")
+        let archivedMode = state.activeMode
+        let archivedStart = state.sessionStartedAt
         await stopAllStreams()
         consecutiveEmptyCloses = [.me: 0, .peer: 0]
         state = .idle
@@ -1335,6 +1340,24 @@ public final class TranslationOrchestrator {
         // No-op when the env vars aren't set.
         WireDumper.shared.close()
         WireDumper.sent.close()
+        archiveSession(mode: archivedMode, startedAt: archivedStart,
+                       enabled: currentSettings.saveHistoryEnabled)
+    }
+
+    /// Persist the just-ended session to the meeting archive. Internal so
+    /// tests can drive it directly. No-op for `.test`, empty transcripts,
+    /// or when history saving is disabled. Does NOT clear the transcript —
+    /// the live view keeps showing it until the next `start()`.
+    func archiveSession(mode: SessionMode?, startedAt: Date?, enabled: Bool) {
+        guard enabled, let mode, mode != .test, let startedAt,
+              !transcript.entries.isEmpty else { return }
+        let record = MeetingRecord(
+            id: UUID(), title: nil,
+            startedAt: startedAt, endedAt: clock.now(),
+            mode: mode,
+            languagePair: transcript.currentLanguagePair ?? .default,
+            entries: transcript.entries)
+        meetingStore.save(record)
     }
 
     /// How long `stopAllStreams()` waits on the off-main CoreAudio HAL
