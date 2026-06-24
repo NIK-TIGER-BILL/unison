@@ -14,6 +14,21 @@
 
 **Part 1 (`docs/superpowers/plans/2026-06-24-meeting-history-part1-persistence.md`) must be complete and merged.** This plan uses `MeetingStore`, `InMemoryMeetingStore`, `MeetingRecord`, `MeetingSummary`, `Composition.meetingStore`, and the `Settings.saveHistoryEnabled` / `historySizeLimitMB` fields it introduced. It also reuses the shared test builders in `Tests/UnisonDomainTests/MeetingTestSupport.swift`.
 
+## Part 1 follow-ups (from the final holistic review)
+
+The Part 1 final review was READY-TO-MERGE (475 tests green, no Critical/Important). Four Minor follow-ups were deferred here; dispositions:
+
+1. **`rename`/`setPinned` can trigger eviction of the oldest meeting when the archive is already over the size limit** (they persist via `save` → `enforceSizeLimit`). **Disposition: accept as documented behaviour, do NOT fix.** Rotation would run on the next session-end anyway; doing it slightly earlier on a metadata edit is a timing nuance, not data loss beyond expected rotation. A store redesign (separate non-enforcing persist path) is disproportionate. Documented in `FileMeetingStore` doc-comments.
+2. **No end-to-end `stop()` → archive integration test** (only `archiveSession(...)` is driven directly). **Disposition: add Task 0 below** — cheap, locks the most important seam. If driving the orchestrator to `.translating` with mocks proves fiddly, fall back to the existing direct coverage and note it.
+3. **Launch-time `enforceSizeLimit()` runs on `@MainActor`** (`Composition.init`). **Disposition: optional micro-refinement, skip unless trivial.** Bounded by the 50 MB cap (index read + a few deletes, sub-100 ms); revisit only if launch profiling shows a hitch.
+4. **Store API (`list`/`load`/`rename`/`setPinned`/`search`/`totalSizeBytes`/`clearAll`) unused in-app until now.** **Disposition: no action** — this plan IS what exercises it.
+
+### Task 0 (follow-up): end-to-end `stop()` → archive test
+
+**Files:** Test `Tests/UnisonDomainTests/OrchestratorArchiveTests.swift` (append).
+
+- [ ] Add a test that builds an orchestrator with an `InMemoryMeetingStore`, drives a `.call` session far enough that `state` carries a `startedAt` (via `start(...)` with granted mock permissions, or — if that's impractical with the mocks — by other means the existing orchestrator tests use to reach `.translating`), seeds one transcript entry, calls `await stop()`, and asserts `store.list().count == 1` with `mode == .call`. If reaching `.translating` with the mocks is impractical, STOP and report — the direct `archiveSession` tests already cover the logic; this only locks the wiring seam. Run `./scripts/test.sh --filter archiveSession_` (or the new test's name) and commit `test(history): e2e stop() archives session`.
+
 ## File Structure
 
 **New source files:**
