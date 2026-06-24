@@ -33,6 +33,7 @@ public final class SettingsViewModel {
     private let installer: (any BlackHoleInstaller)?
     private let hotkeyStore: HotkeyStorage?
     private let togglesStore: ToggleStorage?
+    private let meetingStore: (any MeetingStore)?
 
     // MARK: - State the new SettingsView consumes
 
@@ -74,6 +75,12 @@ public final class SettingsViewModel {
     /// button and swaps its label to "Установка…".
     public var isReinstallingBlackHole: Bool = false
 
+    /// History archive usage, refreshed on demand (the store isn't
+    /// Observable). The window controller calls `refreshHistoryUsage()`
+    /// each `show()`.
+    public private(set) var historyMeetingCount: Int = 0
+    public private(set) var historyTotalBytes: Int = 0
+
     /// Sentinel used to drive `SaveIndicator` — bumps on every mutation
     /// that auto-saves. Views observe `lastSavedAt` and flash the
     /// indicator when it changes.
@@ -107,7 +114,8 @@ public final class SettingsViewModel {
         keychain: (any KeychainService)? = nil,
         installer: (any BlackHoleInstaller)? = nil,
         hotkeyStore: HotkeyStorage? = nil,
-        togglesStore: ToggleStorage? = nil
+        togglesStore: ToggleStorage? = nil,
+        meetingStore: (any MeetingStore)? = nil
     ) {
         self.settings = initial
         self.deviceRegistry = deviceRegistry
@@ -116,6 +124,7 @@ public final class SettingsViewModel {
         self.installer = installer
         self.hotkeyStore = hotkeyStore
         self.togglesStore = togglesStore
+        self.meetingStore = meetingStore
 
         // Seed the in-memory API key from Keychain (if configured).
         self.apiKey = keychain?.loadAPIKey() ?? ""
@@ -139,6 +148,7 @@ public final class SettingsViewModel {
         // immediately after construction to keep them fresh while the
         // app is open.
         refreshDeviceList()
+        refreshHistoryUsage()
     }
 
     /// Re-read the device lists from the registry. Called once at init
@@ -305,6 +315,28 @@ public final class SettingsViewModel {
     /// after a hot-plug event.
     public func refreshBlackHoleStatus() {
         blackHole2chStatus = (deviceRegistry.findBlackHole2ch() != nil) ? .ready : .error
+    }
+
+    public func setSaveHistoryEnabled(_ on: Bool) {
+        settings.saveHistoryEnabled = on
+        emitChange()
+    }
+
+    public func setHistorySizeLimitMB(_ mb: Int) {
+        settings.historySizeLimitMB = mb
+        emitChange()
+    }
+
+    /// Re-read archive usage from the store (count + total bytes).
+    public func refreshHistoryUsage() {
+        historyMeetingCount = meetingStore?.list().count ?? 0
+        historyTotalBytes = meetingStore?.totalSizeBytes() ?? 0
+    }
+
+    public func clearHistory() {
+        meetingStore?.clearAll()
+        refreshHistoryUsage()
+        bumpSavedTimestamp()
     }
 
     // MARK: - Private

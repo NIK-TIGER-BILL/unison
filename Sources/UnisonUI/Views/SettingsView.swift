@@ -59,6 +59,7 @@ public struct SettingsView: View {
                 hotkeysSection
                 blackHoleSection
                 behaviorSection
+                historySection
                 aboutSection
             }
             .padding(.horizontal, 18)
@@ -400,6 +401,52 @@ public struct SettingsView: View {
                     set: { vm.updateHideMenuOnSession($0) }
                 ))
                 .labelsHidden()
+            }
+        }
+    }
+
+    // MARK: - Section: История
+
+    private static let historySizePresets: [Int] = [25, 50, 100, 250, 500, 0]   // 0 = без лимита
+
+    private func sizeLimitLabel(_ mb: Int) -> String { mb == 0 ? "Без лимита" : "\(mb) МБ" }
+
+    private var historySection: some View {
+        card(title: "История") {
+            LabeledContent("Сохранять историю встреч") {
+                Toggle("Сохранять историю встреч", isOn: Binding(
+                    get: { vm.settings.saveHistoryEnabled },
+                    set: { vm.setSaveHistoryEnabled($0) }
+                ))
+                .labelsHidden()
+            }
+            LabeledContent("Лимит размера") {
+                Picker("Лимит размера", selection: Binding(
+                    get: { vm.settings.historySizeLimitMB },
+                    set: { vm.setHistorySizeLimitMB($0) }
+                )) {
+                    ForEach(Self.historySizePresets, id: \.self) { mb in
+                        Text(sizeLimitLabel(mb)).tag(mb)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+            LabeledContent("Сейчас в архиве") {
+                Text("\(vm.historyMeetingCount) встреч · \(String(format: "%.1f", Double(vm.historyTotalBytes) / (1024 * 1024))) МБ")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            LabeledContent {
+                InlineButton(
+                    "Очистить всю историю",
+                    icon: Image(systemName: "trash"),
+                    variant: .base,
+                    isLoading: false,
+                    action: { vm.clearHistory() }
+                )
+            } label: {
+                Text("Удалить все сохранённые встречи")
             }
         }
     }
