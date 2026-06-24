@@ -1360,6 +1360,14 @@ public final class TranslationOrchestrator {
         meetingStore.save(record)
     }
 
+    /// Synchronous archive of the currently-active session. Safe to call
+    /// from `applicationWillTerminate` (no `await`). No-op when idle (the
+    /// `archiveSession` guard skips when `activeMode`/`startedAt` are nil).
+    public func archiveActiveSession() {
+        archiveSession(mode: state.activeMode, startedAt: state.sessionStartedAt,
+                       enabled: currentSettings.saveHistoryEnabled)
+    }
+
     /// How long `stopAllStreams()` waits on the off-main CoreAudio HAL
     /// teardown before giving up and settling the session anyway. Normal
     /// teardown is sub-100 ms; a healthy full stop (incl. the stream

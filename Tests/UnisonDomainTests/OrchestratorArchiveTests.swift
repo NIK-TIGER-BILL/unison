@@ -118,3 +118,23 @@ private func seedOneEntry(_ orch: TranslationOrchestrator) {
     #expect(store.list().count == 1)
     #expect(store.list().first?.mode == .call)
 }
+
+@MainActor
+@Test func archiveActiveSession_savesWhenTranslating() async {
+    let store = InMemoryMeetingStore()
+    let orch = makeOrchestratorForE2E(store: store)
+    await orch.start(mode: .call, languages: .default)
+    seedOneEntry(orch)
+    orch.archiveActiveSession()
+    #expect(store.list().count == 1)
+    #expect(store.list().first?.mode == .call)
+}
+
+@MainActor
+@Test func archiveActiveSession_noopWhenIdle() {
+    let store = InMemoryMeetingStore()
+    let orch = makeOrchestrator(store: store)   // state stays .idle
+    seedOneEntry(orch)
+    orch.archiveActiveSession()
+    #expect(store.list().isEmpty)
+}

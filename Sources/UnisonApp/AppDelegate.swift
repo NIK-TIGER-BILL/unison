@@ -312,6 +312,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         hotkeyService?.stop()
 
+        // Archive an active-at-quit session synchronously — applicationWillTerminate
+        // intentionally skips the async orchestrator.stop() (deadlock), so the
+        // Part 1 stop()-archive hook never fires on quit.
+        composition.orchestrator.archiveActiveSession()
+
         // Synchronous audio teardown FIRST — this is what patches the
         // WAV dump header sizes (if `UNISON_DUMP_OUTPUT_WAV` was set).
         // We deliberately call the player + mixer directly instead of
