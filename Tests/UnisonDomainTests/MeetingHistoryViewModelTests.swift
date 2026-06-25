@@ -162,3 +162,11 @@ private func storeWith(_ records: [MeetingRecord]) -> InMemoryMeetingStore {
     #expect(vm.selectedRecord?.entries.first?.translatedText == "Оригинал")
     #expect(vm.selectedRecord?.entries.first?.edited == false)
 }
+
+@MainActor
+@Test func historyVM_searchNoMatch_isNotEmptyArchive() {
+    let vm = MeetingHistoryViewModel(store: storeWith([recordAt(daysAgo: 1, entries: [sampleEntry(.peer, "деплой")])]))
+    vm.query = "отсутствует"
+    #expect(vm.summaries.isEmpty)
+    #expect(vm.isEmptyArchive == false)   // "no search results" ≠ "no archive"
+}

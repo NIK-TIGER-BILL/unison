@@ -37,9 +37,9 @@ public struct MeetingHistoryView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
 
-            if vm.isEmptyArchive {
+            if vm.summaries.isEmpty {
                 Spacer()
-                Text("Пока нет сохранённых встреч")
+                Text(vm.query.isEmpty ? "Пока нет сохранённых встреч" : "Ничего не найдено")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -96,6 +96,12 @@ private struct MeetingRow: View {
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
             }
+            if !summary.preview.isEmpty {
+                Text(summary.preview)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
             Text(subtitle)
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
@@ -105,9 +111,7 @@ private struct MeetingRow: View {
     }
 
     private var subtitle: String {
-        let pair = "\(summary.languagePair.mine.rawValue.uppercased()) → \(summary.languagePair.peer.rawValue.uppercased())"
-        let mins = max(1, summary.durationSeconds / 60)
-        return "\(pair) · \(mins) мин · \(summary.lineCount) \(pluralReplicas(summary.lineCount))"
+        "\(languagePairLabel(summary.languagePair)) · \(durationLabel(summary.durationSeconds)) · \(summary.lineCount) \(pluralReplicas(summary.lineCount))"
     }
 }
 
@@ -161,6 +165,7 @@ private struct MeetingDetailView: View {
                     }
                     .buttonStyle(.borderless)
                     .help("Переименовать")
+                    .accessibilityLabel("Переименовать")
                 }
                 Spacer()
                 Button { vm.togglePin(record.id) } label: {
@@ -168,10 +173,13 @@ private struct MeetingDetailView: View {
                 }
                 .buttonStyle(.borderless)
                 .help(record.pinned ? "Открепить" : "Закрепить")
+                .accessibilityLabel(record.pinned ? "Открепить" : "Закрепить")
                 Button { onExport(record) } label: { Image(systemName: "square.and.arrow.up") }
                     .buttonStyle(.borderless).help("Экспортировать")
+                    .accessibilityLabel("Экспортировать")
                 Button { showDeleteConfirm = true } label: { Image(systemName: "trash") }
                     .buttonStyle(.borderless).help("Удалить встречу")
+                    .accessibilityLabel("Удалить встречу")
             }
             Text(metaLine)
                 .font(.system(size: 12))
@@ -181,10 +189,7 @@ private struct MeetingDetailView: View {
     }
 
     private var metaLine: String {
-        let pair = "\(record.languagePair.mine.rawValue.uppercased()) → \(record.languagePair.peer.rawValue.uppercased())"
-        let mins = max(1, record.durationSeconds / 60)
-        let mode = record.mode == .listen ? "Прослушивание" : "Звонок"
-        return "\(mode) · \(mins) мин · \(pair)"
+        "\(MeetingRecord.modeWord(record.mode)) · \(durationLabel(record.durationSeconds)) · \(languagePairLabel(record.languagePair))"
     }
 
     private func commitRename() {
@@ -217,8 +222,10 @@ private struct MeetingLineRow: View {
                     Button { draft = entry.translatedText; isEditing = true } label: {
                         Image(systemName: "pencil")
                     }.buttonStyle(.borderless).help("Изменить реплику")
+                        .accessibilityLabel("Изменить реплику")
                     Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }
                         .buttonStyle(.borderless).help("Удалить реплику")
+                        .accessibilityLabel("Удалить реплику")
                 }
             }
             if isEditing {
@@ -253,4 +260,12 @@ private struct MeetingLineRow: View {
 /// Russian plural form for "реплика" (line/utterance).
 private func pluralReplicas(_ n: Int) -> String {
     russianPlural(n, "реплика", "реплики", "реплик")
+}
+
+private func languagePairLabel(_ pair: LanguagePair) -> String {
+    "\(pair.mine.rawValue.uppercased()) → \(pair.peer.rawValue.uppercased())"
+}
+
+private func durationLabel(_ seconds: Int) -> String {
+    "\(max(1, seconds / 60)) мин"
 }

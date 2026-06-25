@@ -64,7 +64,12 @@ public final class MeetingHistoryWindowController {
         panel.nameFieldStringValue = filename
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
-            try? text.write(to: url, atomically: true, encoding: .utf8)
+            do {
+                try text.write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                FileLogStore.shared.write(category: "MeetingHistory", level: "error",
+                    message: "export write failed for \(url.lastPathComponent): \(error)")
+            }
         }
     }
 }

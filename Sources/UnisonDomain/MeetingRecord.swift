@@ -63,7 +63,7 @@ public struct MeetingRecord: Identifiable, Sendable, Codable, Equatable {
         return "\(modeWord(mode)) · \(titleDateFormatter.string(from: startedAt))"
     }
 
-    static func modeWord(_ mode: SessionMode) -> String {
+    public static func modeWord(_ mode: SessionMode) -> String {
         switch mode {
         case .call: return "Звонок"
         case .listen: return "Прослушивание"
