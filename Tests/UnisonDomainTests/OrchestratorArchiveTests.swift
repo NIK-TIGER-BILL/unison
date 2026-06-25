@@ -149,3 +149,74 @@ private func seedOneEntry(_ orch: TranslationOrchestrator) {
     orch.archiveActiveSession()
     #expect(store.list().isEmpty)          // in-flight session must NOT be archived
 }
+
+@MainActor
+@Test func stopArchivesSession_afterTerminalError() async throws {
+    // Regression: a session that ends in a terminal `.error` state was
+    // previously never archived because `stop()` and `archiveActiveSession()`
+    // sourced mode/startedAt from the live `state`, which is nil for
+    // `.error`. With `pendingArchiveMeta` the last good values survive the
+    // error transition and are consumed on stop.
+    let store = InMemoryMeetingStore()
+    let orch = makeOrchestratorForE2E(store: store)
+    await orch.start(mode: .call, languages: .default)
+    guard case .translating = orch.state else {
+        Issue.record("Expected .translating after start(), got \(orch.state)")
+        return
+    }
+    seedOneEntry(orch)
+
+    // Drive a terminal error mid-session. `.apiKeyInvalid` with
+    // `receivedAnyData: true` hits the terminal-error early-return in
+    // `handleStreamFailure` (before the empty-close counter), so the
+    // orchestrator transitions straight to `.error(.apiKeyInvalid)` via
+    // `stopAllStreams() + state = .error(...)` — the same path taken by
+    // a real mid-session invalid-key failure.
+    let factory = MockTranslationStreamFactory()
+    // The orchestrator under test was constructed with its own factory
+    // inside makeOrchestratorForE2E; we need the streams it created.
+    // Instead, rebuild a fresh orchestrator with our observable factory.
+    let store2 = InMemoryMeetingStore()
+    let registry2 = MockAudioDeviceRegistry()
+    registry2.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    let perms2 = MockPermissionsService()
+    perms2.statuses[.microphone] = .granted
+    let orch2 = TranslationOrchestrator(
+        micCapture: MockMicrophoneCapture(),
+        peerCapture: MockPeerAudioCapture(),
+        outputMixer: MockAudioOutputMixer(),
+        virtualMicPlayer: MockAudioPlayer(),
+        translationFactory: factory,
+        permissions: perms2,
+        deviceRegistry: registry2,
+        clock: InstantClock(),
+        transformer: MockAudioFormatTransformer(),
+        networkMonitor: MockNetworkPathMonitor(initial: .satisfied),
+        meetingStore: store2
+    )
+    await orch2.start(mode: .call, languages: .default)
+    guard case .translating = orch2.state else {
+        Issue.record("Expected .translating after start(), got \(orch2.state)")
+        return
+    }
+    seedOneEntry(orch2)
+
+    // Terminal error: apiKeyInvalid with receivedAnyData:true goes through
+    // the terminal-error branch in handleStreamFailure directly.
+    factory.streams[.peer]?.emitConnectionState(.failed(.apiKeyInvalid, receivedAnyData: true))
+
+    // Wait for the orchestrator to reach .error.
+    for _ in 0..<200 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .error = orch2.state { break }
+    }
+    guard case .error(.apiKeyInvalid) = orch2.state else {
+        Issue.record("Expected .error(.apiKeyInvalid), got \(orch2.state)")
+        return
+    }
+
+    // stop() must archive the session even though state is .error.
+    await orch2.stop()
+    #expect(store2.list().count == 1)
+    #expect(store2.list().first?.mode == .call)
+}

@@ -23,8 +23,18 @@ public final class TranslationOrchestrator {
     public private(set) var state: SessionState = .idle {
         didSet {
             Self.log.info("state \(String(describing: oldValue)) → \(String(describing: self.state))")
+            if let m = self.state.activeMode, let s = self.state.sessionStartedAt {
+                self.pendingArchiveMeta = (m, s)
+            }
         }
     }
+
+    /// Mode + start time of the most recent active session. Captured in the
+    /// `state` observer whenever the state carries them, and retained across
+    /// a terminal `.error` (whose `activeMode`/`sessionStartedAt` are nil) so
+    /// an error-ended session is still archived on stop/quit. Cleared after
+    /// the session is archived.
+    private var pendingArchiveMeta: (mode: SessionMode, startedAt: Date)?
 
     /// Orthogonal QoS dimension published alongside `state`. UI binds
     /// to this for the per-stream status indicator (popover dot, pill
@@ -1330,8 +1340,6 @@ public final class TranslationOrchestrator {
 
     public func stop() async {
         Self.log.info("stop() — tearing down session from state=\(String(describing: self.state))")
-        let archivedMode = state.activeMode
-        let archivedStart = state.sessionStartedAt
         await stopAllStreams()
         consecutiveEmptyCloses = [.me: 0, .peer: 0]
         state = .idle
@@ -1340,8 +1348,9 @@ public final class TranslationOrchestrator {
         // No-op when the env vars aren't set.
         WireDumper.shared.close()
         WireDumper.sent.close()
-        archiveSession(mode: archivedMode, startedAt: archivedStart,
+        archiveSession(mode: pendingArchiveMeta?.mode, startedAt: pendingArchiveMeta?.startedAt,
                        enabled: currentSettings.saveHistoryEnabled)
+        pendingArchiveMeta = nil
     }
 
     /// Persist the just-ended session to the meeting archive. Internal so
@@ -1363,9 +1372,13 @@ public final class TranslationOrchestrator {
     /// Synchronous archive of the currently-active session. Safe to call
     /// from `applicationWillTerminate` (no `await`). No-op when idle (the
     /// `archiveSession` guard skips when `activeMode`/`startedAt` are nil).
+    /// Sources from `pendingArchiveMeta` so sessions that ended in a
+    /// terminal `.error` (whose `activeMode`/`sessionStartedAt` are nil)
+    /// are still archived on quit.
     public func archiveActiveSession() {
-        archiveSession(mode: state.activeMode, startedAt: state.sessionStartedAt,
+        archiveSession(mode: pendingArchiveMeta?.mode, startedAt: pendingArchiveMeta?.startedAt,
                        enabled: currentSettings.saveHistoryEnabled)
+        pendingArchiveMeta = nil
     }
 
     /// How long `stopAllStreams()` waits on the off-main CoreAudio HAL
