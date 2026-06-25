@@ -72,6 +72,18 @@ private func makeTempStore(limitMB: Int = 0) -> FileMeetingStore {
     #expect(!ids.contains(danglingID))
 }
 
+@Test func fileStore_load_corruptFile_deindexesGhostRow() throws {
+    let dir = tempDir()
+    let store = FileMeetingStore(directory: dir, sizeLimitMBProvider: { 0 })
+    let rec = sampleRecord(entries: [sampleEntry()])
+    store.save(rec)
+    #expect(store.list().count == 1)
+    // Corrupt the record file in place.
+    try Data("{not valid json".utf8).write(to: dir.appendingPathComponent("\(rec.id.uuidString).json"))
+    #expect(throws: MeetingStoreError.notFound) { _ = try store.load(rec.id) }
+    #expect(store.list().isEmpty)   // ghost de-indexed on the failed load
+}
+
 @Test func fileStore_clearAll_removesOrphanFilesToo() throws {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("FileMeetingStoreTests-\(UUID().uuidString)", isDirectory: true)

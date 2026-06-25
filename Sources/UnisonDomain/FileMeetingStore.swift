@@ -8,6 +8,8 @@ import Foundation
 /// lock so public methods can compose (e.g. `save` → `enforceSizeLimit`
 /// → `delete`).
 public final class FileMeetingStore: MeetingStore, @unchecked Sendable {
+    private static let log = UnisonLog(category: "MeetingStore")
+
     private struct Index: Codable {
         var schemaVersion: Int
         var meetings: [MeetingSummary]
@@ -23,7 +25,8 @@ public final class FileMeetingStore: MeetingStore, @unchecked Sendable {
         self.directory = directory
         self.indexURL = directory.appendingPathComponent("index.json")
         self.sizeLimitMBProvider = sizeLimitMBProvider
-        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: directory, withIntermediateDirectories: true,
+                                attributes: [.posixPermissions: 0o700])
         rebuildIndex()
     }
 
@@ -86,14 +89,33 @@ public final class FileMeetingStore: MeetingStore, @unchecked Sendable {
     public func load(_ id: UUID) throws -> MeetingRecord {
         lock.lock(); defer { lock.unlock() }
         do { return try decodeRecord(at: recordURL(id)) }
-        catch { throw MeetingStoreError.notFound }
+        catch {
+            // Stale or corrupt: drop the index entry so it stops appearing
+            // as a ghost row. The file (if present) is left on disk for
+            // manual recovery.
+            var index = loadIndex()
+            if index.meetings.contains(where: { $0.id == id }) {
+                index.meetings.removeAll { $0.id == id }
+                writeIndex(index)
+                Self.log.error("load: meeting \(id) failed to decode — dropped from index")
+            }
+            throw MeetingStoreError.notFound
+        }
     }
 
     /// Write the record file + index entry. Caller holds the lock. Does NOT
     /// enforce the size limit.
     private func persist(_ record: MeetingRecord) {
-        guard let data = try? JSONEncoder().encode(record) else { return }
-        do { try data.write(to: recordURL(record.id), options: .atomic) } catch { return }
+        guard let data = try? JSONEncoder().encode(record) else {
+            Self.log.error("persist: failed to encode meeting \(record.id)")
+            return
+        }
+        do {
+            try data.write(to: recordURL(record.id), options: .atomic)
+        } catch {
+            Self.log.error("persist: failed to write meeting \(record.id): \(error)")
+            return
+        }
         var index = loadIndex()
         index.meetings.removeAll { $0.id == record.id }
         index.meetings.append(MeetingSummary(record: record, sizeBytes: data.count))
