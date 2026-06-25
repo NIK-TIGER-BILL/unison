@@ -4,6 +4,8 @@ public struct Settings: Equatable, Codable, Sendable {
     public var inputDeviceUID: String?
     public var outputDeviceUID: String?
     public var excludedTapBundleIDs: [String]
+    public var includedTapBundleIDs: [String]
+    public var tapScopeMode: TapScopeMode
     private var _originalMixVolume: Float
     public var saveHistoryEnabled: Bool
     public var historySizeLimitMB: Int
@@ -13,12 +15,19 @@ public struct Settings: Equatable, Codable, Sendable {
         set { _originalMixVolume = min(max(newValue, 0.0), 1.0) }
     }
 
+    /// The app list that applies to the current mode.
+    public var activeTapBundleIDs: [String] {
+        tapScopeMode == .onlySelected ? includedTapBundleIDs : excludedTapBundleIDs
+    }
+
     public init(
         sessionMode: SessionMode = .call,
         languagePair: LanguagePair = .default,
         inputDeviceUID: String? = nil,
         outputDeviceUID: String? = nil,
         excludedTapBundleIDs: [String] = [],
+        includedTapBundleIDs: [String] = [],
+        tapScopeMode: TapScopeMode = .allExcept,
         originalMixVolume: Float = 0.2,
         saveHistoryEnabled: Bool = true,
         historySizeLimitMB: Int = 50
@@ -28,6 +37,8 @@ public struct Settings: Equatable, Codable, Sendable {
         self.inputDeviceUID = inputDeviceUID
         self.outputDeviceUID = outputDeviceUID
         self.excludedTapBundleIDs = excludedTapBundleIDs
+        self.includedTapBundleIDs = includedTapBundleIDs
+        self.tapScopeMode = tapScopeMode
         self._originalMixVolume = min(max(originalMixVolume, 0.0), 1.0)
         self.saveHistoryEnabled = saveHistoryEnabled
         self.historySizeLimitMB = historySizeLimitMB
@@ -37,7 +48,7 @@ public struct Settings: Equatable, Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case sessionMode, languagePair, inputDeviceUID, outputDeviceUID
-        case excludedTapBundleIDs
+        case excludedTapBundleIDs, includedTapBundleIDs, tapScopeMode
         case _originalMixVolume = "originalMixVolume"
         case saveHistoryEnabled, historySizeLimitMB
     }
@@ -50,6 +61,10 @@ public struct Settings: Equatable, Codable, Sendable {
         self.outputDeviceUID = try c.decodeIfPresent(String.self, forKey: .outputDeviceUID)
         self.excludedTapBundleIDs = try c.decodeIfPresent([String].self,
                                                           forKey: .excludedTapBundleIDs) ?? []
+        self.includedTapBundleIDs = try c.decodeIfPresent([String].self,
+                                                          forKey: .includedTapBundleIDs) ?? []
+        self.tapScopeMode = try c.decodeIfPresent(TapScopeMode.self,
+                                                  forKey: .tapScopeMode) ?? .allExcept
         let raw = try c.decode(Float.self, forKey: ._originalMixVolume)
         self._originalMixVolume = min(max(raw, 0.0), 1.0)
         self.saveHistoryEnabled = try c.decodeIfPresent(Bool.self, forKey: .saveHistoryEnabled) ?? true

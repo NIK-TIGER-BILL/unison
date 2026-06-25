@@ -205,8 +205,21 @@ public final class SettingsViewModel {
         emitChange()
     }
 
-    public func setExcludedTapBundleIDs(_ ids: [String]) {
-        settings.excludedTapBundleIDs = ids
+    public func setTapScopeMode(_ mode: TapScopeMode) {
+        settings.tapScopeMode = mode
+        emitChange()
+    }
+
+    /// The app list for the current mode (excluded list in `.allExcept`,
+    /// included list in `.onlySelected`).
+    public var activeTapBundleIDs: [String] { settings.activeTapBundleIDs }
+
+    public func setActiveTapBundleIDs(_ ids: [String]) {
+        if settings.tapScopeMode == .onlySelected {
+            settings.includedTapBundleIDs = ids
+        } else {
+            settings.excludedTapBundleIDs = ids
+        }
         emitChange()
     }
 

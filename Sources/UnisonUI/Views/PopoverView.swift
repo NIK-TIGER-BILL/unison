@@ -43,6 +43,9 @@ public struct PopoverView: View {
             if !vm.isLanguagePairValid {
                 WarnRow(message: "Выбран одинаковый язык")
             }
+            if vm.startBlockedReason == .noAppsToTranslate {
+                WarnRow(message: "Выберите приложения для перевода")
+            }
             primaryButton
             if vm.state.isActive {
                 timer

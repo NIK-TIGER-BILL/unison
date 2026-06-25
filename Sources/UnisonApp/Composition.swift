@@ -155,16 +155,18 @@ public final class Composition {
             return AVAudioEngineMicrophone()
         }()
         let settingsStoreRef = settingsStore
-        let peerCap = ProcessTapCapture(excludedBundleIDsProvider: {
-            settingsStoreRef.load().excludedTapBundleIDs
+        let peerCap = ProcessTapCapture(scopeProvider: {
+            let s = settingsStoreRef.load()
+            return s.tapScopeMode == .onlySelected
+                ? .onlySelected(s.includedTapBundleIDs)
+                : .allExcept(s.excludedTapBundleIDs)
         })
         let mixer = AVAudioOutputMixer()
         let bhPlayer = BlackHole2chPlayer(registry: registry)
         self.virtualMicPlayer = bhPlayer
         self.outputMixer = mixer
 
-        let meetingStore = Self.makeMeetingStore(force: force, settingsStore: settingsStoreRef)
-        self.meetingStore = meetingStore
+        self.meetingStore = Self.makeMeetingStore(force: force, settingsStore: settingsStoreRef)
         self.orchestrator = TranslationOrchestrator(
             micCapture: mic,
             peerCapture: peerCap,
@@ -176,7 +178,7 @@ public final class Composition {
             clock: SystemClock(),
             transformer: ResamplerAdapter(),
             networkMonitor: NetworkMonitor(),
-            meetingStore: meetingStore
+            meetingStore: self.meetingStore
         )
 
         let initialSettings = settingsStore.load()
@@ -217,13 +219,13 @@ public final class Composition {
             installer: installer,
             hotkeyStore: UserDefaultsHotkeyStorage(),
             togglesStore: UserDefaultsToggleStorage(),
-            meetingStore: meetingStore
+            meetingStore: self.meetingStore
         )
         self.transcriptVM = TranscriptViewModel(
             store: orchestrator.transcript,
             orchestrator: orchestrator
         )
-        self.meetingHistoryVM = MeetingHistoryViewModel(store: meetingStore)
+        self.meetingHistoryVM = MeetingHistoryViewModel(store: self.meetingStore)
         // Wire the live-typing-dots pipeline. Without this, the bubble
         // group's `liveEntryId` is always nil → the animated dots that
         // mark "this bubble is still being received" never appear in

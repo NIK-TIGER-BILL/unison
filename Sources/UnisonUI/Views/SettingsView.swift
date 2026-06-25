@@ -54,7 +54,7 @@ public struct SettingsView: View {
             // Lazy layout resized the scrollbar thumb mid-scroll.
             VStack(alignment: .leading, spacing: 18) {
                 audioSection
-                excludedAppsSection
+                appScopeSection
                 languagesSection
                 openAISection
                 hotkeysSection
@@ -198,14 +198,18 @@ public struct SettingsView: View {
         }
     }
 
-    // MARK: - Section: Excluded apps
+    // MARK: - Section: App scope
 
-    private var excludedAppsSection: some View {
-        card(title: "Исключения") {
-            ExcludedAppsSection(
-                excludedBundleIDs: Binding(
-                    get: { vm.settings.excludedTapBundleIDs },
-                    set: { vm.setExcludedTapBundleIDs($0) }
+    private var appScopeSection: some View {
+        card(title: "Приложения") {
+            AppScopeSection(
+                mode: Binding(
+                    get: { vm.settings.tapScopeMode },
+                    set: { vm.setTapScopeMode($0) }
+                ),
+                bundleIDs: Binding(
+                    get: { vm.activeTapBundleIDs },
+                    set: { vm.setActiveTapBundleIDs($0) }
                 )
             )
         }

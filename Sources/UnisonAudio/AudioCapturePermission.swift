@@ -27,7 +27,7 @@ public enum AudioCapturePermission {
     /// It also leaked the consumer Task — the new version holds the
     /// handle and cancels it explicitly before `stop()`.
     public static func triggerPrompt() async {
-        let capture = ProcessTapCapture(excludedBundleIDs: [])
+        let capture = ProcessTapCapture()
         let stream = capture.start()
         // Drain the stream so the IOProc start() lifecycle runs to
         // completion (create tap → aggregate device → IOProc →

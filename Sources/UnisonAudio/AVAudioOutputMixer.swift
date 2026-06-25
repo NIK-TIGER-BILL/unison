@@ -288,8 +288,16 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     public func stop() {
         pacing?.stop()
         closePlaybackDumpIfNeeded()
-        translatedPlayer.stop()
-        originalPlayer.stop()
+        // Reset (not stop) the players. `AVAudioPlayerNode.stop()` flushes the
+        // pending `.dataPlayedBack` completion handlers from `scheduleTranslated`,
+        // and that flush *wedges* whenever a CoreAudio Process Tap was active in
+        // the session — the tap's effect on the render thread makes it never
+        // return, hanging Stop (and, since the wedged stop blocked teardown, the
+        // whole session). `reset()` clears the scheduled buffers cleanly without
+        // that flush. Verified deterministically in the VM tap harness
+        // (scripts/vm-repro-teardown.sh): `stop()` wedges 3/3, `reset()` is 3/3 OK.
+        translatedPlayer.reset()
+        originalPlayer.reset()
         engine.stop()
     }
 
