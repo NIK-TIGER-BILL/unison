@@ -253,6 +253,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             scheduleAutoStart(at: 2.0, tag: "start#1")
             scheduleAutoStop(at: 10.0, tag: "stop#1")
             scheduleAutoStart(at: 14.0, tag: "start#2")
+        case .historyDemo:
+            historyWindow.show()
         case .onboardingDone:
             break
         }
