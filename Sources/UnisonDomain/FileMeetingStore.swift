@@ -88,8 +88,9 @@ public final class FileMeetingStore: MeetingStore, @unchecked Sendable {
 
     public func load(_ id: UUID) throws -> MeetingRecord {
         lock.lock(); defer { lock.unlock() }
-        do { return try decodeRecord(at: recordURL(id)) }
-        catch {
+        do {
+            return try decodeRecord(at: recordURL(id))
+        } catch {
             // Stale or corrupt: drop the index entry so it stops appearing
             // as a ghost row. The file (if present) is left on disk for
             // manual recovery.

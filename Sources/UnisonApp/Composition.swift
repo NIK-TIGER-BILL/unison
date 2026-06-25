@@ -163,10 +163,7 @@ public final class Composition {
         self.virtualMicPlayer = bhPlayer
         self.outputMixer = mixer
 
-        let meetingStore: any MeetingStore = force == .historyDemo
-            ? Self.makeDemoMeetingStore()
-            : FileMeetingStore.applicationSupport(
-                sizeLimitMBProvider: { settingsStoreRef.load().historySizeLimitMB })
+        let meetingStore = Self.makeMeetingStore(force: force, settingsStore: settingsStoreRef)
         self.meetingStore = meetingStore
         self.orchestrator = TranslationOrchestrator(
             micCapture: mic,
@@ -401,6 +398,14 @@ extension Composition {
         // production `MacKeychain` resolves correctly; a missing or
         // revoked key keeps the auth-failed path observable.
         return MacKeychain()
+    }
+
+    /// Pick the meeting store: an in-memory demo store for the
+    /// `history-demo` screenshot harness, else the real file-backed store.
+    static func makeMeetingStore(force: UnisonForceState?, settingsStore: SettingsStore) -> any MeetingStore {
+        if force == .historyDemo { return makeDemoMeetingStore() }
+        return FileMeetingStore.applicationSupport(
+            sizeLimitMBProvider: { settingsStore.load().historySizeLimitMB })
     }
 
     /// In-memory `MeetingStore` seeded with synthetic meetings for the
