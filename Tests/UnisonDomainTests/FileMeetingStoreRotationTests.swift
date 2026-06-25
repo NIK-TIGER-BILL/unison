@@ -45,3 +45,16 @@ private func tempDir() -> URL {
     #expect(store.list().isEmpty)
     #expect(store.totalSizeBytes() == 0)
 }
+
+@Test func fileStore_renameUpdate_doesNotEvictOverCap() {
+    var limit = 0
+    let store = FileMeetingStore(directory: tempDir(), sizeLimitMBProvider: { limit })
+    let big = String(repeating: "слово ", count: 200_000)
+    let old = recordAt(daysAgo: 5, entries: [sampleEntry(.peer, big)])
+    let new = recordAt(daysAgo: 1, entries: [sampleEntry(.peer, big)])
+    store.save(old); store.save(new)        // limit 0 → both present
+    limit = 1                                // over the 1 MB cap
+    store.rename(old.id, title: "Renamed")   // rename now uses update → must NOT evict
+    #expect(store.list().contains { $0.id == old.id })
+    #expect((try? store.load(old.id))?.title == "Renamed")
+}

@@ -56,7 +56,9 @@ public final class MeetingHistoryWindowController {
         // Render the export text up front so the (nonisolated) save-panel
         // completion closure only captures value types (`String` + `URL`).
         let text = record.exportText()
-        let filename = record.displayTitle + ".txt"
+        let filename = record.displayTitle
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-") + ".txt"
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
         panel.nameFieldStringValue = filename

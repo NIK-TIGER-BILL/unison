@@ -89,15 +89,26 @@ public final class FileMeetingStore: MeetingStore, @unchecked Sendable {
         catch { throw MeetingStoreError.notFound }
     }
 
-    public func save(_ record: MeetingRecord) {
-        lock.lock(); defer { lock.unlock() }
+    /// Write the record file + index entry. Caller holds the lock. Does NOT
+    /// enforce the size limit.
+    private func persist(_ record: MeetingRecord) {
         guard let data = try? JSONEncoder().encode(record) else { return }
         do { try data.write(to: recordURL(record.id), options: .atomic) } catch { return }
         var index = loadIndex()
         index.meetings.removeAll { $0.id == record.id }
         index.meetings.append(MeetingSummary(record: record, sizeBytes: data.count))
         writeIndex(index)
+    }
+
+    public func save(_ record: MeetingRecord) {
+        lock.lock(); defer { lock.unlock() }
+        persist(record)
         enforceSizeLimit()
+    }
+
+    public func update(_ record: MeetingRecord) {
+        lock.lock(); defer { lock.unlock() }
+        persist(record)
     }
 
     public func delete(_ id: UUID) {
@@ -108,22 +119,22 @@ public final class FileMeetingStore: MeetingStore, @unchecked Sendable {
         writeIndex(index)
     }
 
-    /// Persists via `save`, so it may trigger size-limit enforcement
-    /// (eviction of the oldest non-pinned meetings) when over the limit.
+    /// Persists via `update` — a metadata edit never grows the archive, so
+    /// it does not trigger size rotation.
     public func rename(_ id: UUID, title: String?) {
         lock.lock(); defer { lock.unlock() }
         guard var rec = try? decodeRecord(at: recordURL(id)) else { return }
         rec.title = title
-        save(rec)
+        update(rec)
     }
 
-    /// Persists via `save`, so it may trigger size-limit enforcement
-    /// (eviction of the oldest non-pinned meetings) when over the limit.
+    /// Persists via `update` — a metadata edit never grows the archive, so
+    /// it does not trigger size rotation.
     public func setPinned(_ id: UUID, _ pinned: Bool) {
         lock.lock(); defer { lock.unlock() }
         guard var rec = try? decodeRecord(at: recordURL(id)) else { return }
         rec.pinned = pinned
-        save(rec)
+        update(rec)
     }
 
     public func search(_ query: String) -> [MeetingSummary] {

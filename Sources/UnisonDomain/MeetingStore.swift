@@ -6,6 +6,12 @@ public protocol MeetingStore: Sendable {
     func list() -> [MeetingSummary]
     func load(_ id: UUID) throws -> MeetingRecord
     func save(_ record: MeetingRecord)
+    /// Persist an edit to an EXISTING record WITHOUT triggering size
+    /// rotation. Edits (rename/pin/edit-line/delete-line) never grow the
+    /// archive, so they must not evict other meetings. `save` (used for
+    /// newly-archived sessions) is the only rotation trigger besides the
+    /// launch sweep.
+    func update(_ record: MeetingRecord)
     func delete(_ id: UUID)
     func rename(_ id: UUID, title: String?)
     func setPinned(_ id: UUID, _ pinned: Bool)
@@ -59,6 +65,10 @@ public final class InMemoryMeetingStore: MeetingStore, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         records[record.id] = record
         enforceSizeLimit()
+    }
+    public func update(_ record: MeetingRecord) {
+        lock.lock(); defer { lock.unlock() }
+        records[record.id] = record
     }
     public func delete(_ id: UUID) {
         lock.lock(); defer { lock.unlock() }

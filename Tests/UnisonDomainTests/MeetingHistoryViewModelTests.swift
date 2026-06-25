@@ -136,3 +136,29 @@ private func storeWith(_ records: [MeetingRecord]) -> InMemoryMeetingStore {
     #expect(vm.selectedRecord == nil)
     #expect(vm.summaries.isEmpty)
 }
+
+@MainActor
+@Test func historyVM_editLine_overCap_doesNotEvictEditedMeeting() {
+    var limit = 0
+    let store = InMemoryMeetingStore(sizeLimitMBProvider: { limit })
+    let big = String(repeating: "слово ", count: 200_000)      // ~2 MB encoded each
+    let old = recordAt(daysAgo: 5, entries: [sampleEntry(.peer, big)])
+    let new = recordAt(daysAgo: 1, entries: [sampleEntry(.peer, big)])
+    store.save(old); store.save(new)                            // limit 0 → both kept
+    limit = 1                                                   // now over a 1 MB cap
+    let vm = MeetingHistoryViewModel(store: store)
+    vm.selectedID = old.id                                      // edit the OLD (non-newest) meeting
+    let entryID = vm.selectedRecord!.entries.first!.id
+    vm.editLine(entryID, newText: "Исправлено")
+    #expect(store.list().contains { $0.id == old.id })          // not evicted by the edit
+    #expect((try? store.load(old.id))?.entries.first?.translatedText == "Исправлено")
+}
+
+@MainActor
+@Test func historyVM_editLine_emptyText_isNoOp() {
+    let e1 = sampleEntry(.peer, "Оригинал")
+    let vm = MeetingHistoryViewModel(store: storeWith([recordAt(daysAgo: 1, entries: [e1])]))
+    vm.editLine(e1.id, newText: "   ")
+    #expect(vm.selectedRecord?.entries.first?.translatedText == "Оригинал")
+    #expect(vm.selectedRecord?.entries.first?.edited == false)
+}

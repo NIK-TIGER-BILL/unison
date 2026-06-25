@@ -61,16 +61,18 @@ public final class MeetingHistoryViewModel {
     public func deleteLine(_ entryID: UUID) {
         guard var rec = selectedRecord else { return }
         rec.entries.removeAll { $0.id == entryID }
-        store.save(rec)
+        store.update(rec)
         reload()
     }
 
     public func editLine(_ entryID: UUID, newText: String) {
-        guard var rec = selectedRecord,
+        let trimmed = newText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              var rec = selectedRecord,
               let i = rec.entries.firstIndex(where: { $0.id == entryID }) else { return }
-        rec.entries[i].translatedText = newText
+        rec.entries[i].translatedText = trimmed
         rec.entries[i].edited = true
-        store.save(rec)
+        store.update(rec)
         reload()
     }
 
