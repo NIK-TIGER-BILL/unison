@@ -70,7 +70,11 @@ public final class MeetingHistoryViewModel {
         guard !trimmed.isEmpty,
               var rec = selectedRecord,
               let i = rec.entries.firstIndex(where: { $0.id == entryID }) else { return }
-        rec.entries[i].translatedText = trimmed
+        if rec.entries[i].speaker == .me {
+            rec.entries[i].originalText = trimmed
+        } else {
+            rec.entries[i].translatedText = trimmed
+        }
         rec.entries[i].edited = true
         store.update(rec)
         reload()

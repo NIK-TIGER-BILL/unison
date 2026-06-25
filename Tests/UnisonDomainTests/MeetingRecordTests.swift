@@ -54,3 +54,10 @@ import Testing
     let decoded: MeetingSummary = try encodeDecode(summary)
     #expect(decoded == summary)
 }
+
+@Test func meetingSummary_preview_meFirst_usesOriginalReadingField() {
+    let e = TranscriptEntry(id: UUID(), speaker: .me, originalText: "Моя реплика", translatedText: "My line",
+                            sourceLanguage: nil, targetLanguage: .en, timestamp: Date(timeIntervalSince1970: 1))
+    let s = MeetingSummary(record: sampleRecord(entries: [e]), sizeBytes: 0)
+    #expect(s.preview == "Моя реплика")
+}

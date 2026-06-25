@@ -125,7 +125,8 @@ public struct MeetingSummary: Identifiable, Sendable, Codable, Equatable {
 
     static func previewText(from entries: [TranscriptEntry], maxLength: Int = 80) -> String {
         guard let first = entries.first else { return "" }
-        let text = first.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = first.speaker == .me ? (first.originalText ?? first.translatedText) : first.translatedText
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.count <= maxLength ? text : String(text.prefix(maxLength)) + "…"
     }
 }

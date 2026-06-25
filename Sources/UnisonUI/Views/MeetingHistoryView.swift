@@ -208,6 +208,17 @@ private struct MeetingLineRow: View {
     @SwiftUI.State private var isEditing = false
     @SwiftUI.State private var draft = ""
 
+    /// The user's-language line shown big: own original for `.me`,
+    /// translation for `.peer` — same as the live transcript.
+    private var primaryText: String {
+        entry.speaker == .me ? (entry.originalText ?? entry.translatedText) : entry.translatedText
+    }
+
+    /// The other-language counterpart shown small.
+    private var secondaryText: String? {
+        entry.speaker == .me ? entry.translatedText : entry.originalText
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
@@ -219,7 +230,7 @@ private struct MeetingLineRow: View {
                 }
                 Spacer()
                 if !isEditing {
-                    Button { draft = entry.translatedText; isEditing = true } label: {
+                    Button { draft = primaryText; isEditing = true } label: {
                         Image(systemName: "pencil")
                     }.buttonStyle(.borderless).help("Изменить реплику")
                         .accessibilityLabel("Изменить реплику")
@@ -236,12 +247,12 @@ private struct MeetingLineRow: View {
                     Button("Отмена") { isEditing = false }
                 }
             } else {
-                Text(entry.translatedText)
+                Text(primaryText)
                     .font(.system(size: 14))
                     .foregroundStyle(.primary)
                     .textSelection(.enabled)
-                if let original = entry.originalText, !original.isEmpty {
-                    Text(original)
+                if let secondary = secondaryText, !secondary.isEmpty {
+                    Text(secondary)
                         .font(.system(size: 12))
                         .italic()
                         .foregroundStyle(.tertiary)

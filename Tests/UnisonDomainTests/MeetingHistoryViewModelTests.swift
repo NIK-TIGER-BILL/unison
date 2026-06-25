@@ -170,3 +170,15 @@ private func storeWith(_ records: [MeetingRecord]) -> InMemoryMeetingStore {
     #expect(vm.summaries.isEmpty)
     #expect(vm.isEmptyArchive == false)   // "no search results" ≠ "no archive"
 }
+
+@MainActor
+@Test func historyVM_editLine_meSpeaker_editsOriginalReadingField() {
+    let e = TranscriptEntry(id: UUID(), speaker: .me, originalText: "Привет", translatedText: "Hello",
+                            sourceLanguage: nil, targetLanguage: .en, timestamp: Date(timeIntervalSince1970: 1))
+    let vm = MeetingHistoryViewModel(store: storeWith([recordAt(daysAgo: 1, entries: [e])]))
+    vm.editLine(e.id, newText: "Здорово")
+    let edited = vm.selectedRecord?.entries.first
+    #expect(edited?.originalText == "Здорово")   // .me edits the reading (original) field
+    #expect(edited?.translatedText == "Hello")    // counterpart untouched
+    #expect(edited?.edited == true)
+}
