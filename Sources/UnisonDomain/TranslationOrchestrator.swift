@@ -23,8 +23,18 @@ public final class TranslationOrchestrator {
     public private(set) var state: SessionState = .idle {
         didSet {
             Self.log.info("state \(String(describing: oldValue)) → \(String(describing: self.state))")
+            if let m = self.state.activeMode, let s = self.state.sessionStartedAt {
+                self.pendingArchiveMeta = (m, s)
+            }
         }
     }
+
+    /// Mode + start time of the most recent active session. Captured in the
+    /// `state` observer whenever the state carries them, and retained across
+    /// a terminal `.error` (whose `activeMode`/`sessionStartedAt` are nil) so
+    /// an error-ended session is still archived on stop/quit. Cleared after
+    /// the session is archived.
+    private var pendingArchiveMeta: (mode: SessionMode, startedAt: Date)?
 
     /// Orthogonal QoS dimension published alongside `state`. UI binds
     /// to this for the per-stream status indicator (popover dot, pill
@@ -103,6 +113,7 @@ public final class TranslationOrchestrator {
     /// domain layer; production wires the `NWPathMonitor`-backed
     /// `NetworkMonitor` from `UnisonSystem`.
     private let networkMonitor: any NetworkPathMonitoring
+    private let meetingStore: any MeetingStore
     /// Task draining `networkMonitor.statusStream`. Spawned in `start`,
     /// cancelled in `stopAllStreams` so a stopped orchestrator doesn't
     /// keep observing the network.
@@ -235,7 +246,8 @@ public final class TranslationOrchestrator {
         deviceRegistry: any AudioDeviceRegistry,
         clock: any Clock,
         transformer: any AudioFormatTransformer,
-        networkMonitor: any NetworkPathMonitoring
+        networkMonitor: any NetworkPathMonitoring,
+        meetingStore: any MeetingStore = InMemoryMeetingStore()
     ) {
         self.transcript = TranscriptStore()
         self.micCapture = micCapture
@@ -248,6 +260,7 @@ public final class TranslationOrchestrator {
         self.clock = clock
         self.transformer = transformer
         self.networkMonitor = networkMonitor
+        self.meetingStore = meetingStore
     }
 
     public func start(mode: SessionMode, languages: LanguagePair, settings: Settings = .default) async {
@@ -1339,6 +1352,37 @@ public final class TranslationOrchestrator {
         // No-op when the env vars aren't set.
         WireDumper.shared.close()
         WireDumper.sent.close()
+        archiveSession(mode: pendingArchiveMeta?.mode, startedAt: pendingArchiveMeta?.startedAt,
+                       enabled: currentSettings.saveHistoryEnabled)
+        pendingArchiveMeta = nil
+    }
+
+    /// Persist the just-ended session to the meeting archive. Internal so
+    /// tests can drive it directly. No-op for `.test`, empty transcripts,
+    /// or when history saving is disabled. Does NOT clear the transcript —
+    /// the live view keeps showing it until the next `start()`.
+    func archiveSession(mode: SessionMode?, startedAt: Date?, enabled: Bool) {
+        guard enabled, let mode, mode != .test, let startedAt,
+              !transcript.entries.isEmpty else { return }
+        let record = MeetingRecord(
+            id: UUID(), title: nil,
+            startedAt: startedAt, endedAt: clock.now(),
+            mode: mode,
+            languagePair: transcript.currentLanguagePair ?? .default,
+            entries: transcript.entries)
+        meetingStore.save(record)
+    }
+
+    /// Synchronous archive of the currently-active session. Safe to call
+    /// from `applicationWillTerminate` (no `await`). No-op when idle (the
+    /// `archiveSession` guard skips when `activeMode`/`startedAt` are nil).
+    /// Sources from `pendingArchiveMeta` so sessions that ended in a
+    /// terminal `.error` (whose `activeMode`/`sessionStartedAt` are nil)
+    /// are still archived on quit.
+    public func archiveActiveSession() {
+        archiveSession(mode: pendingArchiveMeta?.mode, startedAt: pendingArchiveMeta?.startedAt,
+                       enabled: currentSettings.saveHistoryEnabled)
+        pendingArchiveMeta = nil
     }
 
     /// How long `stopAllStreams()` waits on the off-main CoreAudio HAL
@@ -1390,6 +1434,15 @@ public final class TranslationOrchestrator {
 
     public func updateOriginalMixVolume(_ v: Float) {
         outputMixer.setOriginalGain(min(max(v, 0), 1))
+    }
+
+    /// Live-update whether the active session will be archived on
+    /// stop/quit. Mirrors how `originalMixVolume` is propagated — without
+    /// this, toggling "save history" off mid-session wouldn't take effect
+    /// until the next `start()`, so the in-flight session would still be
+    /// archived against the user's intent.
+    public func updateSaveHistoryEnabled(_ enabled: Bool) {
+        currentSettings.saveHistoryEnabled = enabled
     }
 
     /// Read per-speaker connectivity health for the diagnostic snapshot.

@@ -35,6 +35,10 @@ public enum UnisonForceState: String, Sendable {
     /// likely place to find lingering Tasks, audio engine that didn't
     /// release its device, half-closed WS streams, etc.).
     case startStopStart = "start-stop-start"
+    /// Seed the meeting archive with synthetic records (in-memory — never
+    /// touches the on-disk archive) and open the History window at launch.
+    /// Used by the Tart screenshot harness to capture the archive surface.
+    case historyDemo = "history-demo"
 
     /// Resolve from `ProcessInfo.processInfo.environment["UNISON_FORCE_STATE"]`.
     public static var current: UnisonForceState? {
@@ -52,6 +56,8 @@ public final class Composition {
     public let onboardingVM: OnboardingViewModel
     public let settingsVM: SettingsViewModel
     public let transcriptVM: TranscriptViewModel
+    public let meetingStore: any MeetingStore
+    public let meetingHistoryVM: MeetingHistoryViewModel
     public let permissions: any PermissionsService
     public let installer: any BlackHoleInstaller
     public let keychain: any KeychainService
@@ -160,6 +166,7 @@ public final class Composition {
         self.virtualMicPlayer = bhPlayer
         self.outputMixer = mixer
 
+        self.meetingStore = Self.makeMeetingStore(force: force, settingsStore: settingsStoreRef)
         self.orchestrator = TranslationOrchestrator(
             micCapture: mic,
             peerCapture: peerCap,
@@ -170,7 +177,8 @@ public final class Composition {
             deviceRegistry: registry,
             clock: SystemClock(),
             transformer: ResamplerAdapter(),
-            networkMonitor: NetworkMonitor()
+            networkMonitor: NetworkMonitor(),
+            meetingStore: self.meetingStore
         )
 
         let initialSettings = settingsStore.load()
@@ -205,16 +213,19 @@ public final class Composition {
                 // next start() (the popover picker is .disabled while
                 // active to make that contract obvious).
                 orch.updateOriginalMixVolume(s.originalMixVolume)
+                orch.updateSaveHistoryEnabled(s.saveHistoryEnabled)
             },
             keychain: keychain,
             installer: installer,
             hotkeyStore: UserDefaultsHotkeyStorage(),
-            togglesStore: UserDefaultsToggleStorage()
+            togglesStore: UserDefaultsToggleStorage(),
+            meetingStore: self.meetingStore
         )
         self.transcriptVM = TranscriptViewModel(
             store: orchestrator.transcript,
             orchestrator: orchestrator
         )
+        self.meetingHistoryVM = MeetingHistoryViewModel(store: self.meetingStore)
         // Wire the live-typing-dots pipeline. Without this, the bubble
         // group's `liveEntryId` is always nil → the animated dots that
         // mark "this bubble is still being received" never appear in
@@ -272,6 +283,7 @@ public final class Composition {
                 viewModel: self.transcriptVM
             )
         }
+        meetingStore.enforceSizeLimit()
     }
 
     /// Cross-surface synchronisation between the three view-models.
@@ -326,7 +338,8 @@ extension Composition {
             || force == .transcriptDemo
             || force == .popoverOpen
             || force == .startTranslation
-            || force == .startStopStart {
+            || force == .startStopStart
+            || force == .historyDemo {
             print("[Unison] UNISON_FORCE_STATE=\(force.rawValue) — using pre-installed MockBlackHoleInstaller")
             return MockBlackHoleInstaller(preInstalled: true)
         }
@@ -360,7 +373,8 @@ extension Composition {
             || force == .transcriptDemo
             || force == .popoverOpen
             || force == .startTranslation
-            || force == .startStopStart {
+            || force == .startStopStart
+            || force == .historyDemo {
             return ForcedGrantedPermissions()
         }
         return MacPermissions()
@@ -373,7 +387,8 @@ extension Composition {
     ///   only used to satisfy `validateAPIKey` (`sk-` + 20 chars).
     /// - Otherwise the real `MacKeychain` (writes to the macOS Keychain).
     static func makeKeychain(force: UnisonForceState? = UnisonForceState.current) -> any KeychainService {
-        if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen {
+        if force == .onboardingDone || force == .transcriptDemo || force == .popoverOpen
+            || force == .historyDemo {
             return InMemoryKeychain(seeded: "sk-unison-vm-screenshot-placeholder-key")
         }
         // Everything else — production launches AND the
@@ -385,6 +400,62 @@ extension Composition {
         // production `MacKeychain` resolves correctly; a missing or
         // revoked key keeps the auth-failed path observable.
         return MacKeychain()
+    }
+
+    /// Pick the meeting store: an in-memory demo store for the
+    /// `history-demo` screenshot harness, else the real file-backed store.
+    static func makeMeetingStore(force: UnisonForceState?, settingsStore: SettingsStore) -> any MeetingStore {
+        if force == .historyDemo { return makeDemoMeetingStore() }
+        return FileMeetingStore.applicationSupport(
+            sizeLimitMBProvider: { settingsStore.load().historySizeLimitMB })
+    }
+
+    /// In-memory `MeetingStore` seeded with synthetic meetings for the
+    /// `UNISON_FORCE_STATE=history-demo` screenshot harness. Custom titles
+    /// only (no auto-title) so the captured surface is timezone-independent.
+    static func makeDemoMeetingStore() -> InMemoryMeetingStore {
+        let store = InMemoryMeetingStore()
+        func entry(_ s: Speaker, _ orig: String, _ trans: String, _ at: TimeInterval) -> TranscriptEntry {
+            TranscriptEntry(id: UUID(), speaker: s, originalText: orig, translatedText: trans,
+                            sourceLanguage: nil, targetLanguage: .ru,
+                            timestamp: Date(timeIntervalSince1970: at))
+        }
+        let base: TimeInterval = 1_718_000_000
+        store.save(MeetingRecord(
+            id: UUID(), title: "Синк с командой",
+            startedAt: Date(timeIntervalSince1970: base),
+            endedAt: Date(timeIntervalSince1970: base + 1920),
+            mode: .call, languagePair: LanguagePair(mine: .ru, peer: .en),
+            entries: [
+                entry(.peer, "Let's start with the deployment status — are we on track for Friday?",
+                      "Давайте начнём со статуса деплоя — успеваем к пятнице?", base + 60),
+                entry(.me, "Бэкенд готов, фронтенд закроем в четверг.",
+                      "Backend is done, we'll wrap the frontend on Thursday.", base + 75),
+                entry(.peer, "Great. I'll give QA a heads-up to free up a slot.",
+                      "Отлично. Я предупрежу QA, чтобы освободили слот.", base + 92)
+            ],
+            pinned: true))
+        store.save(MeetingRecord(
+            id: UUID(), title: "Интервью — кандидат",
+            startedAt: Date(timeIntervalSince1970: base - 86_400),
+            endedAt: Date(timeIntervalSince1970: base - 86_400 + 3060),
+            mode: .listen, languagePair: LanguagePair(mine: .ru, peer: .en),
+            entries: [
+                entry(.peer, "Tell me about a system you designed end to end.",
+                      "Расскажите о системе, которую вы спроектировали целиком.", base - 86_400 + 30),
+                entry(.peer, "I led the migration to an event-driven pipeline.",
+                      "Я вёл миграцию на событийный пайплайн.", base - 86_400 + 70)
+            ]))
+        store.save(MeetingRecord(
+            id: UUID(), title: "Дейли-стендап",
+            startedAt: Date(timeIntervalSince1970: base - 3 * 86_400),
+            endedAt: Date(timeIntervalSince1970: base - 3 * 86_400 + 900),
+            mode: .call, languagePair: LanguagePair(mine: .ru, peer: .en),
+            entries: [
+                entry(.me, "Вчера закрыл ретеншн, сегодня — ревью PR.",
+                      "Yesterday I finished retention, today PR review.", base - 3 * 86_400 + 20)
+            ]))
+        return store
     }
 
     /// Seed the transcript store with a handful of bubbles mirroring the
