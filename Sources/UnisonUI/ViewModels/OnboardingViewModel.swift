@@ -73,7 +73,12 @@ public final class OnboardingViewModel {
     /// Sub-state for the BlackHole 2ch install sub-task. Same rationale.
     public private(set) var blackHoleInstallStatus: OnboardingStepStatus = .pending
 
-    /// Mutable draft for the OpenAI key input. The view binds directly.
+    /// The provider whose key the user is currently entering.
+    /// Drives validation, placeholder, "Получить ключ" URL, and keychain slot.
+    /// Default is `.openAIRealtime` — preserves previous first-run behaviour.
+    public var selectedModel: TranslationModel = .openAIRealtime
+
+    /// Mutable draft for the API key input. The view binds directly.
     /// Cleared on successful save.
     public var apiKeyDraft: String = ""
 
@@ -135,8 +140,7 @@ public final class OnboardingViewModel {
         }
 
         let micDone = permissions.currentStatus(.microphone) == .granted
-        // TODO(task-10): use the selected model instead of .openAIRealtime
-        let keyDone = keychain.loadAPIKey(for: .openAIRealtime)?.isEmpty == false
+        let keyDone = keychain.loadAPIKey(for: selectedModel)?.isEmpty == false
         steps = [
             OnboardingStep(kind: .blackHole, isDone: bhDone),
             OnboardingStep(kind: .microphone, isDone: micDone),
@@ -183,23 +187,29 @@ public final class OnboardingViewModel {
     }
 
     /// Pure key validator — exposed `nonisolated` so tests can call
-    /// without an actor hop. Matches the HTML reference
-    /// (`startsWith('sk-') && length >= 20`).
-    public nonisolated static func validateAPIKey(_ key: String) -> Bool {
+    /// without an actor hop. Validates against the accepted prefixes of
+    /// the given model and requires at least 20 characters.
+    public nonisolated static func validateAPIKey(_ key: String, for model: TranslationModel) -> Bool {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.hasPrefix("sk-") && trimmed.count >= 20
+        return model.acceptedKeyPrefixes.contains(where: trimmed.hasPrefix) && trimmed.count >= 20
     }
 
-    /// Instance helper that validates the current draft.
+    /// Backward-compatible single-arg overload (OpenAI only). Kept so
+    /// existing call sites outside this file compile without changes.
+    public nonisolated static func validateAPIKey(_ key: String) -> Bool {
+        validateAPIKey(key, for: .openAIRealtime)
+    }
+
+    /// Instance helper that validates the current draft against the
+    /// currently selected model.
     public func validateAPIKey() -> Bool {
-        Self.validateAPIKey(apiKeyDraft)
+        Self.validateAPIKey(apiKeyDraft, for: selectedModel)
     }
 
-    /// Save-button gate: the Save button is enabled only when the draft
-    /// passes validation. The draft must be non-empty and start with
-    /// `sk-`.
+    /// Save-button gate: enabled only when the draft passes validation
+    /// for the currently selected model.
     public var canSaveKey: Bool {
-        validateAPIKey()
+        Self.validateAPIKey(apiKeyDraft, for: selectedModel)
     }
 
     // MARK: - Step actions
@@ -322,25 +332,33 @@ public final class OnboardingViewModel {
         refresh()
     }
 
-    /// Validates and persists the OpenAI key from the draft. On invalid
-    /// input the card flips to the error state with the validation
-    /// message from the design (sk- prefix + 20 chars). On Keychain
-    /// failure we use a generic message.
+    /// Validates and persists the API key from the draft. On invalid
+    /// input the card flips to the error state. On Keychain failure we
+    /// use a generic message.
     public func saveAPIKey() {
         let trimmed = apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard Self.validateAPIKey(trimmed) else {
-            status[.apiKey] = .error("Ключ должен начинаться с sk- и быть длиннее 20 символов.")
+        guard Self.validateAPIKey(trimmed, for: selectedModel) else {
+            status[.apiKey] = .error("Ключ не похож на ключ выбранного провайдера.")
             return
         }
         do {
-            // TODO(task-10): use the selected model instead of .openAIRealtime
-            try keychain.saveAPIKey(trimmed, for: .openAIRealtime)
+            try keychain.saveAPIKey(trimmed, for: selectedModel)
             apiKeyDraft = ""
             status[.apiKey] = .done
             refresh()
         } catch {
             status[.apiKey] = .error("Не удалось сохранить ключ в Keychain.")
         }
+    }
+
+    /// Switch the selected provider. Clears any inline validation error
+    /// on the API-key card and re-evaluates the readiness gate so the
+    /// card immediately reflects whether a key is already stored for the
+    /// new provider.
+    public func setSelectedModel(_ m: TranslationModel) {
+        selectedModel = m
+        clearError(for: .apiKey)
+        refresh()
     }
 
     /// Clears any error for the given step. Used when the user edits
@@ -371,10 +389,12 @@ public final class OnboardingViewModel {
         }
     }
 
-    /// External URL for the OpenAI API-keys page (shown as
-    /// `Получить ключ ↗` under the secret input).
+    /// External URL for the OpenAI API-keys page. Kept as a static
+    /// alias so existing call sites outside this file compile without
+    /// changes. The canonical source is
+    /// `TranslationModel.openAIRealtime.getKeyURL`.
     public nonisolated static var openAIKeysURL: URL {
-        URL(string: "https://platform.openai.com/api-keys")!
+        TranslationModel.openAIRealtime.getKeyURL
     }
 
     /// External URL for the BlackHole manual install page. Surfaced as

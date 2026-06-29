@@ -341,7 +341,57 @@ func onboarding_onCompleted_firesExactlyOnce() async {
 
 @Test
 func onboarding_openAIKeysURL_pointsToPlatform() {
-    #expect(OnboardingViewModel.openAIKeysURL.absoluteString == "https://platform.openai.com/api-keys")
+    // openAIKeysURL is now an alias kept for call-site compatibility;
+    // the canonical source of truth is TranslationModel.openAIRealtime.getKeyURL.
+    #expect(TranslationModel.openAIRealtime.getKeyURL.absoluteString == "https://platform.openai.com/api-keys")
+}
+
+// MARK: - Task 10: engine-aware key validation
+
+@MainActor
+@Test func validatesKeyAgainstSelectedModelPrefix() {
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: MockInstaller(),
+        keychain: MockKeychain()
+    )
+    vm.selectedModel = .geminiLiveTranslate
+    vm.apiKeyDraft = "AQ.abcdefghij1234567890"
+    #expect(vm.canSaveKey)                        // AQ. accepted for Gemini
+    vm.apiKeyDraft = "sk-abcdefghij1234567890"
+    #expect(!vm.canSaveKey)                       // sk- is not a Gemini key
+}
+
+@MainActor
+@Test func savesKeyToSelectedModelSlot() {
+    let kc = MockKeychain()
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: MockInstaller(),
+        keychain: kc
+    )
+    vm.selectedModel = .geminiLiveTranslate
+    vm.apiKeyDraft = "AQ.abcdefghij1234567890"
+    vm.saveAPIKey()
+    #expect(kc.loadAPIKey(for: .geminiLiveTranslate) == "AQ.abcdefghij1234567890")
+    #expect(kc.loadAPIKey(for: .openAIRealtime) == nil)
+}
+
+@MainActor
+@Test func setSelectedModel_clearsErrorAndRefreshes() {
+    let kc = MockKeychain()
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: MockInstaller(),
+        keychain: kc
+    )
+    // Seed OpenAI key so step is done, then prime an error on .apiKey
+    vm.apiKeyDraft = "bad"
+    vm.saveAPIKey()
+    #expect(vm.status[.apiKey]?.errorMessage != nil)
+    // Switching provider must clear the error.
+    vm.setSelectedModel(.geminiLiveTranslate)
+    #expect(vm.status[.apiKey]?.errorMessage == nil)
 }
 
 @Test
