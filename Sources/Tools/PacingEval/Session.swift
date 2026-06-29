@@ -8,6 +8,7 @@ struct ArrivalRecord {
     /// Wall-clock seconds since `Session.start`'s `t_session_start`.
     let t: TimeInterval
     /// Decoded PCM byte count (24kHz int16 → 2 bytes per sample).
+    /// NOTE: model output is always 24 kHz regardless of provider.
     let bytes: Int
     /// Decoded int16 PCM data (24kHz mono). Stored so we can compute
     /// RMS per chunk and assemble a WAV of the model's raw output for
@@ -15,6 +16,7 @@ struct ArrivalRecord {
     /// ~500 KB - 1 MB per 20 s session.
     let pcm: Data
     /// Audio duration this chunk represents.
+    /// Model output is always 24 kHz, so this constant is correct for both providers.
     var audioDurationSec: Double { Double(bytes) / 2.0 / 24_000.0 }
 
     /// Root-mean-square amplitude in `[0, 1]`. int16 normalised to ±1
@@ -39,13 +41,18 @@ struct ArrivalRecord {
 /// chunks at real-time pace, records every output delta with a precise
 /// arrival timestamp, returns the collected timeline.
 ///
-/// The same `OpenAIRealtimeStream` the production app uses — so any
+/// The production stream implementation is used directly — so any
 /// behaviour we observe here (arrival cadence, burst patterns) is
 /// representative of what the app sees.
 struct Session {
     let apiKey: String
     let targetLang: Language
     let chunks: AudioChunkIterator
+    /// Which translation provider to use. Default `.openAIRealtime`.
+    let provider: TranslationModel
+    /// Wire sample rate for audio sent to the stream. Must match
+    /// `stream.inputWireSampleRate`: 24 kHz for OpenAI, 16 kHz for Gemini.
+    let wireSampleRate: Int
     /// Wall-clock seconds between successive `send` calls. Default 0.1
     /// (100 ms) matches the production mic-capture cadence; the input
     /// chunks themselves are expected to be 100 ms each, so this gives
@@ -71,15 +78,26 @@ struct Session {
     }
 
     func run() async throws -> Result {
-        let wsClient = URLSessionWSClient()
-        let stream = OpenAIRealtimeStream(
-            apiKey: apiKey,
-            client: wsClient,
-            clock: SystemClock(),
-            speaker: .peer
-        )
+        let clock = SystemClock()
+        let stream: any TranslationStream
+        switch provider {
+        case .geminiLiveTranslate:
+            stream = GeminiLiveTranslateStream(
+                apiKey: apiKey,
+                client: URLSessionWSClient(),
+                clock: clock,
+                speaker: .peer
+            )
+        case .openAIRealtime:
+            stream = OpenAIRealtimeStream(
+                apiKey: apiKey,
+                client: URLSessionWSClient(),
+                clock: clock,
+                speaker: .peer
+            )
+        }
 
-        print("[session] connecting to gpt-realtime-translate, target=\(targetLang.rawValue)…")
+        print("[session] connecting to \(provider.displayName), target=\(targetLang.rawValue)…")
         try await stream.connect(target: targetLang)
         print("[session] connected; first deltas should arrive shortly")
 
@@ -102,13 +120,16 @@ struct Session {
         }
 
         // Send task — streams input chunks at chunkInterval cadence.
+        // Frames are already at `wireSampleRate` (AudioReader decoded to that
+        // rate). We tag each frame with the wire rate so the stream (and any
+        // future diagnostics) knows the sample rate of the PCM it receives.
         var sentChunks = 0
         var totalSentBytes = 0
         var lastSendTick = Date()
         for chunkBytes in chunks {
             let frame = AudioFrame(
                 pcm: chunkBytes,
-                sampleRate: 24_000,
+                sampleRate: wireSampleRate,
                 channels: 1,
                 format: .int16
             )
@@ -135,7 +156,8 @@ struct Session {
             }
         }
 
-        let inputDurationSec = Double(totalSentBytes) / 2.0 / 24_000.0
+        // int16 mono: 2 bytes per sample, divided by wire rate gives wall-clock input seconds.
+        let inputDurationSec = Double(totalSentBytes) / 2.0 / Double(wireSampleRate)
         print(String(format: "[session] input streaming finished — %.1fs of audio; draining for %.1fs", inputDurationSec, drainTimeoutSec))
         try? await Task.sleep(nanoseconds: UInt64(drainTimeoutSec * 1_000_000_000))
 

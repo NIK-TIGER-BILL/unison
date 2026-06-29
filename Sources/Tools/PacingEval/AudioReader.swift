@@ -1,23 +1,31 @@
 import Foundation
 import AVFoundation
 
-/// Reads a WAV/AIFF/M4A file and converts it to 24 kHz int16 mono PCM
-/// — the wire format OpenAI's Realtime Translate API expects for
-/// `input_audio_buffer.append`. Splits the result into fixed-size chunks
-/// matching the real-time wall-clock pace at which the production
-/// client streams audio (100 ms per chunk by default).
+/// Reads a WAV/AIFF/M4A file and converts it to the requested int16 mono
+/// PCM sample rate — the wire format expected by the translation engine.
+/// OpenAI Realtime expects 24 kHz; Gemini Live expects 16 kHz.
+/// Splits the result into fixed-size chunks matching the real-time wall-clock
+/// pace at which the production client streams audio (100 ms per chunk by default).
 struct AudioReader {
     let url: URL
     /// Per-chunk size in audio milliseconds. Default 100 ms matches the
     /// production client's mic-capture cadence.
     let chunkMs: Int
+    /// Target wire sample rate. Default 24 kHz (OpenAI). Use 16 kHz for Gemini.
+    let targetSampleRate: Int
 
-    /// 24 kHz int16 mono PCM as one contiguous Data, plus chunk count
-    /// for the requested chunkMs.
+    init(url: URL, chunkMs: Int, targetSampleRate: Int = 24_000) {
+        self.url = url
+        self.chunkMs = chunkMs
+        self.targetSampleRate = targetSampleRate
+    }
+
+    /// int16 mono PCM at `targetSampleRate` as one contiguous Data, plus chunk
+    /// count for the requested chunkMs.
     struct Decoded {
         let pcm: Data
         let totalSamples: Int
-        let sampleRate: Int = 24_000
+        let sampleRate: Int
         let chunkSizeBytes: Int
         var totalDurationSec: Double { Double(totalSamples) / Double(sampleRate) }
         var chunkCount: Int { (pcm.count + chunkSizeBytes - 1) / chunkSizeBytes }
@@ -29,7 +37,7 @@ struct AudioReader {
 
         let outputFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
-            sampleRate: 24_000,
+            sampleRate: Double(targetSampleRate),
             channels: 1,
             interleaved: true
         )!
@@ -45,7 +53,7 @@ struct AudioReader {
 
         // Worst-case output frame count: ratio + a few frames slack.
         let outputCapacity = AVAudioFrameCount(
-            Double(inputBuffer.frameLength) * 24_000.0 / inputFormat.sampleRate
+            Double(inputBuffer.frameLength) * Double(targetSampleRate) / inputFormat.sampleRate
         ) + 256
         guard let outputBuffer = AVAudioPCMBuffer(
             pcmFormat: outputFormat,
@@ -81,12 +89,13 @@ struct AudioReader {
             memcpy(dst.baseAddress!, src, bytes)
         }
 
-        // chunkMs → samples → bytes
-        let samplesPerChunk = (chunkMs * 24_000) / 1_000
+        // chunkMs → samples → bytes (at the decoded wire sample rate)
+        let samplesPerChunk = (chunkMs * targetSampleRate) / 1_000
         let bytesPerChunk = samplesPerChunk * 2
         return Decoded(
             pcm: pcm,
             totalSamples: frames,
+            sampleRate: targetSampleRate,
             chunkSizeBytes: bytesPerChunk
         )
     }
@@ -135,13 +144,14 @@ private final class ConvertInputState: @unchecked Sendable {
 
 enum PacingEvalError: Error, CustomStringConvertible {
     case audioRead(String)
-    case missingApiKey
+    /// `envVar` is the name of the missing environment variable (e.g. OPENAI_API_KEY).
+    case missingApiKey(String)
     case sessionFailure(String)
 
     var description: String {
         switch self {
         case .audioRead(let s): return "audio read failed: \(s)"
-        case .missingApiKey: return "OPENAI_API_KEY env var not set"
+        case .missingApiKey(let envVar): return "\(envVar) env var not set"
         case .sessionFailure(let s): return "session failure: \(s)"
         }
     }
