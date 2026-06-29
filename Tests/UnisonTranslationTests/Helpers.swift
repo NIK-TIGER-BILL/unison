@@ -43,6 +43,20 @@ func decodeGeminiServerEvent(_ json: String) throws -> GeminiServerEvent {
     return try JSONDecoder().decode(GeminiServerEvent.self, from: data)
 }
 
+/// Structural check on a Gemini setup payload: the transcription configs must
+/// be TOP-LEVEL `setup` fields, NOT nested in `generationConfig` — the live
+/// API rejects the nested form with a 1007 "Unknown name … at
+/// 'setup.generation_config'" close.
+func geminiSetupHasTranscriptionAtSetupLevel(_ json: String) -> Bool {
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+          let setup = obj["setup"] as? [String: Any] else { return false }
+    let gc = setup["generationConfig"] as? [String: Any]
+    return setup["inputAudioTranscription"] != nil
+        && setup["outputAudioTranscription"] != nil
+        && gc?["inputAudioTranscription"] == nil
+        && gc?["outputAudioTranscription"] == nil
+}
+
 struct GenericSendError: Error {}
 
 /// Clock whose `sleep` parks forever (until `releaseAll`). Lets tests

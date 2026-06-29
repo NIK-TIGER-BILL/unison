@@ -85,4 +85,20 @@ import UnisonDomain
         let second = await it.next()
         #expect(first?.entryId != second?.entryId)
     }
+
+    @Test func decodesAudioFromBinaryFrame() async throws {
+        // Gemini delivers serverContent as BINARY WebSocket frames (not text
+        // like OpenAI); handle(_:) must decode `.data` frames too, else the
+        // whole output stream is silently dropped.
+        let ws = FakeWSClient()
+        let stream = GeminiLiveTranslateStream(
+            apiKey: "AQ.k", client: ws, clock: SystemClock(), speaker: .peer)
+        try await stream.connect(target: .en)
+        let json = #"{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"data":"QUJD","mimeType":"audio/pcm;rate=24000"}}]}}}"#
+        ws.push(.data(Data(json.utf8)))
+        var iterator = stream.output.makeAsyncIterator()
+        let frame = await iterator.next()
+        #expect(frame?.sampleRate == 24_000)
+        #expect(frame?.format == .int16)
+    }
 }

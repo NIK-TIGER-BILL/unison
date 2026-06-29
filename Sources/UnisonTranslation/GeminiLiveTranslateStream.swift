@@ -100,9 +100,14 @@ public actor GeminiLiveTranslateStream: TranslationStream {
     }
 
     private func handle(message: WSMessage) async {
-        guard case .text(let str) = message,
-              let data = str.data(using: .utf8),
-              let event = try? JSONDecoder().decode(GeminiServerEvent.self, from: data) else { return }
+        // Gemini delivers serverContent as BINARY WebSocket frames (unlike
+        // OpenAI's text frames), so accept both.
+        let data: Data
+        switch message {
+        case .text(let str): data = Data(str.utf8)
+        case .data(let d): data = d
+        }
+        guard let event = try? JSONDecoder().decode(GeminiServerEvent.self, from: data) else { return }
         switch event {
         case .setupComplete:
             break

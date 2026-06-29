@@ -13,6 +13,13 @@ import Testing
         #expect(json.contains("outputAudioTranscription"))
     }
 
+    @Test func setupPlacesTranscriptionAtSetupLevelNotInGenerationConfig() throws {
+        // Regression: the live API rejects inputAudioTranscription /
+        // outputAudioTranscription nested in generationConfig (1007 close).
+        let json = try encodeToJSONString(GeminiClientEvent.setup(.init(targetLanguage: "ru")))
+        #expect(geminiSetupHasTranscriptionAtSetupLevel(json))
+    }
+
     @Test func realtimeAudioEncodes16kMime() throws {
         let evt = GeminiClientEvent.realtimeAudio(base64: "QUJD")
         let json = try encodeToJSONString(evt)

@@ -30,20 +30,27 @@ public struct GeminiSetupPayload: Sendable {
         struct Empty: Encodable {}
         struct GenerationConfig: Encodable {
             let responseModalities: [String]
-            let inputAudioTranscription: Empty
-            let outputAudioTranscription: Empty
             let translationConfig: TranslationConfig
         }
-        struct Setup: Encodable { let model: String; let generationConfig: GenerationConfig }
+        // `inputAudioTranscription` / `outputAudioTranscription` are TOP-LEVEL
+        // `setup` fields (siblings of `model`/`generationConfig`), NOT nested
+        // inside `generationConfig` — the live API rejects them there with a
+        // 1007 "Unknown name … at 'setup.generation_config'" close.
+        struct Setup: Encodable {
+            let model: String
+            let generationConfig: GenerationConfig
+            let inputAudioTranscription: Empty
+            let outputAudioTranscription: Empty
+        }
         struct Envelope: Encodable { let setup: Setup }
         try Envelope(setup: .init(
             model: "models/gemini-3.5-live-translate-preview",
             generationConfig: .init(
                 responseModalities: ["AUDIO"],
-                inputAudioTranscription: .init(),
-                outputAudioTranscription: .init(),
                 translationConfig: .init(targetLanguageCode: targetLanguage)
-            )
+            ),
+            inputAudioTranscription: .init(),
+            outputAudioTranscription: .init()
         )).encode(to: encoder)
     }
 }
