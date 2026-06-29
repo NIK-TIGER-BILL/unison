@@ -45,12 +45,14 @@ public final class DiagnosticCollector {
         let bh2 = registry.findBlackHole2ch() != nil ? "present" : "missing"
 
         // Presence + length only — never the key itself.
+        // Use the active model from popoverVM.settings (the last-persisted
+        // settings are mirrored onto the popover VM by SettingsViewModel.onChange).
         let openAIKeyStatus: String = {
-            // TODO(task-8): report the active model's key status, not hardcoded .openAIRealtime
-            if let k = composition.keychain.loadAPIKey(for: .openAIRealtime), !k.isEmpty {
-                return "present (length \(k.count))"
+            let activeModel = composition.popoverVM.settings.translationModel
+            if let k = composition.keychain.loadAPIKey(for: activeModel), !k.isEmpty {
+                return "\(activeModel.rawValue) present (length \(k.count))"
             }
-            return "empty"
+            return "\(activeModel.rawValue) empty"
         }()
 
         let allLines = Self.readRecentLogLines(lookback: lookbackSeconds)

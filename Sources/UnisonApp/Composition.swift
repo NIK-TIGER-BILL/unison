@@ -115,18 +115,10 @@ public final class Composition {
         // `errSecItemNotFound`). Env passthrough also makes ad-hoc
         // smoke-testing trivial: `UNISON_API_KEY=... open Unison.app`.
         let kc = self.keychain
-        let envOverride = ProcessInfo.processInfo.environment["UNISON_API_KEY"]
-        let factory = OpenAIRealtimeStreamFactory(
-            apiKeyProvider: {
-                if let env = envOverride, !env.isEmpty {
-                    Self.bootLog.info("apiKey source=env UNISON_API_KEY length=\(env.count) prefix=\(Self.apiKeyPrefix(env))")
-                    return env
-                }
-                // TODO(task-8): resolve key for the selected model, not hardcoded .openAIRealtime
-                let stored = kc.loadAPIKey(for: .openAIRealtime) ?? ""
-                Self.bootLog.info("apiKey source=keychain length=\(stored.count) prefix=\(Self.apiKeyPrefix(stored))")
-                return stored
-            },
+        let store = self.settingsStore
+        let factory = ProviderAwareStreamFactory(
+            modelProvider: { store.load().translationModel },
+            apiKeyProvider: Self.makeAPIKeyProvider(keychain: kc),
             clock: SystemClock()
         )
 
@@ -187,14 +179,14 @@ public final class Composition {
             installer: installer,
             keychain: keychain
         )
-        let store = settingsStore
+        let settingsStoreForVM = settingsStore
         let popVM = self.popoverVM
         let orch = self.orchestrator
         self.settingsVM = SettingsViewModel(
             initial: initialSettings,
             deviceRegistry: registry,
             onChange: { s in
-                store.save(s)
+                settingsStoreForVM.save(s)
                 popVM.settings = s
                 // Live-propagate the settings that can be applied without
                 // restarting the session. Without this, dragging the
@@ -388,6 +380,34 @@ extension Composition {
         return MacKeychain()
     }
 
+    /// Build the per-engine API-key closure for `ProviderAwareStreamFactory`.
+    /// Checks engine-specific env vars first (UNISON_API_KEY for OpenAI,
+    /// UNISON_GEMINI_API_KEY for Gemini), then falls back to the keychain.
+    /// Returns a closure so the factory can capture `keychain` without
+    /// retaining `Composition` itself.
+    static func makeAPIKeyProvider(
+        keychain: any KeychainService
+    ) -> (TranslationModel) -> String {
+        return { model in
+            let env = ProcessInfo.processInfo.environment
+            switch model {
+            case .openAIRealtime:
+                if let k = env["UNISON_API_KEY"], !k.isEmpty {
+                    bootLog.info("apiKey source=env UNISON_API_KEY length=\(k.count) prefix=\(apiKeyPrefix(k))")
+                    return k
+                }
+            case .geminiLiveTranslate:
+                if let k = env["UNISON_GEMINI_API_KEY"], !k.isEmpty {
+                    bootLog.info("apiKey source=env UNISON_GEMINI_API_KEY length=\(k.count) prefix=\(apiKeyPrefix(k))")
+                    return k
+                }
+            }
+            let stored = keychain.loadAPIKey(for: model) ?? ""
+            bootLog.info("apiKey source=keychain model=\(model.rawValue) length=\(stored.count) prefix=\(apiKeyPrefix(stored))")
+            return stored
+        }
+    }
+
     /// Seed the transcript store with a handful of bubbles mirroring the
     /// design fixture (`design/transcript-final/index.html` MY_PHRASES /
     /// PEER_PHRASES). Used by `UNISON_FORCE_STATE=transcript-demo`. Note
@@ -500,17 +520,28 @@ final class SettingsStore: @unchecked Sendable {
     }
 }
 
-final class OpenAIRealtimeStreamFactory: TranslationStreamFactory, @unchecked Sendable {
-    private let apiKeyProvider: () -> String
+final class ProviderAwareStreamFactory: TranslationStreamFactory, @unchecked Sendable {
+    private let modelProvider: () -> TranslationModel
+    private let apiKeyProvider: (TranslationModel) -> String
     private let clock: any Clock
 
-    init(apiKeyProvider: @escaping () -> String, clock: any Clock) {
+    init(modelProvider: @escaping () -> TranslationModel,
+         apiKeyProvider: @escaping (TranslationModel) -> String,
+         clock: any Clock) {
+        self.modelProvider = modelProvider
         self.apiKeyProvider = apiKeyProvider
         self.clock = clock
     }
 
     func make(speaker: Speaker) -> any TranslationStream {
-        OpenAIRealtimeStream(apiKey: apiKeyProvider(), client: URLSessionWSClient(), clock: clock, speaker: speaker)
+        let model = modelProvider()
+        let key = apiKeyProvider(model)
+        switch model {
+        case .openAIRealtime:
+            return OpenAIRealtimeStream(apiKey: key, client: URLSessionWSClient(), clock: clock, speaker: speaker)
+        case .geminiLiveTranslate:
+            return GeminiLiveTranslateStream(apiKey: key, client: URLSessionWSClient(), clock: clock, speaker: speaker)
+        }
     }
 }
 
