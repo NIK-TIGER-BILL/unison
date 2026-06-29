@@ -8,7 +8,9 @@ import UnisonDomain
 // when test files only import `Testing`.
 
 func encodeToJSONString<T: Encodable>(_ value: T) throws -> String {
-    let data = try JSONEncoder().encode(value)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .withoutEscapingSlashes
+    let data = try encoder.encode(value)
     return String(data: data, encoding: .utf8) ?? ""
 }
 
@@ -34,6 +36,11 @@ func posixOperationCanceledError() -> Error {
         code: 89,
         userInfo: [NSLocalizedDescriptionKey: "Operation canceled"]
     )
+}
+
+func decodeGeminiServerEvent(_ json: String) throws -> GeminiServerEvent {
+    let data = json.data(using: .utf8)!
+    return try JSONDecoder().decode(GeminiServerEvent.self, from: data)
 }
 
 struct GenericSendError: Error {}
