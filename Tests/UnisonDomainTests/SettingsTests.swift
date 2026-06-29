@@ -92,3 +92,27 @@ import Foundation
     #expect(decoded.includedTapBundleIDs.isEmpty)
     #expect(decoded.excludedTapBundleIDs == ["com.spotify.client"])
 }
+
+@Suite struct SettingsTranslationModelTests {
+    @Test func defaultsToOpenAI() {
+        #expect(Settings.default.translationModel == .openAIRealtime)
+    }
+
+    @Test func roundTripsThroughCodable() throws {
+        var s = Settings.default
+        s.translationModel = .geminiLiveTranslate
+        let data = try JSONEncoder().encode(s)
+        let back = try JSONDecoder().decode(Settings.self, from: data)
+        #expect(back.translationModel == .geminiLiveTranslate)
+    }
+
+    @Test func legacyBlobWithoutFieldDecodesToOpenAI() throws {
+        let legacy = """
+        {"sessionMode":"call","languagePair":{"mine":"ru","peer":"en"},
+         "excludedTapBundleIDs":[],"includedTapBundleIDs":[],
+         "tapScopeMode":"allExcept","originalMixVolume":0.2}
+        """
+        let s = try JSONDecoder().decode(Settings.self, from: Data(legacy.utf8))
+        #expect(s.translationModel == .openAIRealtime)
+    }
+}
