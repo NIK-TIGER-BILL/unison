@@ -23,9 +23,11 @@ import Testing
     #expect(Language.ko.flagEmoji == "🇰🇷")
 }
 
-@Test func languageFlag_allCases_returnTwoCharacterFlags() {
+@Test func languageFlag_allCases_returnTwoCharacterOrGlobeFlags() {
     // Regional-indicator flags are 2 scalars (one per letter).
+    // 🌐 (used for languages without a single country, e.g. Arabic) is 1 scalar.
     for lang in Language.allCases {
-        #expect(lang.flagEmoji.unicodeScalars.count == 2)
+        let count = lang.flagEmoji.unicodeScalars.count
+        #expect(count == 1 || count == 2, "Unexpected scalar count \(count) for \(lang)")
     }
 }

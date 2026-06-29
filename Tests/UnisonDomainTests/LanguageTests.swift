@@ -13,18 +13,24 @@ import Testing
     #expect(Language.ja.displayName == "日本語")
 }
 
-@Test func language_allCasesHasThirteenLanguages() {
-    // The 13 supported output targets per OpenAI cookbook:
-    // Spanish, Portuguese, French, Japanese, Russian, Chinese, German,
-    // Korean, Hindi, Indonesian, Vietnamese, Italian, English.
-    #expect(Language.allCases.count == 13)
+@Test func language_allCasesHasTwentyEightLanguages() {
+    // 13 original OpenAI targets + 15 Gemini-only targets = 28.
+    #expect(Language.allCases.count == 28)
+    #expect(Language.openAITargets.count == 13)
 }
 
-@Test func language_supportedTargets_isAllThirteen() {
-    // `supportedTargets` powers the picker. All current cases are
-    // valid output targets — adding a source-only language in the
-    // future must set `isTargetSupported = false`.
+@Test func language_supportedTargets_isOpenAIThirteen() {
+    // `supportedTargets` is the legacy OpenAI picker list — the
+    // canonical 13. Each entry must be a real enum case.
     #expect(Language.supportedTargets.count == 13)
+    for lang in Language.supportedTargets {
+        #expect(Language.allCases.contains(lang))
+    }
+}
+
+@Test func language_isTargetSupported_trueForAllCurrentCases() {
+    // Forward-compat hook: every enum case today is a target for at least one engine.
+    // Adding a source-only language in the future must set `isTargetSupported = false`.
     for lang in Language.allCases {
         #expect(lang.isTargetSupported)
     }
