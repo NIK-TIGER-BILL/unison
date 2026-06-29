@@ -35,8 +35,10 @@ It runs as a menu-bar app and bridges your call in **both directions**:
   result into a virtual microphone that you select inside Zoom / Meet / Teams —
   so your peer hears you in *their* language.
 
-Translation runs on OpenAI's [`gpt-realtime-translate`](https://platform.openai.com)
-realtime endpoint, so latency stays conversational. The whole UI is built on
+Translation runs on a realtime WebSocket endpoint — your choice of
+**OpenAI `gpt-realtime-translate`** or **Google Gemini `gemini-3.5-live-translate-preview`** —
+so latency stays conversational. Pick your engine in onboarding or Settings;
+each stores its own API key in the macOS Keychain. The whole UI is built on
 macOS 26 Tahoe's native **Liquid Glass**.
 
 ---
@@ -50,7 +52,7 @@ The live transcript is up top. The rest of the app:
     <td width="50%" valign="top">
       <img src="docs/images/onboarding.png" alt="Guided onboarding" width="100%"><br>
       <sub><b>Setup</b> — a guided three-step onboarding: install the virtual
-      audio driver, grant the mic, paste your OpenAI key.</sub>
+      audio driver, grant the mic, choose a translation engine and paste your API key.</sub>
     </td>
     <td width="50%" valign="top">
       <img src="docs/images/settings.png" alt="Settings window" width="100%"><br>
@@ -81,8 +83,11 @@ The live transcript is up top. The rest of the app:
   the translation, so the call still feels human (volume is adjustable).
 - **Menu-bar native** — no Dock icon, no window clutter. Start/stop and the
   transcript are a hotkey away (`⌃⌥U` / `⌃⌥T`).
-- **Keys stay local** — your OpenAI key lives in the macOS Keychain, never on
-  disk.
+- **Choice of translation engine** — OpenAI `gpt-realtime-translate` (13 target
+  languages) or Google Gemini `gemini-3.5-live-translate-preview` (~28 target
+  languages). Pick in onboarding or Settings; switching applies on the next session.
+- **Keys stay local** — your API keys (one per engine) live in the macOS Keychain,
+  never on disk.
 - **Liquid Glass throughout** — built on Tahoe's native glass APIs.
 
 ---
@@ -91,13 +96,13 @@ The live transcript is up top. The rest of the app:
 
 ```
 INCOMING  (peer → you)
-  call audio ──▶ Process Tap (CoreAudio) ──▶ resample 24 kHz
-            ──▶ OpenAI gpt-realtime-translate (WebSocket)
+  call audio ──▶ Process Tap (CoreAudio) ──▶ resample to engine rate
+            ──▶ TranslationStream (OpenAI or Gemini, WebSocket)
             ──▶ resample 48 kHz ──▶ AGC + adaptive pacing ──▶ your speakers
 
 OUTGOING  (you → peer)
-  microphone ──▶ resample 24 kHz
-            ──▶ OpenAI gpt-realtime-translate (WebSocket)
+  microphone ──▶ resample to engine rate
+            ──▶ TranslationStream (OpenAI or Gemini, WebSocket)
             ──▶ resample 48 kHz ──▶ AGC ──▶ BlackHole 2ch  ◀── selected as your
                                                                 mic in the call app
 ```
@@ -120,13 +125,15 @@ pacing constants, diagnostic env-vars) live in
 
 ## Supported languages
 
-`gpt-realtime-translate` auto-detects 70+ source languages and translates into
-any of these **13 target languages**:
+The available target languages depend on your chosen engine:
 
-> 🇷🇺 Russian · 🇬🇧 English · 🇪🇸 Spanish · 🇫🇷 French · 🇩🇪 German · 🇮🇹 Italian ·
-> 🇵🇹 Portuguese · 🇨🇳 Chinese · 🇯🇵 Japanese · 🇰🇷 Korean · 🇮🇳 Hindi ·
-> 🇮🇩 Indonesian · 🇻🇳 Vietnamese
+- **OpenAI** `gpt-realtime-translate` — **13 target languages**: Russian, English,
+  Spanish, French, German, Italian, Portuguese, Chinese, Japanese, Korean, Hindi,
+  Indonesian, Vietnamese. Auto-detects 70+ source languages.
+- **Gemini** `gemini-3.5-live-translate-preview` — **~28 target languages** (a curated
+  subset of its 70+ capabilities), with a broader selection than OpenAI.
 
+Switching engines coerces the language pair to the new engine's supported set.
 Pick the pair (*"I speak"* / *"I listen"*) in the menu-bar popover or in Settings.
 
 ---
@@ -135,7 +142,9 @@ Pick the pair (*"I speak"* / *"I listen"*) in the menu-bar popover or in Setting
 
 - **macOS 26 (Tahoe)** or later — the UI uses native Liquid Glass APIs with no
   backports.
-- An **OpenAI API key** with access to `gpt-realtime-translate`.
+- An **API key** for your chosen translation engine — OpenAI (`gpt-realtime-translate`)
+  or Google Gemini (`gemini-3.5-live-translate-preview`). You can add both and switch
+  at any time.
 - The **BlackHole 2ch** virtual audio driver — Unison installs it for you during
   onboarding.
 - To build from source: a **Swift 6.2** toolchain (recent Xcode or the Command
@@ -159,7 +168,8 @@ On first launch, onboarding walks you through three steps:
 
 1. **Install BlackHole** — the virtual microphone your peer will "hear".
 2. **Grant microphone access** — so Unison can translate what you say.
-3. **Add your OpenAI API key** — stored in the Keychain.
+3. **Choose a translation engine and add its API key** — OpenAI or Gemini; stored in
+   the Keychain. You can add both and switch in Settings.
 
 Then, in your video-call app, select **BlackHole 2ch** as the microphone. Press
 `⌃⌥U` to start translating.
@@ -179,6 +189,10 @@ swift run Unison
 # The synthetic source plays predefined test tones so you can exercise the
 # onboarding / settings / transcript flows end-to-end.
 UNISON_DEV_MODE=1 swift run Unison
+
+# Override API keys per engine (bypasses Keychain — useful in CI / VMs)
+UNISON_API_KEY=sk-...        # OpenAI key override
+UNISON_GEMINI_API_KEY=AI...  # Gemini key override
 ```
 
 ### Tests
@@ -220,7 +234,7 @@ Unison is a Swift Package split into focused modules:
 | Module | Responsibility |
 | --- | --- |
 | `UnisonDomain` | Core models — sessions, state, languages, transcript store. |
-| `UnisonTranslation` | The OpenAI realtime translation client (WebSocket). |
+| `UnisonTranslation` | Translation clients (WebSocket) — OpenAI and Gemini, behind a shared `TranslationStream` interface. |
 | `UnisonAudio` | Capture (Process Tap), resampling, playback, AGC, pacing, BlackHole output. |
 | `UnisonSystem` | System integration — permissions, BlackHole install, Keychain. |
 | `UnisonUI` | SwiftUI views and the Liquid Glass surface treatment. |
@@ -235,5 +249,5 @@ mode — are documented in **[CLAUDE.md](CLAUDE.md)**.
 ---
 
 <div align="center">
-<sub>Built for macOS 26 Tahoe · Liquid Glass · OpenAI Realtime</sub>
+<sub>Built for macOS 26 Tahoe · Liquid Glass · OpenAI Realtime · Google Gemini Live</sub>
 </div>

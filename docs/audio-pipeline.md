@@ -16,9 +16,9 @@
 │  ProcessTapCapture (48 kHz F32 mono AudioFrame)                  │
 │   │ Resampler.toWire    [48k F32 → 24k int16]                   │
 │   ▼                                                              │
-│  WS: input_audio_buffer.append → OpenAI gpt-realtime-translate   │
+│  WS: (audio input) → TranslationStream (OpenAI or Gemini)         │
 │   │                                                              │
-│  WS: session.output_audio.delta ← OpenAI                         │
+│  WS: (audio output delta) ← TranslationStream                    │
 │   │ Resampler.fromWire  [24k int16 → 48k F32]                   │
 │   ▼                                                              │
 │  AVAudioOutputMixer:                                             │
@@ -33,15 +33,31 @@
 └──────────────────────────────────────────────────────────────────┘
 
 OUTGOING (user → peer) — symmetric structure: mic → Resampler.toWire
-→ WS → ... → BlackHole2chPlayer (peer's Zoom mic input).
+→ WS → TranslationStream → ... → BlackHole2chPlayer (peer's Zoom mic input).
 ```
 
 ---
 
-## `gpt-realtime-translate` — поведение модели
+## Движки перевода
+
+За одним интерфейсом `TranslationStream` скрываются два взаимозаменяемых движка.
+Выбор хранится в `Settings.translationModel` (дефолт — `.openAIRealtime`) и
+разрешается **однократно в момент `start()`** через `ProviderAwareStreamFactory` —
+смена движка вступает в силу на следующей сессии (как смена языка или устройства).
+**Output у обоих движков 24 kHz** int16 mono; различается только входная rate
+(OpenAI ожидает 24 kHz, Gemini — 16 kHz). Оркестратор читает
+`TranslationStream.inputWireSampleRate` и ресемплирует исходящее аудио через
+`Resampler.toWire(_:targetSampleRate:)` перед отправкой.
+
+---
+
+### OpenAI `gpt-realtime-translate`
 
 Endpoint: `wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate`
 (GA Translation endpoint, released ~mid-May 2026).
+Auth: `Authorization: Bearer <sk-…>` header.
+Input: **24 kHz** int16 mono. Output: 24 kHz int16 mono.
+Поддерживаемых target языков: **13**.
 
 ### Конфигурация (`session.update`)
 
@@ -104,13 +120,77 @@ Endpoint: `wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-tran
 
 ---
 
+### Gemini `gemini-3.5-live-translate-preview`
+
+Endpoint:
+```
+wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=<KEY>
+```
+Auth: API-ключ в **query-параметре** URL (без заголовка; ключ **никогда не логируется**).
+Input: **16 kHz** int16 mono. Output: 24 kHz int16 (base64). Поддерживаемых target языков: **~28** (curated subset из 70+).
+
+#### Конфигурация (setup message)
+
+```json
+{
+  "setup": {
+    "model": "models/gemini-3.5-live-translate-preview",
+    "generationConfig": {
+      "translationConfig": {
+        "targetLanguageCode": "<BCP-47>"
+      },
+      "responseModalities": ["AUDIO"],
+      "inputAudioTranscription": {},
+      "outputAudioTranscription": {}
+    }
+  }
+}
+```
+
+Тип сообщения: `BidiGenerateContentSetup`.
+
+#### Отправка аудио
+
+```json
+{
+  "realtimeInput": {
+    "audio": {
+      "mimeType": "audio/pcm;rate=16000",
+      "data": "<base64 int16 16kHz>"
+    }
+  }
+}
+```
+
+#### Ответ сервера (`serverContent`)
+
+```json
+{
+  "serverContent": {
+    "modelTurn": {
+      "parts": [{ "inlineData": { "mimeType": "audio/pcm;rate=24000", "data": "<base64>" } }]
+    },
+    "inputTranscription": { "text": "..." },
+    "outputTranscription": { "text": "..." },
+    "turnComplete": true
+  }
+}
+```
+
+Аудио: `modelTurn.parts[].inlineData.data` (base64 24 kHz int16 mono).
+Транскрипции: `inputTranscription.text` (оригинал) / `outputTranscription.text` (перевод).
+Конец реплики: `turnComplete: true`.
+
+---
+
 ## Наша цепочка — компоненты
 
 ### `Resampler` (Sources/UnisonAudio/Resampler.swift)
-Конверсия между wire-форматом (24k int16) и playback-форматом (48k F32).
+Конверсия между wire-форматом движка и playback-форматом (48k F32).
 
-- `toOpenAIWire(frame)` — для исходящих frames (mic/tap → OpenAI).
-- `fromOpenAIWire(frame, targetSampleRate:)` — для входящих frames (OpenAI → speakers).
+- `toWire(_:targetSampleRate:)` — для исходящих frames (mic/tap → движок).
+  Оркестратор передаёт `TranslationStream.inputWireSampleRate` (24 kHz для OpenAI, 16 kHz для Gemini).
+- `fromWire(_:)` — для входящих frames (движок → speakers); output всегда 24 kHz.
 - Использует **cached AVAudioConverter** — один экземпляр на (srcRate, dstRate, channels).
   `.reset()` перед каждым чанком чтобы изолировать состояние от предыдущего вызова.
 - Кэш статический lock-protected (двунаправленный pipeline вызывает одновременно).
@@ -272,8 +352,8 @@ Stop-hang). При пустом резолве `.onlySelected` держим по
 | Env var | Что делает |
 |---|---|
 | `UNISON_DUMP_PLAYBACK_WAV=/tmp/x.wav` | Tap на timePitch output — что mainMixer получил, 48kHz F32 mono |
-| `UNISON_DUMP_WIRE_WAV=/tmp/x.wav` | Что **OpenAI вернула** (после decode base64) — 24kHz int16 mono |
-| `UNISON_DUMP_SENT_WAV=/tmp/x.wav` | Что **мы послали** в OpenAI (после Resampler.toWire) — 24kHz int16 mono |
+| `UNISON_DUMP_WIRE_WAV=/tmp/x.wav` | Что **движок вернул** (после decode base64) — 24kHz int16 mono |
+| `UNISON_DUMP_SENT_WAV=/tmp/x.wav` | Что **мы послали** в движок (после Resampler.toWire) — int16 mono (24k/16k в зависимости от движка) |
 | `UNISON_NOISE_REDUCTION=off\|near_field\|far_field` | Override `noise_reduction` в `session.update` |
 | `UNISON_FORCE_STATE=...` | Snapshot/harness mode forcings |
 
@@ -296,9 +376,13 @@ production-цепочку без юзера. Source: `Sources/Tools/PacingEval/`
 ```bash
 # Реальная сессия с OpenAI на pre-recorded WAV
 OPENAI_API_KEY=$(security find-generic-password -s "com.unison.app" -a "openai-api-key" -w) \
-  swift run pacing-eval --audio /path/to/input.wav --target ru --runs 3
+  swift run pacing-eval --provider openai --audio /path/to/input.wav --target ru --runs 3
 
-# Offline + Live playback тест (без OpenAI)
+# Реальная сессия с Gemini
+GEMINI_API_KEY=$(security find-generic-password -s "com.unison.app" -a "gemini-api-key" -w) \
+  swift run pacing-eval --provider gemini --audio /path/to/input.wav --target ru --runs 3
+
+# Offline + Live playback тест (без подключения к движку)
 swift run pacing-eval --audio /path/to/input.wav --playback-test
 ```
 
@@ -324,4 +408,4 @@ swift run pacing-eval --audio /path/to/input.wav --playback-test
 
 ---
 
-*Last updated: 2026-06-23*
+*Last updated: 2026-06-29*
