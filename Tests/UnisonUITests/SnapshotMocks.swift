@@ -26,9 +26,10 @@ final class PreviewInstaller: BlackHoleInstaller, @unchecked Sendable {
 
 final class PreviewKeychain: KeychainService, @unchecked Sendable {
     var stored: String?
-    func loadAPIKey() -> String? { stored }
-    func saveAPIKey(_ key: String) throws { stored = key }
-    func deleteAPIKey() throws { stored = nil }
+    // Single-slot stub; model argument ignored — snapshots only need the "key present" state.
+    func loadAPIKey(for model: TranslationModel) -> String? { stored }
+    func saveAPIKey(_ key: String, for model: TranslationModel) throws { stored = key }
+    func deleteAPIKey(for model: TranslationModel) throws { stored = nil }
 }
 
 final class PreviewDeviceRegistry: AudioDeviceRegistry, @unchecked Sendable {

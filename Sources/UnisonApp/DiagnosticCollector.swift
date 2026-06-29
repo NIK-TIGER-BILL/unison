@@ -46,7 +46,8 @@ public final class DiagnosticCollector {
 
         // Presence + length only — never the key itself.
         let openAIKeyStatus: String = {
-            if let k = composition.keychain.loadAPIKey(), !k.isEmpty {
+            // TODO(task-8): report the active model's key status, not hardcoded .openAIRealtime
+            if let k = composition.keychain.loadAPIKey(for: .openAIRealtime), !k.isEmpty {
                 return "present (length \(k.count))"
             }
             return "empty"

@@ -122,7 +122,8 @@ public final class Composition {
                     Self.bootLog.info("apiKey source=env UNISON_API_KEY length=\(env.count) prefix=\(Self.apiKeyPrefix(env))")
                     return env
                 }
-                let stored = kc.loadAPIKey() ?? ""
+                // TODO(task-8): resolve key for the selected model, not hardcoded .openAIRealtime
+                let stored = kc.loadAPIKey(for: .openAIRealtime) ?? ""
                 Self.bootLog.info("apiKey source=keychain length=\(stored.count) prefix=\(Self.apiKeyPrefix(stored))")
                 return stored
             },
@@ -472,15 +473,15 @@ final class ForcedGrantedPermissions: PermissionsService, @unchecked Sendable {
 /// + 20 chars) but is not a real OpenAI credential. Never used in
 /// production.
 final class InMemoryKeychain: KeychainService, @unchecked Sendable {
-    private var key: String?
+    private var keys: [TranslationModel: String]
 
     init(seeded: String? = nil) {
-        self.key = seeded
+        self.keys = seeded.map { [.openAIRealtime: $0, .geminiLiveTranslate: $0] } ?? [:]
     }
 
-    func loadAPIKey() -> String? { key }
-    func saveAPIKey(_ value: String) throws { key = value }
-    func deleteAPIKey() throws { key = nil }
+    func loadAPIKey(for model: TranslationModel) -> String? { keys[model] }
+    func saveAPIKey(_ value: String, for model: TranslationModel) throws { keys[model] = value }
+    func deleteAPIKey(for model: TranslationModel) throws { keys[model] = nil }
 }
 
 final class SettingsStore: @unchecked Sendable {

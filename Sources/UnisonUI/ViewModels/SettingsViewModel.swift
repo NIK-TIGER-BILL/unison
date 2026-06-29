@@ -118,7 +118,8 @@ public final class SettingsViewModel {
         self.togglesStore = togglesStore
 
         // Seed the in-memory API key from Keychain (if configured).
-        self.apiKey = keychain?.loadAPIKey() ?? ""
+        // TODO(task-9): use the selected model instead of .openAIRealtime
+        self.apiKey = keychain?.loadAPIKey(for: .openAIRealtime) ?? ""
 
         // Seed hotkeys from persistent store, falling back to defaults.
         if let store = hotkeyStore {
@@ -230,11 +231,13 @@ public final class SettingsViewModel {
         }
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            if (try? keychain.deleteAPIKey()) != nil {
+            // TODO(task-9): use the selected model instead of .openAIRealtime
+            if (try? keychain.deleteAPIKey(for: .openAIRealtime)) != nil {
                 bumpSavedTimestamp()
             }
         } else if trimmed.hasPrefix("sk-"), trimmed.count >= 20 {
-            if (try? keychain.saveAPIKey(trimmed)) != nil {
+            // TODO(task-9): use the selected model instead of .openAIRealtime
+            if (try? keychain.saveAPIKey(trimmed, for: .openAIRealtime)) != nil {
                 bumpSavedTimestamp()
             }
         }

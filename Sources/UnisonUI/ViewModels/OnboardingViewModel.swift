@@ -135,7 +135,8 @@ public final class OnboardingViewModel {
         }
 
         let micDone = permissions.currentStatus(.microphone) == .granted
-        let keyDone = keychain.loadAPIKey()?.isEmpty == false
+        // TODO(task-10): use the selected model instead of .openAIRealtime
+        let keyDone = keychain.loadAPIKey(for: .openAIRealtime)?.isEmpty == false
         steps = [
             OnboardingStep(kind: .blackHole, isDone: bhDone),
             OnboardingStep(kind: .microphone, isDone: micDone),
@@ -332,7 +333,8 @@ public final class OnboardingViewModel {
             return
         }
         do {
-            try keychain.saveAPIKey(trimmed)
+            // TODO(task-10): use the selected model instead of .openAIRealtime
+            try keychain.saveAPIKey(trimmed, for: .openAIRealtime)
             apiKeyDraft = ""
             status[.apiKey] = .done
             refresh()
