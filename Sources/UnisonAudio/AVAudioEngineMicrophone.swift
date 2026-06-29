@@ -212,7 +212,7 @@ extension AVAudioEngineMicrophone: AVCaptureAudioDataOutputSampleBufferDelegate 
         }
 
         // Multi-channel handling. Interleaved buffers pass through with
-        // their channel tag — `Resampler.toOpenAIWire` averages
+        // their channel tag — `Resampler.toWire` averages
         // interleaved channels into mono. Planar (non-interleaved)
         // buffers lay the channel planes back-to-back in the block
         // buffer, which the resampler cannot know about, so we take

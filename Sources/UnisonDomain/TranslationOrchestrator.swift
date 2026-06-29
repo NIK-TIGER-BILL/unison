@@ -1480,6 +1480,7 @@ public final class TranslationOrchestrator {
         // a local under main once (above)" comment was lying.)
         let outboundBuffer = audioBufferBySpeaker[.me]
         let task1 = Task { [stream, outboundBuffer, weak self] in
+            let wireRate = stream.inputWireSampleRate
             var frameIndex = 0
             for await frame in micFrames {
                 // First mic frame proves the capture engine spun up
@@ -1497,7 +1498,7 @@ public final class TranslationOrchestrator {
                     self?.markMicFrameReceived(format: formatLabel, sampleRate: sampleRate, rms: rms)
                     self?.logMicLevel(rms: rms, frameIndex: idx)
                 }
-                let wire = transformer.toWire(frame)
+                let wire = transformer.toWire(frame, sampleRate: wireRate)
                 outboundBuffer?.append(wire)
                 await stream.send(wire)
                 frameIndex += 1
@@ -1618,9 +1619,10 @@ public final class TranslationOrchestrator {
             passthroughContinuation.finish()
         }
         let sender = Task { [stream] in
+            let wireRate = stream.inputWireSampleRate
             for await frame in translationFrames {
-                let wire = transformer.toWire(frame)
-                // Dump what we sent to OpenAI (24 kHz int16 mono).
+                let wire = transformer.toWire(frame, sampleRate: wireRate)
+                // Dump what we sent to the engine (Int16 mono at wireRate).
                 // Pairs with WireDumper.shared (model output) — if SENT
                 // is amplitude-stable but WIRE fades, the model is the
                 // culprit.

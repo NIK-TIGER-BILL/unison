@@ -44,7 +44,7 @@ struct PlaybackOfflineRender {
                                  interleaved: false)!
 
         // Build the input buffer at 24kHz int16, then convert to 48k F32
-        // — mirroring what `Resampler.fromOpenAIWire` does in production.
+        // — mirroring what `Resampler.fromWire` does in production.
         let inputFrames = inputPCM24kInt16.count / 2
         guard let in24 = AVAudioPCMBuffer(pcmFormat: in24k, frameCapacity: AVAudioFrameCount(inputFrames)) else {
             throw PacingEvalError.audioRead("alloc in24 buffer")

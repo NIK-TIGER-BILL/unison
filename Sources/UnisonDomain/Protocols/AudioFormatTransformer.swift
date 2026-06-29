@@ -1,9 +1,9 @@
 import Foundation
 
 public protocol AudioFormatTransformer: Sendable {
-    /// Capture format (e.g. 48kHz F32) → wire format (24kHz Int16) for OpenAI.
-    func toWire(_ frame: AudioFrame) -> AudioFrame
+    /// Capture format (e.g. 48kHz F32) → wire format (`sampleRate` Int16).
+    func toWire(_ frame: AudioFrame, sampleRate: Int) -> AudioFrame
 
-    /// Wire format (24kHz Int16) → playback format (e.g. 48kHz F32) for AVAudioEngine.
+    /// Wire format → playback format (e.g. 48kHz F32) for AVAudioEngine.
     func fromWire(_ frame: AudioFrame, targetSampleRate: Int) -> AudioFrame
 }

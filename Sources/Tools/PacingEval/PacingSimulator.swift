@@ -144,7 +144,7 @@ struct PacingSimulator {
         for tick in 0..<totalTicks {
             // Schedule arrivals for this tick. Bytes are 24kHz int16 →
             // samples = bytes / 2. Convert to player (48kHz) sample count
-            // = double, matching how Resampler.fromOpenAIWire upsamples.
+            // = double, matching how Resampler.fromWire upsamples.
             let arrivedBytes = bytesPerTick[tick]
             let arrivedPlayerSamples = Double(arrivedBytes) / 2.0 * 2.0
             scheduledSamples += arrivedPlayerSamples
