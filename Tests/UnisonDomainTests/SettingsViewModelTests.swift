@@ -359,6 +359,39 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
     #expect(Hotkey.defaultShowTranscript.display == "⌃⌥T")
 }
 
+// MARK: - Task-9: model-aware key + language coercion
+
+@MainActor @Test func switchingModelCoercesUnsupportedLanguages() {
+    var saved: Settings?
+    var s = Settings.default
+    s.translationModel = .geminiLiveTranslate
+    s.languagePair = LanguagePair(mine: .pl, peer: .en)   // Polish is Gemini-only
+    let vm = SettingsViewModel(
+        initial: s,
+        deviceRegistry: MockAudioDeviceRegistry(),
+        onChange: { saved = $0 }
+    )
+    vm.setTranslationModel(.openAIRealtime)
+    #expect(vm.settings.translationModel == .openAIRealtime)
+    #expect(TranslationModel.openAIRealtime.supportedTargets.contains(vm.settings.languagePair.mine))
+    #expect(saved?.translationModel == .openAIRealtime)
+}
+
+@MainActor @Test func keyFieldReloadsForSelectedModel() throws {
+    let kc = MockKeychain()
+    try kc.saveAPIKey("sk-aaaaaaaaaaaaaaaaaaaa", for: .openAIRealtime)
+    try kc.saveAPIKey("AQ.bbbbbbbbbbbbbbbbbbbb", for: .geminiLiveTranslate)
+    let vm = SettingsViewModel(
+        initial: .default,
+        deviceRegistry: MockAudioDeviceRegistry(),
+        onChange: { _ in },
+        keychain: kc
+    )
+    #expect(vm.apiKey == "sk-aaaaaaaaaaaaaaaaaaaa")     // default model = OpenAI
+    vm.setTranslationModel(.geminiLiveTranslate)
+    #expect(vm.apiKey == "AQ.bbbbbbbbbbbbbbbbbbbb")     // reloaded for Gemini slot
+}
+
 // MARK: - Tap scope mode accessors
 
 @MainActor
