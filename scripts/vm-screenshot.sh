@@ -29,7 +29,7 @@ SHOTS_DIR="$REPO_DIR/vm-screenshots"
 VM_PID_FILE="$SHOTS_DIR/.vm.pid"
 VM_LOG_FILE="$SHOTS_DIR/.vm.log"
 
-ALL_SCREENS=(popover onboarding-pending onboarding-done settings transcript menubar)
+ALL_SCREENS=(popover onboarding-pending onboarding-done settings transcript history menubar)
 KEEP_RUNNING=0
 
 # Optional margin (in points) added around each captured window so the
@@ -436,6 +436,20 @@ for screen in "${SCREENS[@]}"; do
       ssh_vm 'osascript -e '"'"'tell application "System Events" to set frontmost of process "Unison" to true'"'"' || true'
       sleep 1
       capture_screen transcript
+      ;;
+
+    history)
+      # `history-demo` seeds the MeetingStore with synthetic meetings
+      # (in-memory only) and opens the History window from
+      # `applyForceStateOverrides()`. Mirror the `transcript` case:
+      # bring Unison forward with AppleScript so the window is
+      # frontmost before screencapture queries its bounds.
+      reset_app_state
+      launch_unison "UNISON_DEV_MODE=1 UNISON_FORCE_STATE=history-demo"
+      sleep 2
+      ssh_vm 'osascript -e '"'"'tell application "System Events" to set frontmost of process "Unison" to true'"'"' || true'
+      sleep 1
+      capture_screen history
       ;;
 
     menubar)

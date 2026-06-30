@@ -17,6 +17,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public var settingsWindow: SettingsWindowController!
     public var helpWindow: HelpWindowController!
     public var diagnosticWindow: DiagnosticWindowController!
+    public var historyWindow: MeetingHistoryWindowController!
     public var hotkeyService: HotkeyService!
 
     /// The last `MenubarState` we pushed to the status item. Cached so
@@ -44,6 +45,30 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             level: "info",
             message: "applicationDidFinishLaunching — pid=\(ProcessInfo.processInfo.processIdentifier)"
         )
+
+        // Single-instance guard — "new replaces old". Dev builds are
+        // launched by exec'ing the binary directly, which bypasses
+        // Launch Services' one-instance coalescing, and the app is
+        // menubar-only — so without this a rebuild-and-run leaves the
+        // previous build running beside this one (two menubar icons).
+        // Terminate any prior instance and wait for it to exit.
+        //
+        // Runs BEFORE `CrashReporter.startSession()`: a replaced instance
+        // is intentional, not a crash. A graceful exit removes its own
+        // session marker; a force-killed wedged straggler does not — so
+        // clear the marker here when we replaced something, or
+        // `startSession()` would surface a false "previous session
+        // crashed" alert. When nothing was replaced we leave the marker
+        // untouched so a genuine prior crash is still detected.
+        let replacedInstances = SingleInstanceGuard.replaceOtherInstances()
+        if !replacedInstances.isEmpty {
+            FileLogStore.shared.write(
+                category: "AppDelegate",
+                level: "info",
+                message: "single-instance guard — replaced prior instance(s) pid=\(replacedInstances)"
+            )
+            CrashReporter.markCleanShutdown()
+        }
 
         // Crash detection: writes a session marker and surfaces a
         // modal alert if the previous session's marker is still
@@ -94,6 +119,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         diagnosticWindow = DiagnosticWindowController(
             collector: DiagnosticCollector(composition: composition)
         )
+        historyWindow = MeetingHistoryWindowController(viewModel: composition.meetingHistoryVM)
 
         statusItem = StatusItemController(
             popoverVM: composition.popoverVM,
@@ -111,6 +137,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             onShowDiagnostic: { [weak self] in
                 self?.diagnosticWindow.show()
+            },
+            onShowHistory: { [weak self] in
+                self?.historyWindow.show()
             },
             onShowAbout: { [weak self] in
                 self?.showAbout()
@@ -248,6 +277,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             scheduleAutoStart(at: 2.0, tag: "start#1")
             scheduleAutoStop(at: 10.0, tag: "stop#1")
             scheduleAutoStart(at: 14.0, tag: "start#2")
+        case .historyDemo:
+            historyWindow.show()
         case .onboardingDone:
             break
         }
@@ -306,6 +337,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             message: "applicationWillTerminate — graceful shutdown"
         )
         hotkeyService?.stop()
+
+        // Archive an active-at-quit session synchronously — applicationWillTerminate
+        // intentionally skips the async orchestrator.stop() (deadlock), so the
+        // Part 1 stop()-archive hook never fires on quit.
+        composition.orchestrator.archiveActiveSession()
 
         // Synchronous audio teardown FIRST — this is what patches the
         // WAV dump header sizes (if `UNISON_DUMP_OUTPUT_WAV` was set).

@@ -22,6 +22,7 @@ public enum SnapSize {
     public static let settings = CGSize(width: 560, height: 1620)
     public static let transcript = CGSize(width: 600, height: 360)
     public static let logo = CGSize(width: 256, height: 256)
+    public static let history = CGSize(width: 820, height: 560)
 }
 
 // MARK: - Recording mode
