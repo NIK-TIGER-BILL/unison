@@ -389,6 +389,7 @@ public final class TranslationOrchestrator {
         anyMicFrameThisSession = false
         anyServerDeltaThisSession = false
         state = .translating(mode: mode, startedAt: startedAt)
+        beginAudioActivity()
         // Seed per-stream connectivity health for whichever streams
         // this mode actually opens. The slow-detection loop iterates
         // only over speakers that have a live stream, so seeding the
@@ -1347,6 +1348,7 @@ public final class TranslationOrchestrator {
         await stopAllStreams()
         consecutiveEmptyCloses = [.me: 0, .peer: 0]
         state = .idle
+        endAudioActivity()
         // Finalise any diagnostic dumps so the WAV `data` chunk size
         // gets patched from `0xFFFF_FFFF` to the actual byte count.
         // No-op when the env vars aren't set.
@@ -1355,6 +1357,29 @@ public final class TranslationOrchestrator {
         archiveSession(mode: pendingArchiveMeta?.mode, startedAt: pendingArchiveMeta?.startedAt,
                        enabled: currentSettings.saveHistoryEnabled)
         pendingArchiveMeta = nil
+    }
+
+    /// App-Nap / throttling guard held for the duration of an active
+    /// translation session. A backgrounded menubar app becomes an App-Nap
+    /// candidate during the brief silences between utterances; the timer/IO
+    /// throttling App Nap applies there can jitter audio scheduling.
+    /// `.latencyCritical` requests the highest timer/IO precision and
+    /// `.userInitiated` keeps the work from being deferred. Released in
+    /// `stop()` — holding it while idle would also needlessly block system
+    /// sleep. Idempotent so reconnects don't stack tokens.
+    private var audioActivityToken: (any NSObjectProtocol)?
+
+    private func beginAudioActivity() {
+        guard audioActivityToken == nil else { return }
+        audioActivityToken = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .latencyCritical],
+            reason: "Unison real-time translated audio playback")
+    }
+
+    private func endAudioActivity() {
+        guard let token = audioActivityToken else { return }
+        ProcessInfo.processInfo.endActivity(token)
+        audioActivityToken = nil
     }
 
     /// Persist the just-ended session to the meeting archive. Internal so

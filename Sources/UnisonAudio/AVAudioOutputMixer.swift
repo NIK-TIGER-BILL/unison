@@ -89,6 +89,17 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// completion counters); this only measures how steadily frames reach
     /// the player.
     private var lastScheduleAt: Date?
+    /// Last sample value of the previously-scheduled translated buffer, used
+    /// to declick chunk seams: the first samples of each new buffer are
+    /// ramped from this value so a boundary discontinuity (resampler reset
+    /// transient, AGC gain step) is smoothed rather than stepped. Reset to 0
+    /// on each `play(_:)` so the first chunk (and any chunk resuming after the
+    /// player ran dry) ramps up from silence. Touched only from the mixer
+    /// actor's schedule path — no extra locking needed.
+    private var lastTranslatedSample: Float = 0
+    /// Declick ramp length in samples (~2ms at 48k). Long enough to remove a
+    /// boundary click, short enough to be inaudible as a smear.
+    private static let declickRampSamples = 96
 
     public init() {
         self.playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
@@ -385,6 +396,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         scheduledBufferCount = 0
         playedBackBufferCount = 0
         lastScheduleAt = nil
+        lastTranslatedSample = 0
     }
 
     public func playOriginal(_ frames: AsyncStream<AudioFrame>) async {
@@ -478,6 +490,28 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         }
         // --- end instrumentation ---
 
+        // --- Seam declick ---------------------------------------------------
+        // Ramp the first ~2ms of this buffer from where the audio actually
+        // left off, so a boundary discontinuity becomes a 2ms glide instead
+        // of an instantaneous step (= click). Two cases:
+        //  • Continuous playback (queue non-empty): ramp from the previous
+        //    buffer's last sample. If the signal is already continuous the
+        //    ramp ≈ the signal (no-op); if the resampler/AGC introduced a
+        //    small step at the seam, it's smoothed.
+        //  • Resume after the player ran dry (queue empty, or a long
+        //    schedule gap): the player has been emitting digital silence, so
+        //    ramp up from 0 — otherwise the first non-zero sample steps from
+        //    silence and clicks.
+        counterLock.lock()
+        let queuedBuffers = scheduledBufferCount - playedBackBufferCount
+        counterLock.unlock()
+        let resumingFromSilence = queuedBuffers <= 0 || schedGapMs > 350
+        declickSeam(buf, from: resumingFromSilence ? 0 : lastTranslatedSample)
+        if let ch = buf.floatChannelData, buf.frameLength > 0 {
+            lastTranslatedSample = ch[0][Int(buf.frameLength) - 1]
+        }
+        // --- end seam declick -----------------------------------------------
+
         // Use the explicit `.dataPlayedBack` callback type so we can
         // distinguish "buffer was played by hardware" from "buffer was
         // consumed by the next node" (the default callback). When the
@@ -543,6 +577,22 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
             memcpy(buf.floatChannelData![0], p, frame.pcm.count)
         }
         return buf
+    }
+
+    /// Ramp the first `declickRampSamples` of `buf` from `start` into the
+    /// actual signal (linear blend `out[i] = start·(1−g) + signal[i]·g`,
+    /// `g = i/n`). `out[0] == start` so playback continues without a step,
+    /// and by sample `n` we're back on the real waveform. Runs on the mixer
+    /// actor's schedule path (never the render thread) — plain buffer math.
+    private func declickSeam(_ buf: AVAudioPCMBuffer, from start: Float) {
+        guard let ch = buf.floatChannelData else { return }
+        let p = ch[0]
+        let n = min(Int(buf.frameLength), Self.declickRampSamples)
+        guard n > 1 else { return }
+        for i in 0..<n {
+            let g = Float(i) / Float(n)
+            p[i] = start * (1 - g) + p[i] * g
+        }
     }
 
     /// Root-mean-square of a float32 PCM frame, used for periodic
