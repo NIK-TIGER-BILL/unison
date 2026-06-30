@@ -80,15 +80,34 @@ public final class PlaybackPacing: @unchecked Sendable {
     // controller uses. There's no other reason to expose them and
     // the in-app callers don't reach for them.
 
-    /// Steady-state buffer **setpoint** in audio-seconds — the depth v5
-    /// gently drains the queue back toward (it never *adds* latency to
-    /// reach it; the cushion forms naturally from the model's own bursts).
-    /// Sized to ≈ the observed p90 inter-chunk arrival jitter (~0.30 s) so
-    /// a typical gap is absorbed without underrunning. v4 used 0.15 s,
-    /// which was too thin for the measured 0.30 s+ jitter and underran;
-    /// fixed-1.0× replay of real data ran a ~0.30–0.45 s natural depth, so
-    /// 0.30 s is not added latency, it's the depth the player already has.
-    public static let targetBufferSec: Double = 0.30
+    /// Steady-state buffer **setpoint** in audio-seconds — the cushion the
+    /// controller holds the queue at (draining only *above* it; the cushion
+    /// forms from the model's own bursts, the controller just stops draining
+    /// it). This is the jitter buffer that absorbs the model's arrival-gap
+    /// jitter so the player doesn't run dry — the audible "freeze".
+    ///
+    /// Sizing (from real-session logs, 2026-06-30): the model delivers
+    /// ~real-time but **stalls 700–970 ms a handful of times per call**
+    /// (audio-rx gaps p90 ≈ 0.33 s, max ≈ 0.83 s). A thin 0.30 s cushion
+    /// underran ~6–7 % of ticks on those stalls (replaying the real arrival
+    /// timeline offline). Raised to **0.60 s** — a bigger cushion swallows
+    /// more of each stall, at the cost of exactly that much steady-state
+    /// latency. It's a direct latency ↔ smoothness dial.
+    ///
+    /// **Override live with `UNISON_BUFFER_MS`** (e.g. `=900` for more
+    /// headroom on a jittery network, `=400` to claw back latency) to find
+    /// the per-network sweet spot without a rebuild. We deliberately do NOT
+    /// size it to fully hide the worst ~0.9 s stall (that latency is too
+    /// high) nor stretch audio to bridge it (re-introduces the "robotic"
+    /// artefact): the rare big stall is left as a brief freeze. See the
+    /// `pacing-eval` frontier in the type doc / audio-pipeline.md.
+    public static let targetBufferSec: Double = {
+        if let raw = ProcessInfo.processInfo.environment["UNISON_BUFFER_MS"],
+           let ms = Double(raw), ms >= 0 {
+            return ms / 1000.0
+        }
+        return 0.60
+    }()
     /// Hard ceiling on `timePitch.rate`. v5 caps the drain at a GENTLE
     /// 1.15× (was 1.5×): the user reported "robotic" audio, and TimePitch
     /// above ~1.15× is audibly time-stretched. v5 only ever speeds up to

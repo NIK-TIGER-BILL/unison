@@ -26,8 +26,11 @@ import Testing
 @Test func pacing_arrivalRateDoesNotChangeTarget() {
     // v5 invariant: the target depends ONLY on buffer depth, never on the
     // arrival-rate EMA. Same depth + wildly different arrival ⇒ same target.
-    let slow = PlaybackPacing.targetRate(arrivalRateEMA: 0.80, depthSmooth: 0.45)
-    let fast = PlaybackPacing.targetRate(arrivalRateEMA: 1.40, depthSmooth: 0.45)
+    // Use a depth above the setpoint so the rate is mid-range (not pinned at
+    // the floor), making the arrival-independence assertion meaningful.
+    let d = PlaybackPacing.targetBufferSec + 0.2
+    let slow = PlaybackPacing.targetRate(arrivalRateEMA: 0.80, depthSmooth: d)
+    let fast = PlaybackPacing.targetRate(arrivalRateEMA: 1.40, depthSmooth: d)
     #expect(abs(slow.clampedTarget - fast.clampedTarget) < 1e-9)
 }
 
@@ -62,8 +65,10 @@ import Testing
 
 @Test func pacing_overSetpoint_speedsUpToDrain() {
     // Buffer above setpoint (burst) → speed up above 1.0× to drain, keeping
-    // latency bounded. depth 0.5 over setpoint 0.30 → +0.08 → 1.08×.
-    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.0, depthSmooth: 0.5)
+    // latency bounded. Use a depth comfortably above the setpoint so this
+    // holds regardless of the (env-tunable) targetBufferSec.
+    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.0,
+                                      depthSmooth: PlaybackPacing.targetBufferSec + 0.3)
     #expect(r.bufferError > 0)
     #expect(r.clampedTarget > 1.0)
     #expect(r.clampedTarget <= PlaybackPacing.maxRate)
@@ -150,13 +155,36 @@ import Testing
 
     let underrunPct = Double(steadyUnderruns) / Double(steadyTicks) * 100.0
     let meanDepth = depthSum / Double(depthN)
+    let tgt = PlaybackPacing.targetBufferSec
     // v5 keeps the jittery stream mostly glitch-free…
     #expect(underrunPct < 5.0, "steady-state underrun \(underrunPct)% too high")
     // …never plays below real-time (the core v5 invariant)…
     #expect(minRateSeen >= 1.0 - 1e-9, "v5 must never slow below 1.0×, saw \(minRateSeen)")
     // …and holds latency bounded near the setpoint (no v4-style balloon).
-    #expect(maxDepth < 0.9, "peak latency \(maxDepth)s ballooned")
-    #expect(meanDepth < 0.55, "mean latency \(meanDepth)s drifted too high")
+    // Bounds are relative to the (env-tunable) setpoint: the controller holds
+    // ~setpoint of cushion plus a little jitter headroom, and never balloons.
+    #expect(maxDepth < tgt + 0.7, "peak latency \(maxDepth)s ballooned above setpoint \(tgt)s")
+    #expect(meanDepth < tgt + 0.3, "mean latency \(meanDepth)s drifted too high above setpoint \(tgt)s")
+}
+
+// MARK: - buffer cushion
+
+@Test func pacing_targetBufferSec_defaultsTo600ms() {
+    // The jitter-buffer cushion defaults to 0.60 s; live-overridable via
+    // UNISON_BUFFER_MS (exercised in the running app, not here). Guard the
+    // default so it can't drift silently. Skip if the env override is set.
+    if ProcessInfo.processInfo.environment["UNISON_BUFFER_MS"] == nil {
+        #expect(abs(PlaybackPacing.targetBufferSec - 0.60) < 1e-9)
+    }
+}
+
+@Test func pacing_targetBufferSec_honorsEnvOverride() {
+    // When UNISON_BUFFER_MS is set, the cushion must reflect it (ms → sec).
+    // Only asserts when the env is present (the live-tuning path).
+    if let raw = ProcessInfo.processInfo.environment["UNISON_BUFFER_MS"],
+       let ms = Double(raw), ms >= 0 {
+        #expect(abs(PlaybackPacing.targetBufferSec - ms / 1000.0) < 1e-9)
+    }
 }
 
 // MARK: - slewToward
