@@ -12,6 +12,8 @@ import UnisonDomain
 /// the mic task and owns the Speex state. `reset` is guarded so a session
 /// restart can't race an in-flight `processNear`.
 public final class SpeexEchoCanceller: EchoCanceller, @unchecked Sendable {
+    private static let log = UnisonLog(category: "AEC")
+
     public struct Config: Sendable {
         public let sampleRate: Int32
         public let frameSize: Int       // samples per speex_echo_cancellation
@@ -42,9 +44,14 @@ public final class SpeexEchoCanceller: EchoCanceller, @unchecked Sendable {
     /// (mic thread) counts samples zero-filled when no reference was queued.
     private let farDroppedSamples = Atomic<Int>(0)
     private let farUnderrunSamples = Atomic<Int>(0)
-    /// Read-only diagnostic snapshots, for periodic logging by the caller.
+    /// Read-only diagnostic snapshots (also logged internally when growing).
     public var droppedFarSamples: Int { farDroppedSamples.load(ordering: .relaxed) }
     public var underrunFarSamples: Int { farUnderrunSamples.load(ordering: .relaxed) }
+    /// Mic-thread-only (touched under `stateLock`): log-cadence counter +
+    /// last-logged loss total, so we emit a diagnostic only when far-loss
+    /// actually grows rather than every check.
+    private var processCallCount = 0
+    private var lastLoggedFarLoss = 0
 
     public init(config: Config = .default) {
         precondition(config.frameSize > 0, "frameSize must be positive")
@@ -121,6 +128,20 @@ public final class SpeexEchoCanceller: EchoCanceller, @unchecked Sendable {
                 }
             }
             out.append(contentsOf: outBlock)
+        }
+
+        // Drift observability (spec open-question #1): emit only when the
+        // cumulative far-loss grows, throttled to every 500th call, so a
+        // healthy session stays quiet and a render/mic clock drift shows up
+        // as a growing dropped/underrun count in the diagnostic log.
+        processCallCount += 1
+        if processCallCount % 500 == 0 {
+            let dropped = farDroppedSamples.load(ordering: .relaxed)
+            let underrun = farUnderrunSamples.load(ordering: .relaxed)
+            if dropped + underrun > lastLoggedFarLoss {
+                Self.log.debug("far-reference loss growing — dropped=\(dropped) underrun=\(underrun) samples (render/mic drift?)")
+                lastLoggedFarLoss = dropped + underrun
+            }
         }
 
         var data = Data(count: out.count * 4)

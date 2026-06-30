@@ -62,8 +62,13 @@ final class FarReferenceRing: @unchecked Sendable {
         return n
     }
 
-    /// Consumer-side reset. Only call when the producer is quiescent
-    /// (session start/stop), which the orchestrator guarantees.
+    /// Consumer-side discard of all queued samples (snaps `head` to `tail`).
+    /// SPSC-safe against a concurrent producer `write` — each side touches
+    /// only its own cursor — so it's valid to call on session reset even
+    /// while the render-thread far-tap is still producing (the network-resume
+    /// path does exactly this). The only requirement is a single-threaded
+    /// consumer; any samples the producer enqueues during the snap simply
+    /// remain as fresh reference.
     func clear() {
         head.store(tail.load(ordering: .acquiring), ordering: .releasing)
     }
