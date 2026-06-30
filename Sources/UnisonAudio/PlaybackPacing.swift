@@ -21,21 +21,31 @@ import UnisonDomain
 /// too empty". Then slew-rate-limit the change so the rate moves
 /// smoothly (under 0.5/sec) and is imperceptible inside a single chunk.
 ///
-/// **Invariants enforced.**
-/// 1. `timePitch.rate >= 1.0` always — never play slower than real-time.
-///    Anything slower would let the buffer overflow forever.
-/// 2. `timePitch.rate <= maxRate` (2.5) — above that TimePitch artefacts
-///    become audible on speech.
-/// 3. Rate changes are slew-limited to `maxRateStepPerTick` (0.05 = 0.5
-///    per second). At a 100 ms tick interval this is imperceptible
-///    inside a single ~400 ms chunk.
+/// **v4 — bidirectional regulator (was v3's one-sided "speed-up only").**
+/// v3 floored the rate at 1.0× and targeted a 1.0 s buffer, which made it
+/// a no-op at the thin depths real sessions run at — and since the model
+/// emits at 0.92–0.99× wall-clock, playing at a hard 1.0× drained the
+/// buffer to silence (the "audio drops out then resumes" symptom). v4
+/// regulates the queue around a THIN setpoint (`targetBufferSec` ≈ 0.15 s,
+/// ≈ today's latency) and is allowed to play slightly slower than
+/// real-time (down to `minRate` 0.85×) so consumption matches arrival
+/// instead of out-running it. Net effect: no added steady-state latency,
+/// but the dropouts caused by our own 1.0× floor go away.
 ///
-/// **What this does NOT solve.** Bluetooth driver clock skew, per-chunk
-/// network jitter, and the model's clause-burst timing all live below
-/// this controller. The pacing keeps the queue *bounded* and the
-/// playback *smooth* — but if the model ever genuinely emits slower
-/// than 1.0× for a sustained period (unlikely but possible), the
-/// buffer must underrun because we can't go below 1.0×.
+/// **Invariants enforced.**
+/// 1. `minRate <= timePitch.rate <= maxRate`. The floor is below 1.0 on
+///    purpose (match sub-real-time arrival); the ceiling drains bursts.
+/// 2. Rate changes are slew-limited to `maxRateStepPerTick` (0.05 = 0.5
+///    per second) — imperceptible inside a single chunk.
+///
+/// **What this does NOT solve.** Bluetooth driver clock skew and large
+/// per-chunk network-jitter spikes still live below this controller — a
+/// chunk arriving much later than its predecessor can still momentarily
+/// empty the thin buffer. Those residual gaps are smoothed at the
+/// playback boundary, and the model's own amplitude fade is handled by
+/// `CompensatingAGC`, not here. If the model ever emits slower than
+/// `minRate` for a sustained stretch some underrun is still unavoidable —
+/// but 0.85× covers the observed arrival range.
 ///
 /// Owned by the player; one instance per `AVAudioPlayerNode` whose
 /// output passes through the matching `AVAudioUnitTimePitch`. Call
@@ -58,32 +68,41 @@ public final class PlaybackPacing: @unchecked Sendable {
     // controller uses. There's no other reason to expose them and
     // the in-app callers don't reach for them.
 
-    /// Desired steady-state buffer depth in audio-seconds. Acts as the
-    /// "we don't care below this" threshold — at the empirically-
-    /// observed average buffer depth (0.08–0.15 s on real OpenAI
-    /// translation sessions), rate stays at 1.0× and the controller
-    /// is a no-op. Pushed up to 1.0 s after harness data showed v3's
-    /// previous 0.4 s threshold triggered mild speedups (rate up to
-    /// 1.18×) that drained the buffer fast enough to create the
-    /// "empty window between chunks" pattern the user reported.
-    public static let targetBufferSec: Double = 1.0
+    /// Steady-state buffer **setpoint** in audio-seconds — the depth the
+    /// regulator holds the queue at. Kept THIN (≈ the empirically-observed
+    /// 0.08–0.15 s depth real sessions already run at) so the added
+    /// latency over the old behaviour is negligible: we are NOT pre-rolling
+    /// a cushion, just regulating around the depth the player already had.
+    /// v3 used 1.0 s here, but combined with the old `minRate = 1.0` floor
+    /// that made the controller a no-op which drained to underrun on
+    /// sub-real-time arrival. v4 regulates *bidirectionally* around this
+    /// thin setpoint: below it, ease slightly below arrival to rebuild;
+    /// above it, speed up to drain.
+    public static let targetBufferSec: Double = 0.15
     /// Hard ceiling on `timePitch.rate`. Capped at 1.5× — TimePitch
     /// supports much higher, but our policy is "stay close to real-
     /// time playback unless the model is truly overflowing". 1.5×
     /// is still audibly natural; higher values introduce noticeable
     /// time-stretch artefacts.
     public static let maxRate: Double = 1.5
-    /// Hard floor on `timePitch.rate`. Below 1.0 the player falls behind
-    /// real-time and the buffer overflows indefinitely; we never go
-    /// slower than wall-clock even if the buffer is empty.
-    public static let minRate: Double = 1.0
+    /// Floor on `timePitch.rate`. v4 lets the player run *slightly* slower
+    /// than wall-clock so it can match the model's measured sub-real-time
+    /// arrival (0.92–0.99×) instead of out-running it and draining to
+    /// silence. This does NOT bloat latency — matching arrival keeps the
+    /// buffer stable at `targetBufferSec`; the rate only dips toward this
+    /// floor transiently to rebuild a critically-low buffer, and the
+    /// buffer-error term + `maxRate` ceiling still drain any burst. 0.85
+    /// is a safety margin below the observed arrival range — in practice
+    /// the rate hovers near `arrivalRateEMA` (~0.95×), not at the floor.
+    public static let minRate: Double = 0.85
     /// Multiplier on `(depth_smooth - targetBufferSec)` to translate
-    /// buffer error into a rate correction. Tuned so a 3 s buffer
-    /// depth (excess = 2.0) lands exactly at `maxRate=1.5` from a 1.0
-    /// baseline: `1.0 + 2.0 × 0.3 = 1.6` → clamps to 1.5. The 0.3
-    /// gain keeps the ramp gentle — the rate changes smoothly across
-    /// several seconds rather than jerking on each depth peak.
-    public static let correctionGain: Double = 0.3
+    /// buffer error into a rate correction around the thin setpoint.
+    /// 0.4 makes the regulator responsive enough to rebuild a near-empty
+    /// buffer within ~2 s (at depth 0, correction ≈ -0.06 → eases ~0.06
+    /// below arrival) and to drain a burst (depth 0.5 s → +0.14 → speeds
+    /// up), while the per-tick slew limit keeps every change smooth and
+    /// imperceptible inside a chunk.
+    public static let correctionGain: Double = 0.4
     /// Maximum change in `timePitch.rate` per tick. At a 100 ms tick
     /// interval, 0.05 means the rate can move at most 0.5 per second
     /// — well below the threshold of audible glitching on TimePitch.

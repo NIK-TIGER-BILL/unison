@@ -28,9 +28,12 @@ import Foundation
 /// shared global. The class `CompensatingAGC` is just a stateful
 /// wrapper around it for the real-time path.
 public struct AGCConfig: Sendable {
-    /// Target RMS to maintain. Calibrated against observed model
-    /// output at the start of a session before fade kicks in
-    /// (≈ 0.05 in our test recordings).
+    /// Minimum loudness floor for the adaptive target. The AGC restores
+    /// faded audio to the session's own peak RMS (see
+    /// `AGCState.sessionPeakRMS`); `targetRMS` is the floor it won't
+    /// target below, so a genuinely-quiet session still reaches a sane
+    /// level. ≈ 0.05 matches OpenAI's fresh output; louder engines
+    /// (Gemini ≈ 0.12) self-target their own peak above it.
     public let targetRMS: Double
     /// Maximum gain multiplier. 4× ≈ +12 dB — covers our worst-case
     /// observed fade (Q4/Q1 ≈ 30 % → need ~3.3× to restore).
@@ -84,8 +87,17 @@ public struct AGCState: Equatable, Sendable {
     /// Seconds of consecutive silence observed. Once this exceeds
     /// `config.resetSilenceSec`, the controller resets to fresh state.
     public var silenceAccumSec: Double
+    /// Peak long-term RMS seen this session — the "fresh" level before
+    /// the model's fade. The adaptive target: we restore faded audio to
+    /// THIS level (floored at `config.targetRMS`), so the compensation
+    /// auto-calibrates to each engine's output loudness (OpenAI ≈ 0.05,
+    /// Gemini ≈ 0.12) and to the speaker/mic — rather than pinning every
+    /// engine at a single hard-coded level that left louder engines
+    /// audibly fading down to it. Reset to 0 on silence.
+    public var sessionPeakRMS: Double
 
-    public static let initial = AGCState(longTermRMS: 0, currentGain: 1.0, silenceAccumSec: 0)
+    public static let initial = AGCState(longTermRMS: 0, currentGain: 1.0,
+                                         silenceAccumSec: 0, sessionPeakRMS: 0)
 }
 
 public enum CompensatingAGC {
@@ -149,10 +161,20 @@ public enum CompensatingAGC {
                                  + frameRMS * config.rmsAlpha
         }
 
-        // Desired gain to bring long-term RMS to target.
+        // Track the session's peak (fresh) level — the loudest the
+        // long-term RMS has reached before the fade pulls it down.
+        newState.sessionPeakRMS = max(state.sessionPeakRMS, newState.longTermRMS)
+
+        // Desired gain restores the faded long-term RMS back to the
+        // session's fresh level (its peak), floored at `targetRMS` so a
+        // genuinely-quiet session still reaches a sane minimum loudness.
+        // Targeting the peak (not a fixed constant) is what fixes the
+        // "gets quieter over a call" symptom on louder engines like
+        // Gemini, whose fresh ≈ 0.12 sat well above the old 0.05 target.
+        let target = max(newState.sessionPeakRMS, config.targetRMS)
         let desiredGain: Float
         if newState.longTermRMS > 0.0001 {
-            desiredGain = Float(config.targetRMS / newState.longTermRMS)
+            desiredGain = Float(target / newState.longTermRMS)
         } else {
             desiredGain = 1.0
         }

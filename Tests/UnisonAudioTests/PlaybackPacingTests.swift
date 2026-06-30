@@ -2,69 +2,113 @@ import Foundation
 import Testing
 @testable import UnisonAudio
 
-// Tests for the lenient pacing v3 (after the harness-data review).
-// Constants for reference (kept in sync with PlaybackPacing.swift):
-//   targetBufferSec  = 1.0
+// Tests for bidirectional pacing v4 (matches the model's sub-real-time
+// arrival around a thin buffer setpoint instead of flooring at 1.0×).
+// Constants (kept in sync with PlaybackPacing.swift):
+//   targetBufferSec  = 0.15
 //   maxRate          = 1.5
-//   minRate          = 1.0
-//   correctionGain   = 0.3
+//   minRate          = 0.85
+//   correctionGain   = 0.4
 
 // MARK: - targetRate
 
-@Test func pacing_atBufferTarget_targetMatchesArrival() {
-    // At exactly targetBufferSec (1.0 s), correction = 0 → rate matches arrival.
-    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.0, depthSmooth: 1.0)
-    #expect(r.bufferError == 0.0)
-    #expect(r.correction == 0.0)
-    #expect(r.clampedTarget == 1.0)
+@Test func pacing_atSetpoint_targetMatchesArrival() {
+    // At exactly targetBufferSec, correction = 0 → rate == arrival.
+    let r = PlaybackPacing.targetRate(arrivalRateEMA: 0.95, depthSmooth: PlaybackPacing.targetBufferSec)
+    #expect(abs(r.bufferError) < 1e-9)
+    #expect(abs(r.correction) < 1e-9)
+    #expect(abs(r.clampedTarget - 0.95) < 1e-9)
 }
 
-@Test func pacing_belowTarget_targetFloorsAtOne() {
-    // Normal operation (depth 0.2 s, well below 1.0 s target):
-    // bufferError = -0.8, correction = -0.24, unbounded = 0.76 → clamps to 1.0.
-    // The controller is a no-op at typical buffer depths — this is the
-    // intent of the lenient v3 thresholds.
-    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.0, depthSmooth: 0.2)
-    #expect(r.unboundedTarget < 1.0)
-    #expect(r.clampedTarget == 1.0)
+@Test func pacing_subRealtimeArrival_followsArrival_notFlooredAtOne() {
+    // THE v4 fix: model emits at 0.95× and the buffer is at setpoint → we
+    // PLAY at 0.95× (match arrival) instead of the old hard 1.0× that
+    // out-ran the source and drained the buffer to silence. Consumption ==
+    // arrival ⇒ no underrun and no latency growth.
+    let r = PlaybackPacing.targetRate(arrivalRateEMA: 0.95, depthSmooth: PlaybackPacing.targetBufferSec)
+    #expect(r.clampedTarget < 1.0)
+    #expect(abs(r.clampedTarget - 0.95) < 1e-9)
 }
 
-@Test func pacing_mildOverTarget_gentleSpeedup() {
-    // Buffer 2.0 s (over target by 1.0) → correction = 0.3 → target = 1.3.
-    // Mild ramp-up, well below the 1.5 ceiling — gives the buffer time
-    // to drain without aggressive time-stretching.
-    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.0, depthSmooth: 2.0)
-    #expect(abs(r.bufferError - 1.0) < 0.0001)
-    #expect(abs(r.correction - 0.3) < 0.0001)
-    #expect(abs(r.clampedTarget - 1.3) < 0.0001)
+@Test func pacing_bufferDraining_easesBelowArrivalToRebuild() {
+    // Buffer below setpoint (0.05 < 0.15) → ease slightly below arrival to
+    // rebuild the thin cushion, never below minRate.
+    let r = PlaybackPacing.targetRate(arrivalRateEMA: 0.95, depthSmooth: 0.05)
+    #expect(r.bufferError < 0)
+    #expect(r.clampedTarget < 0.95)            // slower than arrival → rebuilds
+    #expect(r.clampedTarget >= PlaybackPacing.minRate)
 }
 
-@Test func pacing_severeOverTarget_saturatesAtMaxRate() {
-    // Buffer 3.0 s (excess 2.0) + arrival 1.0× → unbounded = 1.0 + 0.6 = 1.6.
-    // Clamps to maxRate = 1.5. This is the safety-net regime — should
-    // never trigger on typical OpenAI Realtime sessions.
-    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.0, depthSmooth: 3.0)
-    #expect(r.unboundedTarget > 1.5)
-    #expect(r.clampedTarget == 1.5)
+@Test func pacing_criticallyEmpty_clampsAtMinRate_notBelow() {
+    // Low arrival + empty buffer pushes the raw target below the floor;
+    // it clamps at minRate (0.85), the safety margin.
+    let r = PlaybackPacing.targetRate(arrivalRateEMA: 0.80, depthSmooth: 0.0)
+    #expect(r.unboundedTarget < PlaybackPacing.minRate)
+    #expect(r.clampedTarget == PlaybackPacing.minRate)
 }
 
-@Test func pacing_arrivalSlightlyAboveOne_lowDepth_stillRateOne() {
-    // Verbose target language case: arrival 1.05× wall-clock, buffer near
-    // empty. Correction negative pulls unbounded below arrival, but the
-    // 1.0 floor + 1.0 minRate keep us at 1.0. We follow the arrival rate
-    // only when buffer is at or above target.
-    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.05, depthSmooth: 0.2)
-    // unbounded = 1.05 + (0.2 - 1.0) × 0.3 = 1.05 - 0.24 = 0.81 → floor 1.0
-    #expect(r.clampedTarget == 1.0)
+@Test func pacing_overSetpoint_speedsUpToDrain() {
+    // Buffer above setpoint (burst) → speed up above arrival to drain,
+    // keeping latency bounded.
+    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.0, depthSmooth: 0.5)
+    #expect(r.bufferError > 0)
+    #expect(r.clampedTarget > 1.0)
+    #expect(r.clampedTarget <= PlaybackPacing.maxRate)
 }
 
-@Test func pacing_slowArrival_targetStillFloorsAtOne() {
-    // Pathological case: model emits slower than real-time (0.7×).
-    // We never slow below 1.0 — that would let the buffer overflow
-    // indefinitely. Underrun is the unavoidable consequence; pacing
-    // can't fix what isn't being emitted.
-    let r = PlaybackPacing.targetRate(arrivalRateEMA: 0.7, depthSmooth: 1.0)
-    #expect(r.clampedTarget == 1.0)
+@Test func pacing_severeOverSetpoint_saturatesAtMaxRate() {
+    // A large sustained buffer (burst / verbose target) saturates the
+    // drain rate at maxRate.
+    let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.2, depthSmooth: 3.0)
+    #expect(r.unboundedTarget > PlaybackPacing.maxRate)
+    #expect(r.clampedTarget == PlaybackPacing.maxRate)
+}
+
+// MARK: - Emergent behaviour over a synthetic timeline
+
+@Test func pacing_subRealtimeTimeline_noSustainedUnderrun_andThinLatency() {
+    // Replay the production rate math over 60 s of steady 0.95× arrival
+    // (the observed model cadence). v3 (floor 1.0×) would out-run the
+    // source and underrun continuously; v4 should rebuild a thin buffer,
+    // settle at consumption ≈ arrival, and hold latency near the setpoint.
+    let dt = PlaybackPacing.tickIntervalSec
+    let sr = 48_000.0
+    let dtSamples = dt * sr
+    let arrivalRate = 0.95
+
+    var scheduled = 0.0, completed = 0.0, prevSched = 0.0
+    var arrivalEMA = 1.0, depthSmooth = 0.0, applied = 1.0
+    var steadyTicks = 0, steadyUnderruns = 0
+    var lastDepth = 0.0
+
+    for tick in 0..<600 {
+        scheduled += arrivalRate * dtSamples                 // steady sub-real-time delivery
+        let want = applied * dtSamples
+        let avail = scheduled - completed
+        let consumed = min(want, avail)
+        completed += consumed
+        let depth = max(0, scheduled - completed) / sr
+
+        let instArrival = (scheduled - prevSched) / dtSamples
+        prevSched = scheduled
+        arrivalEMA += (instArrival - arrivalEMA) * PlaybackPacing.arrivalRateAlpha
+        depthSmooth += (depth - depthSmooth) * PlaybackPacing.depthSmoothAlpha
+
+        let st = PlaybackPacing.targetRate(arrivalRateEMA: arrivalEMA, depthSmooth: depthSmooth)
+        applied = PlaybackPacing.slewToward(currentRate: applied, target: st.clampedTarget,
+                                            maxStep: PlaybackPacing.maxRateStepPerTick)
+
+        if tick > 200 {                                       // after warm-up / EMA convergence
+            steadyTicks += 1
+            if consumed < want - 1e-6 { steadyUnderruns += 1 }
+            lastDepth = depth
+        }
+    }
+
+    let underrunPct = Double(steadyUnderruns) / Double(steadyTicks) * 100.0
+    #expect(underrunPct < 2.0, "steady-state underrun \(underrunPct)% — controller still out-runs arrival")
+    // Latency-neutral: the buffer holds near the thin setpoint, not blown up.
+    #expect(lastDepth > 0.05 && lastDepth < 0.40, "steady depth \(lastDepth)s drifted off the setpoint")
 }
 
 // MARK: - slewToward

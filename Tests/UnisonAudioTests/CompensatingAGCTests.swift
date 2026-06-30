@@ -158,3 +158,30 @@ import Testing
     #expect(ratio > 0.6,
             "AGC should mostly restore amplitude (ratio went \(ratio) — needs to exceed 0.6)")
 }
+
+@Test func agc_adaptsTargetToFreshLevel_aboveTargetRMS() {
+    // Louder engine (Gemini-like): the session's fresh level is 0.12,
+    // well above the 0.05 floor. As it fades to 0.04 the AGC must restore
+    // toward the FRESH 0.12 — not pin at 0.05 — otherwise the user hears
+    // the 0.12→0.05 drop as "getting quieter". The peak target should
+    // auto-calibrate to ~0.12.
+    var state = AGCState.initial
+    var lastOut: [Float] = []
+    let frames = 250  // 25 s
+    for i in 0..<frames {
+        let progress = Double(i) / Double(frames)
+        let inRMS = 0.12 - progress * (0.12 - 0.04)   // fade 0.12 → 0.04
+        let frame: [Float] = .init(repeating: Float(inRMS), count: 4800)
+        let (s, o) = CompensatingAGC.processed(
+            samples: frame, frameDurationSec: 0.1, state: state, config: .default)
+        state = s
+        lastOut = o
+    }
+    // Peak target tracked the fresh ~0.12 level (not the 0.05 floor)…
+    #expect(state.sessionPeakRMS > 0.10,
+            "peak target should track the fresh 0.12 level, got \(state.sessionPeakRMS)")
+    // …so the faded tail is boosted back well above the old 0.05 pin.
+    let outRMS = Double(abs(lastOut[0]))
+    #expect(outRMS > 0.08,
+            "faded output should be restored toward the fresh ~0.12, got \(outRMS)")
+}
