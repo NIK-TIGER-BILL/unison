@@ -1,4 +1,5 @@
 import SwiftUI
+import UnisonDomain
 
 /// Liquid-glass onboarding window — the first thing the user sees when
 /// they launch Unison without all three prerequisites in place.
@@ -303,7 +304,7 @@ public struct OnboardingView: View {
 
     private var apiKeyCard: some View {
         StepCard(
-            title: "OpenAI ключ",
+            title: "Ключ API",
             icon: Image(systemName: "key.fill"),
             status: cardStatus(for: .apiKey)
         ) {
@@ -311,12 +312,24 @@ public struct OnboardingView: View {
                 DashedDivider()
                     .padding(.top, 0)
 
+                // Provider selector — segmented so the user can switch
+                // between OpenAI and Gemini; updates validation, placeholder,
+                // and "Получить ключ" URL immediately.
+                Picker("Провайдер", selection: Binding(
+                    get: { vm.selectedModel },
+                    set: { vm.setSelectedModel($0) }
+                )) {
+                    ForEach(TranslationModel.allCases, id: \.self) { Text($0.displayName).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
                 // SecretInput and "Сохранить" stacked vertically. The
                 // design HTML puts them side-by-side in a 480pt-wide
                 // window, but at our 440pt window the row gets too
-                // cramped — the button "ь" was getting clipped against
-                // the card edge. Stacking keeps the input full-width and
-                // the button right-aligned underneath.
+                // cramped — the button was getting clipped against the
+                // card edge. Stacking keeps the input full-width and the
+                // button right-aligned underneath.
                 SecretInput(
                     text: Binding(
                         get: { vm.apiKeyDraft },
@@ -326,15 +339,15 @@ public struct OnboardingView: View {
                             vm.clearError(for: .apiKey)
                         }
                     ),
-                    placeholder: "sk-proj-..."
+                    placeholder: vm.selectedModel.apiKeyPlaceholder
                 )
                 .padding(.top, 4)
 
                 HStack(spacing: 0) {
                     MutedLink("Получить ключ") {
-                        onOpenURL(OnboardingViewModel.openAIKeysURL)
+                        onOpenURL(vm.selectedModel.getKeyURL)
                     }
-                    .accessibilityLabel("Получить ключ OpenAI")
+                    .accessibilityLabel("Получить ключ \(vm.selectedModel.displayName)")
                     Spacer(minLength: 8)
                     compactPrimaryButton(
                         title: "Сохранить",

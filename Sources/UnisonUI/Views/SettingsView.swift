@@ -56,7 +56,7 @@ public struct SettingsView: View {
                 audioSection
                 appScopeSection
                 languagesSection
-                openAISection
+                modelSection
                 hotkeysSection
                 blackHoleSection
                 behaviorSection
@@ -227,7 +227,7 @@ public struct SettingsView: View {
                         vm.setLanguagePair(pair)
                     }
                 )) {
-                    ForEach(Language.supportedTargets, id: \.self) { lang in
+                    ForEach(vm.settings.translationModel.supportedTargets, id: \.self) { lang in
                         Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
                     }
                 }
@@ -243,7 +243,7 @@ public struct SettingsView: View {
                         vm.setLanguagePair(pair)
                     }
                 )) {
-                    ForEach(Language.supportedTargets, id: \.self) { lang in
+                    ForEach(vm.settings.translationModel.supportedTargets, id: \.self) { lang in
                         Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
                     }
                 }
@@ -253,19 +253,33 @@ public struct SettingsView: View {
         }
     }
 
-    // MARK: - Section: OpenAI
+    // MARK: - Section: Translation model
 
-    private var openAISection: some View {
-        // Label above the input rather than inline — `sk-proj-…` keys
-        // are too long to share a row without truncation.
-        card(title: "OpenAI") {
+    private var modelSection: some View {
+        // Label above the input rather than inline — long API keys
+        // can't share a row without truncation.
+        card(title: "Модель перевода") {
+            LabeledContent("Движок") {
+                Picker("Движок", selection: Binding(
+                    get: { vm.settings.translationModel },
+                    set: { vm.setTranslationModel($0) }
+                )) {
+                    ForEach(TranslationModel.allCases, id: \.self) { model in
+                        Text(model.displayName).tag(model)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+
             VStack(alignment: .leading, spacing: 6) {
                 Text("API ключ")
                 SecretInputBound(
                     text: Binding(
                         get: { vm.apiKey },
                         set: { vm.updateApiKey($0) }
-                    )
+                    ),
+                    placeholder: vm.settings.translationModel.apiKeyPlaceholder
                 )
                 .frame(maxWidth: .infinity)
                 HStack(spacing: 6) {
@@ -273,9 +287,9 @@ public struct SettingsView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                     MutedLink("Получить ключ") {
-                        onOpenURL(SettingsLinks.openAIKeys)
+                        onOpenURL(vm.settings.translationModel.getKeyURL)
                     }
-                    .accessibilityLabel("Получить ключ OpenAI")
+                    .accessibilityLabel("Получить ключ \(vm.settings.translationModel.displayName)")
                     Spacer(minLength: 0)
                 }
             }
@@ -493,10 +507,11 @@ public struct SettingsView: View {
 
 private struct SecretInputBound: View {
     @Binding var text: String
+    var placeholder: String = "sk-proj-…"
 
     var body: some View {
         // Show/hide toggle lives inside `SecretInput` (internal state).
-        SecretInput(text: $text, placeholder: "sk-proj-…")
+        SecretInput(text: $text, placeholder: placeholder)
     }
 }
 
@@ -506,7 +521,6 @@ private enum SettingsLayout {
 }
 
 private enum SettingsLinks {
-    static let openAIKeys = URL(string: "https://platform.openai.com/api-keys")!
     static let license = URL(string: "https://opensource.org/licenses/MIT")!
     static let source = URL(string: "https://github.com/NIK-TIGER-BILL/unison")!
 }

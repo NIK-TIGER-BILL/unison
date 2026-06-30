@@ -17,10 +17,10 @@ final class MockInstaller: BlackHoleInstaller, @unchecked Sendable {
 }
 
 final class MockKeychain: KeychainService, @unchecked Sendable {
-    private var stored: String?
-    func loadAPIKey() -> String? { stored }
-    func saveAPIKey(_ key: String) throws { stored = key }
-    func deleteAPIKey() throws { stored = nil }
+    private var keys: [TranslationModel: String] = [:]
+    func loadAPIKey(for model: TranslationModel) -> String? { keys[model] }
+    func saveAPIKey(_ key: String, for model: TranslationModel) throws { keys[model] = key }
+    func deleteAPIKey(for model: TranslationModel) throws { keys[model] = nil }
 }
 
 @MainActor
@@ -121,7 +121,7 @@ func onboarding_saveAPIKey_invalidDraft_setsErrorStatus() {
         Issue.record("Expected .error for invalid draft, got \(String(describing: vm.status[.apiKey]))")
     }
     // Keychain must be untouched.
-    #expect(kc.loadAPIKey() == nil)
+    #expect(kc.loadAPIKey(for: .openAIRealtime) == nil)
 }
 
 @MainActor
@@ -137,7 +137,7 @@ func onboarding_saveAPIKey_validDraft_persistsAndClearsDraft() {
     vm.saveAPIKey()
     #expect(vm.status[.apiKey] == .done)
     #expect(vm.apiKeyDraft == "")
-    #expect(kc.loadAPIKey() == "sk-proj-1234567890abcdef")
+    #expect(kc.loadAPIKey(for: .openAIRealtime) == "sk-proj-1234567890abcdef")
 }
 
 @MainActor
@@ -321,7 +321,7 @@ func onboarding_onCompleted_firesExactlyOnce() async {
     let perms = MockPermissionsService()
     perms.statuses[.microphone] = .granted
     let kc = MockKeychain()
-    try? kc.saveAPIKey("sk-proj-1234567890abcdef")
+    try? kc.saveAPIKey("sk-proj-1234567890abcdef", for: .openAIRealtime)
     // 2ch installed by default in MockInstaller.
     let vm = OnboardingViewModel(
         permissions: perms,
@@ -341,7 +341,57 @@ func onboarding_onCompleted_firesExactlyOnce() async {
 
 @Test
 func onboarding_openAIKeysURL_pointsToPlatform() {
-    #expect(OnboardingViewModel.openAIKeysURL.absoluteString == "https://platform.openai.com/api-keys")
+    // openAIKeysURL is now an alias kept for call-site compatibility;
+    // the canonical source of truth is TranslationModel.openAIRealtime.getKeyURL.
+    #expect(TranslationModel.openAIRealtime.getKeyURL.absoluteString == "https://platform.openai.com/api-keys")
+}
+
+// MARK: - Task 10: engine-aware key validation
+
+@MainActor
+@Test func validatesKeyAgainstSelectedModelPrefix() {
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: MockInstaller(),
+        keychain: MockKeychain()
+    )
+    vm.selectedModel = .geminiLiveTranslate
+    vm.apiKeyDraft = "AQ.abcdefghij1234567890"
+    #expect(vm.canSaveKey)                        // AQ. accepted for Gemini
+    vm.apiKeyDraft = "sk-abcdefghij1234567890"
+    #expect(!vm.canSaveKey)                       // sk- is not a Gemini key
+}
+
+@MainActor
+@Test func savesKeyToSelectedModelSlot() {
+    let kc = MockKeychain()
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: MockInstaller(),
+        keychain: kc
+    )
+    vm.selectedModel = .geminiLiveTranslate
+    vm.apiKeyDraft = "AQ.abcdefghij1234567890"
+    vm.saveAPIKey()
+    #expect(kc.loadAPIKey(for: .geminiLiveTranslate) == "AQ.abcdefghij1234567890")
+    #expect(kc.loadAPIKey(for: .openAIRealtime) == nil)
+}
+
+@MainActor
+@Test func setSelectedModel_clearsErrorAndRefreshes() {
+    let kc = MockKeychain()
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: MockInstaller(),
+        keychain: kc
+    )
+    // Seed OpenAI key so step is done, then prime an error on .apiKey
+    vm.apiKeyDraft = "bad"
+    vm.saveAPIKey()
+    #expect(vm.status[.apiKey]?.errorMessage != nil)
+    // Switching provider must clear the error.
+    vm.setSelectedModel(.geminiLiveTranslate)
+    #expect(vm.status[.apiKey]?.errorMessage == nil)
 }
 
 @Test

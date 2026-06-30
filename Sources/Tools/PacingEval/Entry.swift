@@ -10,6 +10,8 @@ struct CLIArgs {
     let outputDir: URL
     let label: String
     let runs: Int
+    /// Which translation provider to target. Default `.openAIRealtime`.
+    let provider: TranslationModel
     /// When set, skip the OpenAI session entirely and just render the
     /// input audio through our production AVAudioEngine playback chain
     /// (player → timePitch → mixer) offline. Used to test whether the
@@ -23,6 +25,7 @@ struct CLIArgs {
         var output: String = "./pacing-eval-out"
         var label: String?
         var runs: Int = 1
+        var provider: TranslationModel = .openAIRealtime
         var playbackTestOnly = false
         var i = 1
         while i < args.count {
@@ -37,6 +40,19 @@ struct CLIArgs {
                 i += 1; label = args[i]
             case "--runs":
                 i += 1; runs = Int(args[i]) ?? 1
+            case "--provider":
+                i += 1
+                switch args[i] {
+                case "openai":
+                    provider = .openAIRealtime
+                case "gemini":
+                    provider = .geminiLiveTranslate
+                default:
+                    FileHandle.standardError.write(
+                        "--provider must be 'openai' or 'gemini'. Got: \(args[i])\n".data(using: .utf8)!
+                    )
+                    exit(2)
+                }
             case "--playback-test":
                 playbackTestOnly = true
             case "--help", "-h":
@@ -61,28 +77,38 @@ struct CLIArgs {
         let outputURL = URL(fileURLWithPath: output)
         try FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
         let finalLabel = label ?? (audio as NSString).lastPathComponent.replacingOccurrences(of: ".", with: "_")
-        return CLIArgs(audioPath: audio, targetLang: lang, outputDir: outputURL, label: finalLabel, runs: max(1, runs), playbackTestOnly: playbackTestOnly)
+        return CLIArgs(
+            audioPath: audio,
+            targetLang: lang,
+            outputDir: outputURL,
+            label: finalLabel,
+            runs: max(1, runs),
+            provider: provider,
+            playbackTestOnly: playbackTestOnly
+        )
     }
 
     static func printHelp() {
         print("""
-        pacing-eval — measure gpt-realtime-translate output cadence and
+        pacing-eval — measure realtime-translate output cadence and
         replay the PlaybackPacing controller against the recorded timeline.
 
         Usage:
-          pacing-eval --audio <path.wav> --target <lang> [--output <dir>] [--label <name>]
+          pacing-eval --audio <path.wav> --target <lang> [--provider <name>] [--output <dir>] [--label <name>]
 
         Required:
-          --audio <path>     Input audio file (WAV/AIFF/M4A; any sample rate)
-          --target <code>    ISO 639-1 target language code (en, ru, es, de, fr, ...)
+          --audio <path>       Input audio file (WAV/AIFF/M4A; any sample rate)
+          --target <code>      ISO 639-1 target language code (en, ru, es, de, fr, ...)
 
         Optional:
-          --output <dir>     Output directory for CSVs + report (default: ./pacing-eval-out)
-          --label <name>     Label prefix for output files (default: derived from audio filename)
-          -h, --help         Show this help
+          --provider <name>    Translation provider: openai (default) or gemini
+          --output <dir>       Output directory for CSVs + report (default: ./pacing-eval-out)
+          --label <name>       Label prefix for output files (default: derived from audio filename)
+          -h, --help           Show this help
 
         Env:
-          OPENAI_API_KEY     Required; the bearer token for the Realtime API
+          OPENAI_API_KEY       Required for --provider openai (default)
+          GEMINI_API_KEY       Required for --provider gemini
         """)
     }
 }
@@ -283,27 +309,40 @@ struct PacingEvalCLI {
     static func main() async {
         do {
             let args = try CLIArgs.parse()
-            // Playback-test mode doesn't talk to OpenAI; skip the API
-            // key check so we can run fade diagnosis without exposing
-            // a key.
+            // Playback-test mode doesn't talk to any provider; skip the API
+            // key check so we can run fade diagnosis without exposing a key.
             let apiKey: String
             if args.playbackTestOnly {
                 apiKey = ""
             } else {
-                guard let k = ProcessInfo.processInfo.environment["OPENAI_API_KEY"], !k.isEmpty else {
-                    throw PacingEvalError.missingApiKey
+                let envVar: String
+                switch args.provider {
+                case .openAIRealtime:    envVar = "OPENAI_API_KEY"
+                case .geminiLiveTranslate: envVar = "GEMINI_API_KEY"
+                }
+                guard let k = ProcessInfo.processInfo.environment[envVar], !k.isEmpty else {
+                    throw PacingEvalError.missingApiKey(envVar)
                 }
                 apiKey = k
             }
 
-            print("[pacing-eval] audio=\(args.audioPath) target=\(args.targetLang.rawValue) out=\(args.outputDir.path) runs=\(args.runs) playback-test=\(args.playbackTestOnly)")
+            // Wire sample rate depends on the provider. AudioReader must
+            // decode to this rate so the PCM sent to the stream is already
+            // at the rate the stream expects (streams base64-encode pcm as-is).
+            let wireSampleRate = args.provider.inputWireSampleRate
 
-            let reader = AudioReader(url: URL(fileURLWithPath: args.audioPath), chunkMs: 100)
+            print("[pacing-eval] audio=\(args.audioPath) target=\(args.targetLang.rawValue) provider=\(args.provider.rawValue) out=\(args.outputDir.path) runs=\(args.runs) playback-test=\(args.playbackTestOnly)")
+
+            // Playback-test always uses 24 kHz (tests the AVAudioEngine chain,
+            // independent of provider). Live session decodes to wireSampleRate.
+            let readerRate = args.playbackTestOnly ? 24_000 : wireSampleRate
+            let reader = AudioReader(url: URL(fileURLWithPath: args.audioPath), chunkMs: 100, targetSampleRate: readerRate)
             let decoded = try reader.decode()
-            print(String(format: "[pacing-eval] decoded %.2fs audio (%d chunks of %dms)",
+            print(String(format: "[pacing-eval] decoded %.2fs audio (%d chunks of %dms) at %dHz",
                          decoded.totalDurationSec,
                          decoded.chunkCount,
-                         100))
+                         100,
+                         decoded.sampleRate))
 
             if args.playbackTestOnly {
                 try runPlaybackTest(decoded: decoded, args: args)
@@ -321,6 +360,8 @@ struct PacingEvalCLI {
                     apiKey: apiKey,
                     targetLang: args.targetLang,
                     chunks: chunks,
+                    provider: args.provider,
+                    wireSampleRate: wireSampleRate,
                     chunkInterval: 0.1,
                     drainTimeoutSec: 5.0
                 )

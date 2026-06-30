@@ -8,7 +8,9 @@ import UnisonDomain
 // when test files only import `Testing`.
 
 func encodeToJSONString<T: Encodable>(_ value: T) throws -> String {
-    let data = try JSONEncoder().encode(value)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .withoutEscapingSlashes
+    let data = try encoder.encode(value)
     return String(data: data, encoding: .utf8) ?? ""
 }
 
@@ -34,6 +36,42 @@ func posixOperationCanceledError() -> Error {
         code: 89,
         userInfo: [NSLocalizedDescriptionKey: "Operation canceled"]
     )
+}
+
+func decodeGeminiServerEvent(_ json: String) throws -> GeminiServerEvent {
+    let data = json.data(using: .utf8)!
+    return try JSONDecoder().decode(GeminiServerEvent.self, from: data)
+}
+
+/// Structural check on a Gemini setup payload: the transcription configs must
+/// be TOP-LEVEL `setup` fields, NOT nested in `generationConfig` — the live
+/// API rejects the nested form with a 1007 "Unknown name … at
+/// 'setup.generation_config'" close.
+func geminiSetupHasTranscriptionAtSetupLevel(_ json: String) -> Bool {
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+          let setup = obj["setup"] as? [String: Any] else { return false }
+    let gc = setup["generationConfig"] as? [String: Any]
+    return setup["inputAudioTranscription"] != nil
+        && setup["outputAudioTranscription"] != nil
+        && gc?["inputAudioTranscription"] == nil
+        && gc?["outputAudioTranscription"] == nil
+}
+
+/// Structural check: `realtimeInputConfig` must be a TOP-LEVEL setup field
+/// (sibling of model/generationConfig) carrying
+/// `automaticActivityDetection.silenceDurationMs` — this is the VAD
+/// turn-detection fix (the ~800 ms API default was the freeze source).
+/// Misplacing it under generationConfig would 1007-reject like the
+/// transcription fields did.
+func geminiSetupHasVADConfig(_ json: String, silenceMs: Int) -> Bool {
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+          let setup = obj["setup"] as? [String: Any],
+          let ric = setup["realtimeInputConfig"] as? [String: Any],
+          let aad = ric["automaticActivityDetection"] as? [String: Any] else { return false }
+    let gc = setup["generationConfig"] as? [String: Any]
+    return gc?["realtimeInputConfig"] == nil
+        && (aad["silenceDurationMs"] as? Int) == silenceMs
+        && aad["endOfSpeechSensitivity"] != nil
 }
 
 struct GenericSendError: Error {}

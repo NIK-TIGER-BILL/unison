@@ -6,6 +6,7 @@ public struct Settings: Equatable, Codable, Sendable {
     public var excludedTapBundleIDs: [String]
     public var includedTapBundleIDs: [String]
     public var tapScopeMode: TapScopeMode
+    public var translationModel: TranslationModel
     private var _originalMixVolume: Float
     public var saveHistoryEnabled: Bool
     public var historySizeLimitMB: Int
@@ -28,6 +29,7 @@ public struct Settings: Equatable, Codable, Sendable {
         excludedTapBundleIDs: [String] = [],
         includedTapBundleIDs: [String] = [],
         tapScopeMode: TapScopeMode = .allExcept,
+        translationModel: TranslationModel = .openAIRealtime,
         originalMixVolume: Float = 0.2,
         saveHistoryEnabled: Bool = true,
         historySizeLimitMB: Int = 50
@@ -39,6 +41,7 @@ public struct Settings: Equatable, Codable, Sendable {
         self.excludedTapBundleIDs = excludedTapBundleIDs
         self.includedTapBundleIDs = includedTapBundleIDs
         self.tapScopeMode = tapScopeMode
+        self.translationModel = translationModel
         self._originalMixVolume = min(max(originalMixVolume, 0.0), 1.0)
         self.saveHistoryEnabled = saveHistoryEnabled
         self.historySizeLimitMB = historySizeLimitMB
@@ -49,6 +52,7 @@ public struct Settings: Equatable, Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case sessionMode, languagePair, inputDeviceUID, outputDeviceUID
         case excludedTapBundleIDs, includedTapBundleIDs, tapScopeMode
+        case translationModel
         case _originalMixVolume = "originalMixVolume"
         case saveHistoryEnabled, historySizeLimitMB
     }
@@ -65,6 +69,8 @@ public struct Settings: Equatable, Codable, Sendable {
                                                           forKey: .includedTapBundleIDs) ?? []
         self.tapScopeMode = try c.decodeIfPresent(TapScopeMode.self,
                                                   forKey: .tapScopeMode) ?? .allExcept
+        self.translationModel = try c.decodeIfPresent(TranslationModel.self,
+                                                      forKey: .translationModel) ?? .openAIRealtime
         let raw = try c.decode(Float.self, forKey: ._originalMixVolume)
         self._originalMixVolume = min(max(raw, 0.0), 1.0)
         self.saveHistoryEnabled = try c.decodeIfPresent(Bool.self, forKey: .saveHistoryEnabled) ?? true

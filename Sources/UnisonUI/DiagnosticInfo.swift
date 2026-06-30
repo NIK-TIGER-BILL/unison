@@ -89,7 +89,7 @@ public struct DiagnosticInfo: Sendable, Equatable {
             "Микрофон: \(micDevice ?? "по умолчанию")",
             "Аудио-выход: \(speakerDevice ?? "по умолчанию")",
             "BlackHole 2ch: \(blackHole2ch)",
-            "OpenAI ключ: \(openAIKeyStatus)",
+            "API ключ: \(openAIKeyStatus)",
             "Связь: \(connectivityHealth.ruLabel)"
         ]
         // Per-stream health is the diagnostic surface for the

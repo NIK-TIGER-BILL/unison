@@ -389,6 +389,7 @@ public final class TranslationOrchestrator {
         anyMicFrameThisSession = false
         anyServerDeltaThisSession = false
         state = .translating(mode: mode, startedAt: startedAt)
+        beginAudioActivity()
         // Seed per-stream connectivity health for whichever streams
         // this mode actually opens. The slow-detection loop iterates
         // only over speakers that have a live stream, so seeding the
@@ -1259,6 +1260,16 @@ public final class TranslationOrchestrator {
     /// state at `.error(...)` instead of clobbering it back to `.idle`,
     /// which would hide the failure from the popover.
     private func stopAllStreams() async {
+        // Release the App Nap / latency-critical activity token here, not in
+        // stop(): stop() is only one of the session-end paths. The six
+        // terminal-error transitions (no-data, reconnect-exhausted, failResume,
+        // pause-recovery, connection-observer terminal, empty-close escalation)
+        // all reach stopAllStreams() but NOT stop(), so ending the token only
+        // in stop() leaked it on every auto-failure — pinning high-precision
+        // timers and blocking system sleep until the user manually pressed
+        // Stop. stopAllStreams() is NOT on the reconnect / network-pause paths,
+        // so the token correctly survives those. Idempotent.
+        endAudioActivity()
         cancelReconnectWatchdog()
         cancelNoDataWatchdog()
         stopNetworkObserver()
@@ -1344,7 +1355,7 @@ public final class TranslationOrchestrator {
 
     public func stop() async {
         Self.log.info("stop() — tearing down session from state=\(String(describing: self.state))")
-        await stopAllStreams()
+        await stopAllStreams()   // also releases the App Nap activity token
         consecutiveEmptyCloses = [.me: 0, .peer: 0]
         state = .idle
         // Finalise any diagnostic dumps so the WAV `data` chunk size
@@ -1355,6 +1366,35 @@ public final class TranslationOrchestrator {
         archiveSession(mode: pendingArchiveMeta?.mode, startedAt: pendingArchiveMeta?.startedAt,
                        enabled: currentSettings.saveHistoryEnabled)
         pendingArchiveMeta = nil
+    }
+
+    /// App-Nap / throttling guard held for the duration of an active
+    /// translation session. A backgrounded menubar app becomes an App-Nap
+    /// candidate during the brief silences between utterances; the timer/IO
+    /// throttling App Nap applies there can jitter audio scheduling.
+    /// `.latencyCritical` requests the highest timer/IO precision and
+    /// `.userInitiated` keeps the work from being deferred. Released in
+    /// `stop()` — holding it while idle would also needlessly block system
+    /// sleep. Idempotent so reconnects don't stack tokens.
+    private var audioActivityToken: (any NSObjectProtocol)?
+
+    #if DEBUG
+    /// Test hook: is the App Nap / latency-critical activity token currently
+    /// held? Regression-guards that every session-end path releases it (C1).
+    var isHoldingAudioActivity: Bool { audioActivityToken != nil }
+    #endif
+
+    private func beginAudioActivity() {
+        guard audioActivityToken == nil else { return }
+        audioActivityToken = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .latencyCritical],
+            reason: "Unison real-time translated audio playback")
+    }
+
+    private func endAudioActivity() {
+        guard let token = audioActivityToken else { return }
+        ProcessInfo.processInfo.endActivity(token)
+        audioActivityToken = nil
     }
 
     /// Persist the just-ended session to the meeting archive. Internal so
@@ -1533,6 +1573,7 @@ public final class TranslationOrchestrator {
         // a local under main once (above)" comment was lying.)
         let outboundBuffer = audioBufferBySpeaker[.me]
         let task1 = Task { [stream, outboundBuffer, weak self] in
+            let wireRate = stream.inputWireSampleRate
             var frameIndex = 0
             for await frame in micFrames {
                 // First mic frame proves the capture engine spun up
@@ -1550,7 +1591,7 @@ public final class TranslationOrchestrator {
                     self?.markMicFrameReceived(format: formatLabel, sampleRate: sampleRate, rms: rms)
                     self?.logMicLevel(rms: rms, frameIndex: idx)
                 }
-                let wire = transformer.toWire(frame)
+                let wire = transformer.toWire(frame, sampleRate: wireRate)
                 outboundBuffer?.append(wire)
                 await stream.send(wire)
                 frameIndex += 1
@@ -1565,29 +1606,41 @@ public final class TranslationOrchestrator {
             let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingOldest(Self.pipelineFrameBuffer)) {
                 resampledContinuation = $0
             }
-            let pump = Task {
+            // DETACHED + userInitiated — same fix as the peer pump: the
+            // enclosing task2 inherits the orchestrator's @MainActor, so a
+            // plain `Task {}` here would run the resample (buffer alloc +
+            // converter) and the yield ON the main thread, behind transcript /
+            // Liquid-Glass rendering. The me path drives `.call` (virtual mic —
+            // what the PEER hears) and `.test` (local speakers), so the same
+            // congestion would stutter the outgoing direction. Keep audio
+            // delivery off the MainActor's critical path.
+            let pump = Task.detached(priority: .userInitiated) {
+                var firstMarked = false
+                var lastHealthHopAt = Date.distantPast
                 for await wireFrame in stream.output {
-                    // Diagnostic dump of the raw model output. Both
-                    // the me-stream pump (this site, used in `.call`
-                    // and `.test`) AND the peer-stream pump (the
-                    // wireIncomingPipeline equivalent below) write to
-                    // the shared `WireDumper.shared`. In `.call` mode
-                    // the resulting WAV interleaves both directions
-                    // — interpret per arrival timestamps if you need
-                    // to separate them.
+                    // Shared dumper with the peer pump in `.call` mode — the WAV
+                    // interleaves both directions; split by arrival timestamps.
                     WireDumper.shared.write(wireFrame.pcm)
-                    // First audio delta from the server — disarm the
-                    // no-data watchdog. `markFirstDataReceived` is
-                    // @MainActor-isolated; this Task isn't, so hop
-                    // explicitly. Doing it in the pipeline (not in
-                    // the stream's handle()) means we mark "we
-                    // actually delivered data" rather than just "we
-                    // parsed an event".
-                    await MainActor.run { [weak self] in
-                        self?.recordDeltaArrival(speaker: .me)
-                        self?.markFirstDataReceived()
+                    // Resample + yield FIRST, off the MainActor.
+                    let yieldResult = resampledContinuation.yield(
+                        transformer.fromWire(wireFrame, targetSampleRate: 48_000))
+                    if case .dropped = yieldResult {
+                        Self.log.error("[pipeline DROP me→\(destination)] resampled buffer full — output frame DROPPED (downstream player too slow)")
                     }
-                    resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
+                    // First-data / health bookkeeping: hop to the MainActor
+                    // WITHOUT awaiting (never blocks delivery), coalesced to ≤1
+                    // hop / 0.5s. `markFirstDataReceived` disarms the no-data
+                    // watchdog; `recordDeltaArrival` feeds slow-detection (3s
+                    // threshold ≫ 0.5s, so coalescing is safe).
+                    let now = Date()
+                    if !firstMarked || now.timeIntervalSince(lastHealthHopAt) > 0.5 {
+                        firstMarked = true
+                        lastHealthHopAt = now
+                        Task { @MainActor [weak self] in
+                            self?.recordDeltaArrival(speaker: .me)
+                            self?.markFirstDataReceived()
+                        }
+                    }
                 }
                 resampledContinuation.finish()
             }
@@ -1671,9 +1724,10 @@ public final class TranslationOrchestrator {
             passthroughContinuation.finish()
         }
         let sender = Task { [stream] in
+            let wireRate = stream.inputWireSampleRate
             for await frame in translationFrames {
-                let wire = transformer.toWire(frame)
-                // Dump what we sent to OpenAI (24 kHz int16 mono).
+                let wire = transformer.toWire(frame, sampleRate: wireRate)
+                // Dump what we sent to the engine (Int16 mono at wireRate).
                 // Pairs with WireDumper.shared (model output) — if SENT
                 // is amplitude-stable but WIRE fades, the model is the
                 // culprit.
@@ -1686,20 +1740,36 @@ public final class TranslationOrchestrator {
             let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingOldest(Self.pipelineFrameBuffer)) {
                 resampledContinuation = $0
             }
-            let pump = Task {
+            // DETACHED + userInitiated: the orchestrator is @MainActor, so a
+            // plain `Task {}` here would run the resample (buffer alloc +
+            // converter) and the yield ON the main thread, behind transcript /
+            // Liquid-Glass rendering. Detaching keeps audio delivery off the
+            // MainActor's critical path entirely (the #1 micropause finding).
+            let pump = Task.detached(priority: .userInitiated) {
+                var firstMarked = false
+                var lastHealthHopAt = Date.distantPast
                 for await wireFrame in stream.output {
-                    // Diagnostic dump of the raw model output (before
-                    // any Resampler / scheduling / playback). Guarded
-                    // by env var; silent no-op otherwise. Pairs with
-                    // UNISON_DUMP_PLAYBACK_WAV (the post-timePitch
-                    // tap) for A/B comparison of what the model
-                    // emits vs what the speakers receive.
                     WireDumper.shared.write(wireFrame.pcm)
-                    await MainActor.run { [weak self] in
-                        self?.recordDeltaArrival(speaker: .peer)
-                        self?.markFirstDataReceived()
+                    // Resample + yield FIRST, off the MainActor — never let the
+                    // audio frame wait behind UI work.
+                    let yieldResult = resampledContinuation.yield(
+                        transformer.fromWire(wireFrame, targetSampleRate: 48_000))
+                    if case .dropped = yieldResult {
+                        Self.log.error("[pipeline DROP peer→speakers] resampled buffer full — output frame DROPPED (downstream player too slow)")
                     }
-                    resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
+                    // Health/first-data bookkeeping needs only eventual
+                    // consistency: hop to the MainActor WITHOUT awaiting (so it
+                    // never blocks delivery), and coalesce to ≤1 hop / 0.5s
+                    // instead of one per 250ms chunk.
+                    let now = Date()
+                    if !firstMarked || now.timeIntervalSince(lastHealthHopAt) > 0.5 {
+                        firstMarked = true
+                        lastHealthHopAt = now
+                        Task { @MainActor [weak self] in
+                            self?.recordDeltaArrival(speaker: .peer)
+                            self?.markFirstDataReceived()
+                        }
+                    }
                 }
                 resampledContinuation.finish()
             }

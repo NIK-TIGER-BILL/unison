@@ -82,20 +82,14 @@ private final class CachedConverter: @unchecked Sendable {
 }
 
 public enum Resampler {
-    public static func toOpenAIWire(_ frame: AudioFrame) -> AudioFrame {
-        if frame.sampleRate == 24_000, frame.format == .int16, frame.channels == 1 { return frame }
-        // Normalize to float32 mono before resampling. Capture sources
-        // aim for mono float32, but real devices diverge: USB/BT mics
-        // deliver int16 (the mic capture explicitly tags it) and some
-        // configurations deliver interleaved multi-channel. Both used
-        // to land in `resampleFloat32`'s fatalError / mono
-        // precondition — a guaranteed mid-call crash.
+    public static func toWire(_ frame: AudioFrame, targetSampleRate: Int) -> AudioFrame {
+        if frame.sampleRate == targetSampleRate, frame.format == .int16, frame.channels == 1 { return frame }
         let f32 = frame.format == .float32 ? frame : convertInt16ToFloat32(frame)
-        let f32_24k = resampleFloat32(mixdownToMono(f32), targetSampleRate: 24_000)
-        return convertFloat32ToInt16(f32_24k)
+        let f32t = resampleFloat32(mixdownToMono(f32), targetSampleRate: targetSampleRate)
+        return convertFloat32ToInt16(f32t)
     }
 
-    public static func fromOpenAIWire(_ frame: AudioFrame, targetSampleRate: Int) -> AudioFrame {
+    public static func fromWire(_ frame: AudioFrame, targetSampleRate: Int) -> AudioFrame {
         let f32 = frame.format == .float32 ? frame : convertInt16ToFloat32(frame)
         return resampleFloat32(mixdownToMono(f32), targetSampleRate: targetSampleRate)
     }

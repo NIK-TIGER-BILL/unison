@@ -80,7 +80,7 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
 @MainActor
 @Test func settingsVM_loadsAPIKeyFromKeychainOnInit() throws {
     let kc = MockKeychain()
-    try kc.saveAPIKey("sk-init-1234567890")
+    try kc.saveAPIKey("sk-init-1234567890", for: .openAIRealtime)
     let vm = SettingsViewModel(
         initial: .default,
         deviceRegistry: MockAudioDeviceRegistry(),
@@ -100,7 +100,7 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
         keychain: kc
     )
     vm.updateApiKey("sk-new-98765432109876543210")
-    #expect(kc.loadAPIKey() == "sk-new-98765432109876543210")
+    #expect(kc.loadAPIKey(for: .openAIRealtime) == "sk-new-98765432109876543210")
     #expect(vm.apiKey == "sk-new-98765432109876543210")
     #expect(vm.lastSavedAt != nil)
 }
@@ -112,7 +112,7 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
     // A partial value must keep the previously stored key intact and
     // must NOT flash «сохранено».
     let kc = MockKeychain()
-    try kc.saveAPIKey("sk-old-12345678901234567890")
+    try kc.saveAPIKey("sk-old-12345678901234567890", for: .openAIRealtime)
     let vm = SettingsViewModel(
         initial: .default,
         deviceRegistry: MockAudioDeviceRegistry(),
@@ -120,7 +120,7 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
         keychain: kc
     )
     vm.updateApiKey("sk-pro")  // mid-edit fragment
-    #expect(kc.loadAPIKey() == "sk-old-12345678901234567890", "Partial key must not overwrite the stored one")
+    #expect(kc.loadAPIKey(for: .openAIRealtime) == "sk-old-12345678901234567890", "Partial key must not overwrite the stored one")
     #expect(vm.apiKey == "sk-pro", "In-memory value tracks the field")
     #expect(vm.lastSavedAt == nil, "No save indicator for a write that didn't happen")
 }
@@ -128,7 +128,7 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
 @MainActor
 @Test func settingsVM_updateApiKey_emptyClearsKeychain() throws {
     let kc = MockKeychain()
-    try kc.saveAPIKey("sk-old-1234567890")
+    try kc.saveAPIKey("sk-old-1234567890", for: .openAIRealtime)
     let vm = SettingsViewModel(
         initial: .default,
         deviceRegistry: MockAudioDeviceRegistry(),
@@ -137,7 +137,7 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
     )
     #expect(vm.apiKey == "sk-old-1234567890")
     vm.updateApiKey("")
-    #expect(kc.loadAPIKey() == nil)
+    #expect(kc.loadAPIKey(for: .openAIRealtime) == nil)
     #expect(vm.apiKey == "")
 }
 
@@ -357,6 +357,39 @@ private final class FailingInstaller: BlackHoleInstaller, @unchecked Sendable {
 @Test func defaultHotkeys_displayMatchesDesign() {
     #expect(Hotkey.defaultStartStop.display == "⌃⌥U")
     #expect(Hotkey.defaultShowTranscript.display == "⌃⌥T")
+}
+
+// MARK: - Task-9: model-aware key + language coercion
+
+@MainActor @Test func switchingModelCoercesUnsupportedLanguages() {
+    var saved: Settings?
+    var s = Settings.default
+    s.translationModel = .geminiLiveTranslate
+    s.languagePair = LanguagePair(mine: .pl, peer: .en)   // Polish is Gemini-only
+    let vm = SettingsViewModel(
+        initial: s,
+        deviceRegistry: MockAudioDeviceRegistry(),
+        onChange: { saved = $0 }
+    )
+    vm.setTranslationModel(.openAIRealtime)
+    #expect(vm.settings.translationModel == .openAIRealtime)
+    #expect(TranslationModel.openAIRealtime.supportedTargets.contains(vm.settings.languagePair.mine))
+    #expect(saved?.translationModel == .openAIRealtime)
+}
+
+@MainActor @Test func keyFieldReloadsForSelectedModel() throws {
+    let kc = MockKeychain()
+    try kc.saveAPIKey("sk-aaaaaaaaaaaaaaaaaaaa", for: .openAIRealtime)
+    try kc.saveAPIKey("AQ.bbbbbbbbbbbbbbbbbbbb", for: .geminiLiveTranslate)
+    let vm = SettingsViewModel(
+        initial: .default,
+        deviceRegistry: MockAudioDeviceRegistry(),
+        onChange: { _ in },
+        keychain: kc
+    )
+    #expect(vm.apiKey == "sk-aaaaaaaaaaaaaaaaaaaa")     // default model = OpenAI
+    vm.setTranslationModel(.geminiLiveTranslate)
+    #expect(vm.apiKey == "AQ.bbbbbbbbbbbbbbbbbbbb")     // reloaded for Gemini slot
 }
 
 // MARK: - Tap scope mode accessors

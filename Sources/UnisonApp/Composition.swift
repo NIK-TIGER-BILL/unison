@@ -121,17 +121,10 @@ public final class Composition {
         // `errSecItemNotFound`). Env passthrough also makes ad-hoc
         // smoke-testing trivial: `UNISON_API_KEY=... open Unison.app`.
         let kc = self.keychain
-        let envOverride = ProcessInfo.processInfo.environment["UNISON_API_KEY"]
-        let factory = OpenAIRealtimeStreamFactory(
-            apiKeyProvider: {
-                if let env = envOverride, !env.isEmpty {
-                    Self.bootLog.info("apiKey source=env UNISON_API_KEY length=\(env.count) prefix=\(Self.apiKeyPrefix(env))")
-                    return env
-                }
-                let stored = kc.loadAPIKey() ?? ""
-                Self.bootLog.info("apiKey source=keychain length=\(stored.count) prefix=\(Self.apiKeyPrefix(stored))")
-                return stored
-            },
+        let store = self.settingsStore
+        let factory = ProviderAwareStreamFactory(
+            modelProvider: { store.load().translationModel },
+            apiKeyProvider: Self.makeAPIKeyProvider(keychain: kc),
             clock: SystemClock()
         )
 
@@ -194,14 +187,14 @@ public final class Composition {
             installer: installer,
             keychain: keychain
         )
-        let store = settingsStore
+        let settingsStoreForVM = settingsStore
         let popVM = self.popoverVM
         let orch = self.orchestrator
         self.settingsVM = SettingsViewModel(
             initial: initialSettings,
             deviceRegistry: registry,
             onChange: { s in
-                store.save(s)
+                settingsStoreForVM.save(s)
                 popVM.settings = s
                 // Live-propagate the settings that can be applied without
                 // restarting the session. Without this, dragging the
@@ -402,6 +395,34 @@ extension Composition {
         return MacKeychain()
     }
 
+    /// Build the per-engine API-key closure for `ProviderAwareStreamFactory`.
+    /// Checks engine-specific env vars first (UNISON_API_KEY for OpenAI,
+    /// UNISON_GEMINI_API_KEY for Gemini), then falls back to the keychain.
+    /// Returns a closure so the factory can capture `keychain` without
+    /// retaining `Composition` itself.
+    static func makeAPIKeyProvider(
+        keychain: any KeychainService
+    ) -> (TranslationModel) -> String {
+        return { model in
+            let env = ProcessInfo.processInfo.environment
+            switch model {
+            case .openAIRealtime:
+                if let k = env["UNISON_API_KEY"], !k.isEmpty {
+                    bootLog.info("apiKey source=env UNISON_API_KEY length=\(k.count) prefix=\(apiKeyPrefix(k))")
+                    return k
+                }
+            case .geminiLiveTranslate:
+                if let k = env["UNISON_GEMINI_API_KEY"], !k.isEmpty {
+                    bootLog.info("apiKey source=env UNISON_GEMINI_API_KEY length=\(k.count) prefix=\(apiKeyPrefix(k))")
+                    return k
+                }
+            }
+            let stored = keychain.loadAPIKey(for: model) ?? ""
+            bootLog.info("apiKey source=keychain model=\(model.rawValue) length=\(stored.count) prefix=\(apiKeyPrefix(stored))")
+            return stored
+        }
+    }
+
     /// Pick the meeting store: an in-memory demo store for the
     /// `history-demo` screenshot harness, else the real file-backed store.
     static func makeMeetingStore(force: UnisonForceState?, settingsStore: SettingsStore) -> any MeetingStore {
@@ -543,15 +564,15 @@ final class ForcedGrantedPermissions: PermissionsService, @unchecked Sendable {
 /// + 20 chars) but is not a real OpenAI credential. Never used in
 /// production.
 final class InMemoryKeychain: KeychainService, @unchecked Sendable {
-    private var key: String?
+    private var keys: [TranslationModel: String]
 
     init(seeded: String? = nil) {
-        self.key = seeded
+        self.keys = seeded.map { [.openAIRealtime: $0, .geminiLiveTranslate: $0] } ?? [:]
     }
 
-    func loadAPIKey() -> String? { key }
-    func saveAPIKey(_ value: String) throws { key = value }
-    func deleteAPIKey() throws { key = nil }
+    func loadAPIKey(for model: TranslationModel) -> String? { keys[model] }
+    func saveAPIKey(_ value: String, for model: TranslationModel) throws { keys[model] = value }
+    func deleteAPIKey(for model: TranslationModel) throws { keys[model] = nil }
 }
 
 final class SettingsStore: @unchecked Sendable {
@@ -570,17 +591,28 @@ final class SettingsStore: @unchecked Sendable {
     }
 }
 
-final class OpenAIRealtimeStreamFactory: TranslationStreamFactory, @unchecked Sendable {
-    private let apiKeyProvider: () -> String
+final class ProviderAwareStreamFactory: TranslationStreamFactory, @unchecked Sendable {
+    private let modelProvider: () -> TranslationModel
+    private let apiKeyProvider: (TranslationModel) -> String
     private let clock: any Clock
 
-    init(apiKeyProvider: @escaping () -> String, clock: any Clock) {
+    init(modelProvider: @escaping () -> TranslationModel,
+         apiKeyProvider: @escaping (TranslationModel) -> String,
+         clock: any Clock) {
+        self.modelProvider = modelProvider
         self.apiKeyProvider = apiKeyProvider
         self.clock = clock
     }
 
     func make(speaker: Speaker) -> any TranslationStream {
-        OpenAIRealtimeStream(apiKey: apiKeyProvider(), client: URLSessionWSClient(), clock: clock, speaker: speaker)
+        let model = modelProvider()
+        let key = apiKeyProvider(model)
+        switch model {
+        case .openAIRealtime:
+            return OpenAIRealtimeStream(apiKey: key, client: URLSessionWSClient(), clock: clock, speaker: speaker)
+        case .geminiLiveTranslate:
+            return GeminiLiveTranslateStream(apiKey: key, client: URLSessionWSClient(), clock: clock, speaker: speaker)
+        }
     }
 }
 

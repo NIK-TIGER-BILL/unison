@@ -6,18 +6,16 @@ public final class MacKeychain: KeychainService, @unchecked Sendable {
     private static let log = UnisonLog(category: "MacKeychain")
 
     public let service: String
-    public let account: String
 
-    public init(service: String = "com.unison.app", account: String = "openai-api-key") {
+    public init(service: String = "com.unison.app") {
         self.service = service
-        self.account = account
     }
 
-    public func loadAPIKey() -> String? {
+    public func loadAPIKey(for model: TranslationModel) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: model.keychainAccount,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -37,12 +35,12 @@ public final class MacKeychain: KeychainService, @unchecked Sendable {
         return str
     }
 
-    public func saveAPIKey(_ key: String) throws {
+    public func saveAPIKey(_ key: String, for model: TranslationModel) throws {
         let data = key.data(using: .utf8)!
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: model.keychainAccount
         ]
         let update: [String: Any] = [kSecValueData as String: data]
         let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
@@ -58,11 +56,11 @@ public final class MacKeychain: KeychainService, @unchecked Sendable {
         }
     }
 
-    public func deleteAPIKey() throws {
+    public func deleteAPIKey(for model: TranslationModel) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: model.keychainAccount
         ]
         let status = SecItemDelete(query as CFDictionary)
         if status != errSecSuccess && status != errSecItemNotFound {

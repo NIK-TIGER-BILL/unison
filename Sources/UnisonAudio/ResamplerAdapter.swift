@@ -18,8 +18,8 @@ public final class ResamplerAdapter: AudioFormatTransformer, @unchecked Sendable
 
     public init() {}
 
-    public func toWire(_ frame: AudioFrame) -> AudioFrame {
-        let out = Resampler.toOpenAIWire(frame)
+    public func toWire(_ frame: AudioFrame, sampleRate: Int) -> AudioFrame {
+        let out = Resampler.toWire(frame, targetSampleRate: sampleRate)
         lock.lock(); let shouldLog = !loggedToWire; if shouldLog { loggedToWire = true }; lock.unlock()
         if shouldLog {
             Self.log.info("toWire — first call: in=\(frame.sampleRate)Hz \(String(describing: frame.format)) → out=\(out.sampleRate)Hz \(String(describing: out.format))")
@@ -28,7 +28,7 @@ public final class ResamplerAdapter: AudioFormatTransformer, @unchecked Sendable
     }
 
     public func fromWire(_ frame: AudioFrame, targetSampleRate: Int) -> AudioFrame {
-        let out = Resampler.fromOpenAIWire(frame, targetSampleRate: targetSampleRate)
+        let out = Resampler.fromWire(frame, targetSampleRate: targetSampleRate)
         lock.lock(); let shouldLog = !loggedFromWire; if shouldLog { loggedFromWire = true }; lock.unlock()
         if shouldLog {
             Self.log.info("fromWire — first call: in=\(frame.sampleRate)Hz \(String(describing: frame.format)) → out=\(out.sampleRate)Hz \(String(describing: out.format))")

@@ -45,29 +45,34 @@ public final class WireDumper: @unchecked Sendable {
     private var writeCount: Int = 0
     private var bytesWritten: UInt64 = 0
 
+    /// Dump path resolved ONCE — the process environment is immutable for the
+    /// process lifetime, so re-reading `ProcessInfo.environment` (which
+    /// materializes a fresh `[String:String]` from the C `environ` on every
+    /// access) on the per-frame hot path was pure waste, even when dumping is
+    /// disabled (the common production case). `nil` = disabled.
+    private let envPath: String?
+
     private init(category: String, envVar: String) {
         self.category = category
         self.envVar = envVar
         self.log = UnisonLog(category: category)
+        let raw = ProcessInfo.processInfo.environment[envVar]
+        self.envPath = (raw?.isEmpty == false) ? raw : nil
+        if self.envPath == nil {
+            log.info("\(category) — \(envVar) not set; dumping disabled (no per-frame overhead)")
+        }
     }
 
-    /// Append one delta's worth of int16 PCM to the dump file. Cheap
-    /// — opens the file on the first call, then just appends. Caller
-    /// is the orchestrator's pipeline pump.
+    /// Append one delta's worth of int16 PCM to the dump file. When dumping is
+    /// disabled this is a single nil-check and return — no lock, no allocation.
+    /// Opens the file on the first enabled call, then just appends.
     public func write(_ pcm: Data) {
+        guard let path = envPath else { return }   // disabled — cheapest path
         lock.lock(); defer { lock.unlock() }
-        let envPath = ProcessInfo.processInfo.environment[envVar]
-        // Log the first call's view of the env var so we can verify
-        // whether the env var propagated into the process.
         if !firstCallSeen {
             firstCallSeen = true
-            if let envPath, !envPath.isEmpty {
-                log.info("\(category) first call — env path=\(envPath)")
-            } else {
-                log.info("\(category) first call — \(envVar) NOT SET; dumping disabled.")
-            }
+            log.info("\(category) first call — env path=\(path)")
         }
-        guard let path = envPath, !path.isEmpty else { return }
         if !initialised {
             initialised = true
             let url = URL(fileURLWithPath: path)

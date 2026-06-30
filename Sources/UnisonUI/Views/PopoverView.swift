@@ -61,7 +61,7 @@ public struct PopoverView: View {
             if let reason = vm.state.errorValue {
                 ErrorRow(
                     title: "Не удалось запустить",
-                    detail: PopoverViewModel.userMessage(for: reason),
+                    detail: PopoverViewModel.userMessage(for: reason, model: vm.settings.translationModel),
                     action: reason == .audioCaptureDenied
                         ? .openSettings(label: "Открыть Настройки") {
                             // macOS 14.4+ split AudioCapture into per-service panes; the
@@ -232,10 +232,9 @@ public struct PopoverView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             Picker("", selection: selection) {
-                // Both sides of `LanguagePair` end up as
-                // `session.audio.output.language`, so they're
-                // restricted to OpenAI's supported output targets.
-                ForEach(Language.supportedTargets, id: \.self) { lang in
+                // Both sides of `LanguagePair` are restricted to the
+                // selected engine's supported output targets.
+                ForEach(vm.settings.translationModel.supportedTargets, id: \.self) { lang in
                     Text("\(lang.flagEmoji) \(lang.displayName)").tag(lang)
                 }
             }

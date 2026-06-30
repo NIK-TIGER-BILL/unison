@@ -126,8 +126,8 @@ public final class SettingsViewModel {
         self.togglesStore = togglesStore
         self.meetingStore = meetingStore
 
-        // Seed the in-memory API key from Keychain (if configured).
-        self.apiKey = keychain?.loadAPIKey() ?? ""
+        // Seed the in-memory API key from Keychain for the currently selected model.
+        self.apiKey = keychain?.loadAPIKey(for: initial.translationModel) ?? ""
 
         // Seed hotkeys from persistent store, falling back to defaults.
         if let store = hotkeyStore {
@@ -178,6 +178,16 @@ public final class SettingsViewModel {
         emitChange()
     }
 
+    /// Switch the active translation engine. Coerces the stored language pair
+    /// to the new engine's supported targets and reloads the corresponding
+    /// keychain slot into `apiKey`.
+    public func setTranslationModel(_ model: TranslationModel) {
+        settings.translationModel = model
+        settings.languagePair = model.coerced(settings.languagePair)
+        apiKey = keychain?.loadAPIKey(for: model) ?? ""
+        emitChange()
+    }
+
     public func setInputDeviceUID(_ uid: String?) {
         settings.inputDeviceUID = uid
         emitChange()
@@ -223,28 +233,29 @@ public final class SettingsViewModel {
         emitChange()
     }
 
-    /// Persist a new OpenAI API key. The in-memory value updates on
-    /// every keystroke (so the field binding stays live), but the
-    /// Keychain write happens only for an emptied field (= delete) or a
-    /// plausibly-complete key — the previous per-keystroke write stored
-    /// truncated garbage, and a ⌘A-retype transiently wiped the stored
-    /// key mid-edit. The validity rule mirrors onboarding's
-    /// `canSaveKey`. `lastSavedAt` bumps only when a write actually
-    /// happened AND succeeded, so the «сохранено» flash can't lie about
-    /// a rejected Keychain write.
+    /// Persist the API key for the currently selected translation engine.
+    /// The in-memory value updates on every keystroke (so the field binding
+    /// stays live), but the Keychain write happens only for an emptied field
+    /// (= delete) or a plausibly-complete key — the previous per-keystroke
+    /// write stored truncated garbage, and a ⌘A-retype transiently wiped
+    /// the stored key mid-edit. The validity rule checks the selected
+    /// engine's accepted prefixes. `lastSavedAt` bumps only when a write
+    /// actually happened AND succeeded, so the «сохранено» flash can't lie
+    /// about a rejected Keychain write.
     public func updateApiKey(_ key: String) {
         apiKey = key
         guard let keychain else {
             bumpSavedTimestamp()
             return
         }
+        let model = settings.translationModel
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            if (try? keychain.deleteAPIKey()) != nil {
+            if (try? keychain.deleteAPIKey(for: model)) != nil {
                 bumpSavedTimestamp()
             }
-        } else if trimmed.hasPrefix("sk-"), trimmed.count >= 20 {
-            if (try? keychain.saveAPIKey(trimmed)) != nil {
+        } else if model.acceptedKeyPrefixes.contains(where: trimmed.hasPrefix), trimmed.count >= 20 {
+            if (try? keychain.saveAPIKey(trimmed, for: model)) != nil {
                 bumpSavedTimestamp()
             }
         }

@@ -227,6 +227,19 @@ func popoverVM_userMessage_apiKeyInvalidPointsToPlatformDashboard() {
     #expect(msg.contains("platform.openai.com"))
 }
 
+@Test
+func popoverVM_userMessage_isEngineAware_forGemini() {
+    // A Gemini user must not be told to go to the OpenAI dashboard.
+    let key = PopoverViewModel.userMessage(for: .apiKeyInvalid, model: .geminiLiveTranslate)
+    #expect(key.contains("Gemini"))
+    #expect(key.contains("aistudio.google.com"))
+    #expect(!key.lowercased().contains("openai"))
+
+    let net = PopoverViewModel.userMessage(for: .networkLost, model: .geminiLiveTranslate)
+    #expect(net.contains("Gemini"))
+    #expect(!net.lowercased().contains("openai"))
+}
+
 @MainActor
 @Test
 func popoverVM_elapsedSecondsString_keepsCountingDuringReconnecting() {

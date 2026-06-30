@@ -209,8 +209,19 @@ public final class MockOpenAIRealtimeServer: @unchecked Sendable {
     /// Block until the next text frame arrives from the client. Resolves
     /// immediately if a frame is already queued. Used by tests to know
     /// when the orchestrator has finished its handshake step.
-    public func nextClientMessage(timeout: TimeInterval = 5.0) async -> String? {
-        // Slurp any already-received frame.
+    ///
+    /// The re-check-and-park happens in a SINGLE `locked` section (the same
+    /// lock `receiveLoop` takes). Previously the "is a frame queued?" check
+    /// and the "park a waiter" step were two separate critical sections — a
+    /// frame arriving in the gap saw no waiter, so `receiveLoop` buffered it
+    /// WITHOUT resuming anyone and WITHOUT advancing the cursor; the waiter
+    /// then blocked until the timeout and returned nil even though the frame
+    /// was sitting unserved. That lost-wakeup race is why
+    /// `mockServer_inputAudioBufferAppend_landsOnServer` flaked on CI (wide
+    /// scheduling gaps) while passing locally. `timeout` is now only a
+    /// last-resort safety net.
+    public func nextClientMessage(timeout: TimeInterval = 20.0) async -> String? {
+        // Fast path: a frame is already queued.
         let queued: String? = locked {
             if let next = receivedTextFrames.dropFirst(processedFrameCount).first {
                 processedFrameCount += 1
@@ -219,15 +230,24 @@ public final class MockOpenAIRealtimeServer: @unchecked Sendable {
             return nil
         }
         if let queued { return queued }
-        // Otherwise park a one-shot waiter that `receiveLoop` resumes when
-        // the next frame lands, with a timeout Task that resumes it with
-        // nil if no frame arrives. (No `withTaskGroup`: a parked
-        // `withCheckedContinuation` there can't be cancelled, so the group
-        // would never return after the timeout branch won — the deadlock
-        // that wedged the suite.)
         return await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
             let waiter = OneShotContinuation<String?>(cont)
-            locked { pendingFrameWaiters.append(waiter) }
+            // Re-check AND park atomically so a frame can't slip into the gap
+            // between the check and the park (the lost-wakeup race). No
+            // `withTaskGroup`: a parked `withCheckedContinuation` there can't
+            // be cancelled, so the group would never return after a timeout.
+            let raced: String? = locked {
+                if let next = receivedTextFrames.dropFirst(processedFrameCount).first {
+                    processedFrameCount += 1
+                    return next
+                }
+                pendingFrameWaiters.append(waiter)
+                return nil
+            }
+            if let raced {
+                waiter.resume(raced)
+                return
+            }
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
                 guard let self else { return }

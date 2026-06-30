@@ -16,9 +16,9 @@
 │  ProcessTapCapture (48 kHz F32 mono AudioFrame)                  │
 │   │ Resampler.toWire    [48k F32 → 24k int16]                   │
 │   ▼                                                              │
-│  WS: input_audio_buffer.append → OpenAI gpt-realtime-translate   │
+│  WS: (audio input) → TranslationStream (OpenAI or Gemini)         │
 │   │                                                              │
-│  WS: session.output_audio.delta ← OpenAI                         │
+│  WS: (audio output delta) ← TranslationStream                    │
 │   │ Resampler.fromWire  [24k int16 → 48k F32]                   │
 │   ▼                                                              │
 │  AVAudioOutputMixer:                                             │
@@ -33,15 +33,31 @@
 └──────────────────────────────────────────────────────────────────┘
 
 OUTGOING (user → peer) — symmetric structure: mic → Resampler.toWire
-→ WS → ... → BlackHole2chPlayer (peer's Zoom mic input).
+→ WS → TranslationStream → ... → BlackHole2chPlayer (peer's Zoom mic input).
 ```
 
 ---
 
-## `gpt-realtime-translate` — поведение модели
+## Движки перевода
+
+За одним интерфейсом `TranslationStream` скрываются два взаимозаменяемых движка.
+Выбор хранится в `Settings.translationModel` (дефолт — `.openAIRealtime`) и
+разрешается **однократно в момент `start()`** через `ProviderAwareStreamFactory` —
+смена движка вступает в силу на следующей сессии (как смена языка или устройства).
+**Output у обоих движков 24 kHz** int16 mono; различается только входная rate
+(OpenAI ожидает 24 kHz, Gemini — 16 kHz). Оркестратор читает
+`TranslationStream.inputWireSampleRate` и ресемплирует исходящее аудио через
+`Resampler.toWire(_:targetSampleRate:)` перед отправкой.
+
+---
+
+### OpenAI `gpt-realtime-translate`
 
 Endpoint: `wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-translate`
 (GA Translation endpoint, released ~mid-May 2026).
+Auth: `Authorization: Bearer <sk-…>` header.
+Input: **24 kHz** int16 mono. Output: 24 kHz int16 mono.
+Поддерживаемых target языков: **13**.
 
 ### Конфигурация (`session.update`)
 
@@ -104,42 +120,144 @@ Endpoint: `wss://api.openai.com/v1/realtime/translations?model=gpt-realtime-tran
 
 ---
 
+### Gemini `gemini-3.5-live-translate-preview`
+
+Endpoint:
+```
+wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=<KEY>
+```
+Auth: API-ключ в **query-параметре** URL (без заголовка; ключ **никогда не логируется**).
+Input: **16 kHz** int16 mono. Output: 24 kHz int16 (base64). Поддерживаемых target языков: **~28** (curated subset из 70+).
+
+#### Конфигурация (setup message)
+
+```json
+{
+  "setup": {
+    "model": "models/gemini-3.5-live-translate-preview",
+    "generationConfig": {
+      "translationConfig": {
+        "targetLanguageCode": "<BCP-47>"
+      },
+      "responseModalities": ["AUDIO"],
+      "inputAudioTranscription": {},
+      "outputAudioTranscription": {}
+    }
+  }
+}
+```
+
+Тип сообщения: `BidiGenerateContentSetup`.
+
+#### Отправка аудио
+
+```json
+{
+  "realtimeInput": {
+    "audio": {
+      "mimeType": "audio/pcm;rate=16000",
+      "data": "<base64 int16 16kHz>"
+    }
+  }
+}
+```
+
+#### Ответ сервера (`serverContent`)
+
+```json
+{
+  "serverContent": {
+    "modelTurn": {
+      "parts": [{ "inlineData": { "mimeType": "audio/pcm;rate=24000", "data": "<base64>" } }]
+    },
+    "inputTranscription": { "text": "..." },
+    "outputTranscription": { "text": "..." },
+    "turnComplete": true
+  }
+}
+```
+
+Аудио: `modelTurn.parts[].inlineData.data` (base64 24 kHz int16 mono).
+Транскрипции: `inputTranscription.text` (оригинал) / `outputTranscription.text` (перевод).
+Конец реплики: `turnComplete: true`.
+
+---
+
 ## Наша цепочка — компоненты
 
 ### `Resampler` (Sources/UnisonAudio/Resampler.swift)
-Конверсия между wire-форматом (24k int16) и playback-форматом (48k F32).
+Конверсия между wire-форматом движка и playback-форматом (48k F32).
 
-- `toOpenAIWire(frame)` — для исходящих frames (mic/tap → OpenAI).
-- `fromOpenAIWire(frame, targetSampleRate:)` — для входящих frames (OpenAI → speakers).
+- `toWire(_:targetSampleRate:)` — для исходящих frames (mic/tap → движок).
+  Оркестратор передаёт `TranslationStream.inputWireSampleRate` (24 kHz для OpenAI, 16 kHz для Gemini).
+- `fromWire(_:)` — для входящих frames (движок → speakers); output всегда 24 kHz.
 - Использует **cached AVAudioConverter** — один экземпляр на (srcRate, dstRate, channels).
   `.reset()` перед каждым чанком чтобы изолировать состояние от предыдущего вызова.
 - Кэш статический lock-protected (двунаправленный pipeline вызывает одновременно).
 
-### `PlaybackPacing` v3 — lenient (Sources/UnisonAudio/PlaybackPacing.swift)
-Safety net controller для адаптивного TimePitch.rate.
+### `PlaybackPacing` v5 — asymmetric «never slow, gently drain» (Sources/UnisonAudio/PlaybackPacing.swift)
+Регулятор адаптивного TimePitch.rate. Базовый рейт = **ровно 1.0×**; рейт
+**только повышается** (никогда ниже 1.0×) и **только мягко** (cap 1.15×),
+чтобы слить буфер, выросший выше setpoint.
 
 | Константа | Значение | Смысл |
 |---|---|---|
-| `targetBufferSec` | 1.0 | Ниже этого rate=1.0 (controller silent) |
-| `correctionGain` | 0.3 | Пологий slope |
-| `maxRate` | 1.5 | Cap на ускорение |
-| `minRate` | 1.0 | НИКОГДА не приглушаем (даже на underrun) |
+| `targetBufferSec` | **0.75** (env `UNISON_BUFFER_MS`) | **Край deadband** (порог слива): пока depth ≤ него — рейт РОВНО 1.0× (TimePitch не трогает звук), сливаем только ВЫШЕ. Реальная latency = натуральная глубина очереди (~0.5–0.75с), не это число. 0.5 был НИЖЕ натуральной глубины → постоянный слив → «вкл/выкл» |
+| `correctionGain` | **0.15** | `rate = 1.0 + (depth_smooth − threshold)·gain`. 0.15 (было 0.4) — слив еле заметный, не слэмит рейт |
+| `maxRate` | **1.06** | Очень мягкий cap (было 1.15). 1.06 хватает обогнать доставку модели ~1.015×, но почти неслышно. 1.15 слэмил рейт и осушал очередь в 0 («вкл/выкл») |
+| `minRate` | 1.0 | **Жёсткий floor: никогда не медленнее реалтайма** |
+| `depthSmoothAlpha` | 0.15 | τ ≈ 0.6 с (было 0.05/τ≈2с — медленный сглаживатель был корнем микропауз) |
 | `maxRateStepPerTick` | 0.05 | Slew = 0.5/сек — плавно |
 
-На реальном контенте в наших тестовых записях rate **стоит на 1.000 на протяжении всей сессии** — controller вступает только при патологическом overflow (depth > 1s sustained, что мы пока ни разу не видели в production).
+**Почему v5 (был v4 «bidirectional»).** Офлайн-реплей **реального** записанного
+timeline (`pacing-eval`) показал: v4 давал underrun 3% в **8 окнах** И раздувал
+буфер до **~960 мс**, тогда как простой фиксированный 1.0× давал **ноль**
+underrun. Виноват был **сам v4**: он целил рейт по `arrivalRateEMA + correction`
+через медленный (τ≈2с) сглаживатель, поэтому на бёрсте ускорялся — **сливая
+подушку прямо перед следующей паузой** (это и есть микропауза) — а floor 0.85×
+растягивал звук не вовремя (артефакт «робот»). Оба симптома, на которые жаловался
+юзер, — **наш контроллер**, не сеть.
 
-**Важно**: `minRate = 1.0` — мы **не можем играть медленнее реалтайма**. Это сознательный выбор:
-- Если модель эмитит **> 1.0×** wall-clock на длинном отрезке (бёрст/verbose target) — без floor рейт мог бы упасть < 1.0, и буфер раздул бы латентность indefinitely. Floor → controller обязан ускоряться вверх или держать 1.0
-- Если модель эмитит **< 1.0×** (наш наблюдаемый случай: `arrival_rate_ema ≈ 0.92-0.99x`) — буфер постепенно опустошается → underrun неизбежен. Floor ничего не делает, controller бессилен
+**v5 реагирует только на фактический backlog.** Базовый рейт 1.0×; рейт растёт
+лишь чтобы слить буфер выше `targetBufferSec`, мягко (до 1.15×), а быстрый
+сглаживатель (τ≈0.6с) ловит суб-секундные бёрсты. `arrivalRateEMA` **убран из
+формулы** (остался только для диагностического лога). Это убрало осцилляцию
+рейта и «робота»: рейт держится в **[1.00, 1.05]×** без слышимого растяжения.
 
-В наших данных модель устойчиво ниже 1.0×, поэтому реальный риск — underrun (тишина между чанками), а не overflow. `pipelineFrameBuffer=50` + `bufferingOldest` гарантируют что буфер не растёт > 5 секунд даже в патологических сценариях.
+**Джиттер-буфер (`targetBufferSec`) и БАГ переслива (реальные логи 2026-06-30).**
+v5 убрал осцилляцию, но **фризы остались и были заметны**. Реальный лог вскрыл
+настоящую причину — **наш контроллер сам опустошал буфер**: при тонком setpoint
+0.30 с он разгонялся до ~1.08×, чтобы слить *здоровый* буфер 0.5 с обратно к
+0.30 — **выжигая подушку прямо перед паузой модели**, после чего плеер пустел
+(фриз). Лог поймал это даже когда **модель отдавала вовремя** (gaps 199–322мс ≈
+realtime, а буфер всё равно сливался 0.5→0 → UNDERRUN): тонкий setpoint заставлял
+контроллер срезать подушку, которую сам же должен держать, потом underrun,
+ребилд, снова срез. Это и есть «недогляд».
+
+**Фикс:** `targetBufferSec` это теперь **потолок**, а не setpoint. Контроллер
+играет 1.0× пока очередь ≤ потолка (ДЕРЖИТ подушку 0.3–0.9 с, не трогает), и
+сливает только ВЫШЕ (cap runaway latency). Поднят до **1.0 с** — на реальной
+сессии: фризы 6.7%→**3.8%**, тишина 2300→**1300 мс**, rate_max 1.15→**1.089×**
+(почти не сливает). Frontier: 0.30→6.7%, 0.60→5.2%, 1.0→3.8%/600мс — выше 1.0
+насыщается (остаток — это **продолжительные** замедления модели, где суммарный
+недобор > подушки, не одиночный gap). Тюнится вживую `UNISON_BUFFER_MS` (=600
+ради latency на спокойной сети, =1400 на рваной). Остаток намеренно **не**
+прячем растяжением (вернёт «робота»). Следующий шаг если мало — **adaptive
+jitter buffer** (растить подушку только в турбулентность, latency низкая в покое).
+`pipelineFrameBuffer=50` + `bufferingOldest` гарантируют что буфер не растёт > 5 с.
 
 ### `CompensatingAGCRunner` (Sources/UnisonAudio/CompensatingAGC.swift)
-Компенсация для model fade (см. выше).
+Компенсация для model fade (см. выше). **Адаптивная цель:** AGC
+восстанавливает приглушённый звук к **пиковому (свежему) RMS самой сессии**
+(`AGCState.sessionPeakRMS`), а не к жёсткой константе — компенсация
+авто-калибруется под громкость каждого движка (OpenAI ≈ 0.05, Gemini ≈ 0.12)
+и под спикера/микрофон. Раньше фиксированный `targetRMS=0.05` пиннил громкие
+движки (Gemini) ниже их свежего уровня → юзер всё равно слышал fade 0.12→0.05.
+Цель сбрасывается на паузе (≥3 с тишины), как и сам fade модели.
 
 | Константа | Значение | Смысл |
 |---|---|---|
-| `targetRMS` | 0.05 | Уровень свежей сессии модели |
+| `targetRMS` | 0.05 | **Floor** адаптивной цели (минимум для тихих сессий) |
 | `maxGain` | 4.0 | +12 dB potential |
 | `minGain` | 1.0 | Только бустим, никогда не глушим |
 | `rmsAlpha` | 0.02 | EMA τ ≈ 5 сек |
@@ -155,6 +273,24 @@ Safety net controller для адаптивного TimePitch.rate.
 - Два player: `translatedPlayer` (vol 1.0) + `originalPlayer` (vol 0.2 настраиваемый)
 - `AVAudioUnitTimePitch` между translatedPlayer и mainMixer для адаптивного rate
 - Output device — `settings.outputDeviceUID` (default device если не указан)
+
+**Seam declick (щелчки на стыках чанков).** `scheduleTranslated` рампит первые
+~2мс каждого буфера от того места, где звук реально остановился: при непрерывном
+проигрывании — от последнего сэмпла предыдущего буфера (маленький скачок от
+resampler-reset / AGC-гейн-степа сглаживается; если сигнал уже непрерывен — рамп
+≈ сигнал, no-op); при возобновлении после опустошения очереди (queue пуст /
+большой schedGap) — от 0 (плеер играл цифровую тишину, первый ненулевой сэмпл
+иначе щёлкает). Один корректный фикс на все случаи (resampler/AGC/resume) без
+риска per-chunk DSP. **Аудио-pump переведён с @MainActor на detached
+`.userInitiated`** — ресемпл+отдача больше не ждут рендер транскрипта/glass.
+`PlaybackPacing` пишет `timePitch.rate` только при изменении (не 10×/сек).
+
+> ⚠️ **TODO (агент-аудит):** `AVAudioUnitTimePitch` — спектральный фазовый
+> вокодер, **не прозрачен на rate=1.0** и добавляет ~90мс латентности всегда.
+> v5 держит rate=1.0 в deadband >90% времени → платим за вокодер зря. Кандидат:
+> bypass на 1.0× или замена на time-domain (`AUiPodTime`). Большая правка, риск
+> щелчка на toggle — отдельным шагом. Также не сделано: gap concealment (NetEq —
+> в паузе тянуть питч-период + comfort noise вместо тишины).
 
 ### `BlackHole2chPlayer` (Sources/UnisonAudio/BlackHole2chPlayer.swift)
 Virtual mic для пира — выводит переведённый user audio в BlackHole 2ch, который видеоконф-app использует как мик.
@@ -310,9 +446,11 @@ Stop-hang). При пустом резолве `.onlySelected` держим по
 | Env var | Что делает |
 |---|---|
 | `UNISON_DUMP_PLAYBACK_WAV=/tmp/x.wav` | Tap на timePitch output — что mainMixer получил, 48kHz F32 mono |
-| `UNISON_DUMP_WIRE_WAV=/tmp/x.wav` | Что **OpenAI вернула** (после decode base64) — 24kHz int16 mono |
-| `UNISON_DUMP_SENT_WAV=/tmp/x.wav` | Что **мы послали** в OpenAI (после Resampler.toWire) — 24kHz int16 mono |
+| `UNISON_DUMP_WIRE_WAV=/tmp/x.wav` | Что **движок вернул** (после decode base64) — 24kHz int16 mono |
+| `UNISON_DUMP_SENT_WAV=/tmp/x.wav` | Что **мы послали** в движок (после Resampler.toWire) — int16 mono (24k/16k в зависимости от движка) |
 | `UNISON_NOISE_REDUCTION=off\|near_field\|far_field` | Override `noise_reduction` в `session.update` |
+| `UNISON_BUFFER_MS=500` | Потолок джиттер-буфера (`PlaybackPacing.targetBufferSec`) в мс. Контроллер держит подушку ≤ него, сливает выше. Default **500** (хватает после VAD-фикса) |
+| `UNISON_VAD_SILENCE_MS=300` | **Gemini VAD `silenceDurationMs`** — сколько модель ждёт тишину перед концом тёрна. API default ~800мс = и был источник фризов. Default **300**. Меньше = плавнее/меньше latency, но риск рубить тёрн в середине клаузы (хуже связность перевода) |
 | `UNISON_FORCE_STATE=...` | Snapshot/harness mode forcings |
 
 Пример полной диагностической запуска:
@@ -324,6 +462,28 @@ UNISON_DUMP_PLAYBACK_WAV=/tmp/playback.wav \
 open /Applications/Unison.app
 ```
 
+### Always-on instrumentation (логи в `~/Library/Logs/Unison/unison.log`)
+
+Чтобы диагностировать микропаузы **только по логам**, каждая граница output-пути
+всегда пишет диагностику (мы в разработке — пусть пишут максимально подробно).
+Читаются слева-направо вдоль пути «модель → колонки»:
+
+| Тег | Где | Что показывает |
+|---|---|---|
+| `[ws-rx]` | URLSessionWSClient | Gap между WS-фреймами **на сокете** (>400мс), ДО актора/декода — истинная сетевая/модельная каденция. Если `[ws-rx]` гладкий, а `[audio-rx]` рваный → проблема в нашем актора |
+| `[turn <speaker>]` | Gemini stream | `turnComplete` — модель закончила тёрн (дальше пауза = VAD `silenceDurationMs`). Коррелирует большой `[audio-rx]` gap с границей тёрна |
+| `[audio-rx <speaker>]` | Gemini/OpenAI stream | Меж-чанковый gap (+Nms) и размер чанка, на акторе. Сверять с `[ws-rx]` |
+| `[pump <speaker>]` | TranslationOrchestrator | Длительность per-frame MainActor-hop'а; пишется только если >30мс = UI-конжешн тормозит audio-pump |
+| `[pipeline DROP …]` | TranslationOrchestrator | `resampled`-буфер переполнен, кадр **выброшен** (downstream-плеер не успевает) |
+| `[sched speakers]` | AVAudioOutputMixer | `schedGap` — wall-clock между подачами кадров в плеер (debug); `[sched-stall]` если >250мс |
+| `[speakers] pacing …` | PlaybackPacing tick | depth/depth_smooth/arrival_ema/rate раз в 1с — авторитетная глубина очереди (по реальным completion-callback'ам) |
+| `[UNDERRUN speakers]` | PlaybackPacing tick | **Очередь пуста посреди речи** = слышимая микропауза (авторитетный сигнал). Кросс-ссылка на теги выше локализует причину |
+
+**Как читать при микропаузе:** найти `[UNDERRUN speakers]` → посмотреть
+непосредственно перед ним: был ли большой `[audio-rx]` gap (сеть/модель)? был ли
+`[pump]` >30мс (UI)? был ли `[sched-stall]` (pipeline)? `[pipeline DROP]`
+(back-pressure)? — это и есть корень конкретной паузы.
+
 ---
 
 ## `pacing-eval` CLI Harness
@@ -334,9 +494,13 @@ production-цепочку без юзера. Source: `Sources/Tools/PacingEval/`
 ```bash
 # Реальная сессия с OpenAI на pre-recorded WAV
 OPENAI_API_KEY=$(security find-generic-password -s "com.unison.app" -a "openai-api-key" -w) \
-  swift run pacing-eval --audio /path/to/input.wav --target ru --runs 3
+  swift run pacing-eval --provider openai --audio /path/to/input.wav --target ru --runs 3
 
-# Offline + Live playback тест (без OpenAI)
+# Реальная сессия с Gemini
+GEMINI_API_KEY=$(security find-generic-password -s "com.unison.app" -a "gemini-api-key" -w) \
+  swift run pacing-eval --provider gemini --audio /path/to/input.wav --target ru --runs 3
+
+# Offline + Live playback тест (без подключения к движку)
 swift run pacing-eval --audio /path/to/input.wav --playback-test
 ```
 
@@ -356,10 +520,16 @@ swift run pacing-eval --audio /path/to/input.wav --playback-test
 
 ## Открытые вопросы / TODO
 
-- [ ] Минимальное repro для OpenAI bug report (gpt-realtime-translate fade)
-- [ ] Quality degradation (не только громкость) — нужно отдельное расследование
-- [ ] Куски аудио прерываются до окончания — расследуется
+- [ ] Минимальное repro для bug report провайдерам (fade — есть и у OpenAI, и у Gemini)
+- [x] **Громкость деградирует (fade)** — компенсируется адаптивным AGC (цель = peak RMS сессии, авто-калибровка под движок: OpenAI ≈ 0.05, Gemini ≈ 0.12)
+- [x] **«Звук резко пропадает и появляется» + «роботизированный»** — оба симптома были **наш v4 контроллер**: `arrivalRateEMA + correction` через медленный (τ≈2с) сглаживатель ускорялся на бёрсте и сливал подушку перед паузой (underrun 3%/8 окон, пик буфера 963мс), а floor 0.85× растягивал звук («робот»). Доказано офлайн-реплеем реального timeline. Чинит `PlaybackPacing` **v5** (asymmetric: `1.0 + correction`, никогда < 1.0×, мягкий cap 1.15×, τ≈0.6с) → underrun 0.8% (1 окно), пик 550мс, рейт [1.00,1.05]×, mean latency без изменений
+- [x] **Заметные фризы — настоящая причина: БАГ переслива (наш контроллер).** Live-тест с ключом юзера (pacing-eval, 3 прогона ru→en через прод-стрим) расставил всё по местам: внутри речи p99 меж-чанковых gap'ов = **428–489мс**, а МАКС gap (0.54–0.87с) всегда на **хвосте реплики** (t≈39с, ПОСЛЕ конца 32.7с инпута), не в середине. `[ws-rx]` (socket-level) подтвердил: gap'ы на **сети/модели**, до нашего актора — не наш пайплайн. Значит держимая подушка 500мс покрывает речь; фризы были от **переслива** (контроллер сливал подушку → underrun даже на нормальных 250–489мс gap'ах). Фикс переслива (`targetBufferSec` = потолок) + 500мс = гладко внутри речи
+- [x] **VAD-гипотеза оказалась НЕВЕРНОЙ** (важно, чтобы не повторять). Live A/B `silenceDurationMs` 300 vs 800 → почти идентично (p50 ~248, max 764 vs 980). На монологе VAD не влияет на каденцию (нет границ тёрнов). `realtimeInputConfig` оставлен как возможная оптимизация latency для реальных диалогов (env `UNISON_VAD_SILENCE_MS`), но это **НЕ** фикс фризов
+- [ ] Подтвердить на слух (юзер) что 500мс + фикс переслива = гладко. Хвостовые gap'ы (конец реплики) и паузы спикера — натуральные, не фриз. Если в реальном звонке turn-boundary паузы мешают — тюнить `UNISON_VAD_SILENCE_MS` и слушать связность перевода
+- [ ] `[UNDERRUN speakers]` недосчитывает фризы при хронически тонком буфере (guard `depth_smooth>0.03`) — `[sched-stall]` надёжнее как прокси фриза
+- [ ] Деградация *качества* модели (не громкости, бустом не лечится) — отдельное расследование / репорт провайдеру
+- [ ] Per-frame MainActor hop в pump'ах оркестратора (`recordDeltaArrival`) — потенциальный доп. источник стартвейшна под UI-нагрузкой; квантифицируется логом `[pump …]`, если >30мс — увести с hot-path
 
 ---
 
-*Last updated: 2026-06-23*
+*Last updated: 2026-06-30*

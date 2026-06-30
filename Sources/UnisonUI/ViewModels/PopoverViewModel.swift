@@ -367,24 +367,29 @@ public final class PopoverViewModel {
     /// the popover. Kept on the view-model so tests can verify the
     /// mapping without instantiating SwiftUI views. Wording stays short
     /// per the project's UX-copy convention (see MEMORY.md).
-    public nonisolated static func userMessage(for error: TranslationError) -> String {
+    public nonisolated static func userMessage(
+        for error: TranslationError,
+        model: TranslationModel = .openAIRealtime
+    ) -> String {
         switch error {
         case .permissionDenied(.microphone):
             return "Нет доступа к микрофону. Откройте Настройки → Privacy & Security → Microphone."
         case .blackHole2chMissing:
             return "BlackHole 2ch не найден. Установите драйвер в Onboarding."
         case .networkLost:
-            return "Нет связи с серверами OpenAI. Проверьте интернет."
+            return "Нет связи с серверами \(model.providerName). Проверьте интернет."
         case .apiKeyInvalid:
             // Markdown link — ErrorRow renders the message through a
             // `Text(LocalizedStringKey(...))` initializer that auto-
             // parses `[label](url)` into a clickable link, while the
             // surrounding text stays selectable via `.textSelection`.
-            return "OpenAI ключ невалидный. Проверьте на [platform.openai.com/api-keys](https://platform.openai.com/api-keys) или вставьте новый в Настройках."
+            let dashURL = model.getKeyURL.absoluteString
+            let dashLabel = dashURL.replacingOccurrences(of: "https://", with: "")
+            return "\(model.providerName) ключ невалидный. Проверьте на [\(dashLabel)](\(dashURL)) или вставьте новый в Настройках."
         case .rateLimited:
-            return "Превышен лимит запросов OpenAI. Повторите позже."
+            return "Превышен лимит запросов \(model.providerName). Повторите позже."
         case .insufficientCredits:
-            return "Закончились средства OpenAI. Пополните баланс."
+            return "Закончились средства \(model.providerName). Пополните баланс."
         case .inputDeviceUnavailable:
             return "Микрофон недоступен. Выберите другое устройство в Настройках."
         case .outputDeviceUnavailable:

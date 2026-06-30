@@ -82,6 +82,24 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     private let counterLock = NSLock()
     private var scheduledBufferCount: Int = 0
     private var playedBackBufferCount: Int = 0
+    /// Schedule-cadence instrumentation (always-on dev diagnostic): the
+    /// wall-clock of the last `scheduleTranslated` call, so each new frame
+    /// can log the inter-schedule gap (`schedGap`). Authoritative
+    /// queue-depth / underrun is tracked by `PlaybackPacing` (real
+    /// completion counters); this only measures how steadily frames reach
+    /// the player.
+    private var lastScheduleAt: Date?
+    /// Last sample value of the previously-scheduled translated buffer, used
+    /// to declick chunk seams: the first samples of each new buffer are
+    /// ramped from this value so a boundary discontinuity (resampler reset
+    /// transient, AGC gain step) is smoothed rather than stepped. Reset to 0
+    /// on each `play(_:)` so the first chunk (and any chunk resuming after the
+    /// player ran dry) ramps up from silence. Touched only from the mixer
+    /// actor's schedule path — no extra locking needed.
+    private var lastTranslatedSample: Float = 0
+    /// Declick ramp length in samples (~2ms at 48k). Long enough to remove a
+    /// boundary click, short enough to be inaudible as a smear.
+    private static let declickRampSamples = 96
 
     public init() {
         self.playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
@@ -377,6 +395,8 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         counterLock.lock(); defer { counterLock.unlock() }
         scheduledBufferCount = 0
         playedBackBufferCount = 0
+        lastScheduleAt = nil
+        lastTranslatedSample = 0
     }
 
     public func playOriginal(_ frames: AsyncStream<AudioFrame>) async {
@@ -444,6 +464,71 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         }
         translatedChunkIndex += 1
         let frameLength = buf.frameLength
+
+        // --- Schedule-cadence instrumentation (always-on dev diagnostic) ---
+        // `schedGap` is the wall-clock gap between consecutive schedule
+        // calls = the cadence at which fresh frames actually reach the
+        // player. A spike here means the upstream pipeline stalled (no
+        // frame to schedule); cross-reference `[audio-rx]` (was the model
+        // late?) and `[pump peer]` (did the MainActor hop stall?) to
+        // localise it. Authoritative queue-depth / underrun lives in
+        // PlaybackPacing's tick log (`[speakers] pacing …` and
+        // `[UNDERRUN speakers]`), which uses the real .dataPlayedBack
+        // completion counters rather than the version-sensitive
+        // playerTime clock.
+        counterLock.lock()
+        let nowAt = Date()
+        let schedGapMs = lastScheduleAt.map { nowAt.timeIntervalSince($0) * 1000 } ?? 0
+        lastScheduleAt = nowAt
+        counterLock.unlock()
+        Self.log.debug("[sched speakers] schedGap=\(Int(schedGapMs))ms"
+            + " frame=\(String(format: "%.0f", Double(frameLength) / 48.0))ms"
+            + " rate=\(String(format: "%.3f", Double(timePitch.rate)))")
+        if schedGapMs > 250 {
+            Self.log.info("[sched-stall speakers] \(Int(schedGapMs))ms gap before this frame reached"
+                + " the player — upstream starved (cross-check [audio-rx]/[pump peer])")
+        }
+        // --- end instrumentation ---
+
+        // --- Seam declick ---------------------------------------------------
+        // Ramp the first ~2ms of this buffer from where the audio actually
+        // left off, so a boundary discontinuity becomes a 2ms glide instead
+        // of an instantaneous step (= click). Two cases:
+        //  • Continuous playback (queue non-empty): ramp from the previous
+        //    buffer's last sample. If the signal is already continuous the
+        //    ramp ≈ the signal (no-op); if the resampler/AGC introduced a
+        //    small step at the seam, it's smoothed.
+        //  • Resume after the player TRULY ran dry: ramp up from 0, otherwise
+        //    the first non-zero sample steps from the digital silence the
+        //    player emitted and clicks.
+        //
+        // Dryness signal: `scheduledBufferCount == playedBackBufferCount` —
+        // every scheduled buffer has FINISHED hardware playout (.dataPlayedBack
+        // fired), so nothing is left to render. The completion lag only makes
+        // this read dry LATE, never falsely early (you cannot play back more
+        // than was scheduled), so there are no false positives on a healthy
+        // seam. We deliberately do NOT also trigger on a large `schedGap`: a
+        // normal 0.3–0.8s inter-chunk gap is absorbed by the ~0.75s cushion
+        // (the player keeps playing through it), so gating on the gap would
+        // ramp healthy clause boundaries from 0 — a 2ms notch on exactly the
+        // seams this is meant to smooth.
+        //
+        // `lastTranslatedSample` is read+written under `counterLock` (this type
+        // is a class, not an actor — it's only serialized in practice by the
+        // single `playTranslated` consumer; the lock guards the stop→restart
+        // handoff where a late in-flight schedule can race the next session's
+        // `resetPlaybackCounters`).
+        counterLock.lock()
+        let resumingFromSilence = scheduledBufferCount <= playedBackBufferCount
+        let prevSample = lastTranslatedSample
+        counterLock.unlock()
+        declickSeam(buf, from: resumingFromSilence ? 0 : prevSample)
+        if let ch = buf.floatChannelData, buf.frameLength > 0 {
+            let last = ch[0][Int(buf.frameLength) - 1]
+            counterLock.lock(); lastTranslatedSample = last; counterLock.unlock()
+        }
+        // --- end seam declick -----------------------------------------------
+
         // Use the explicit `.dataPlayedBack` callback type so we can
         // distinguish "buffer was played by hardware" from "buffer was
         // consumed by the next node" (the default callback). When the
@@ -509,6 +594,22 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
             memcpy(buf.floatChannelData![0], p, frame.pcm.count)
         }
         return buf
+    }
+
+    /// Ramp the first `declickRampSamples` of `buf` from `start` into the
+    /// actual signal (linear blend `out[i] = start·(1−g) + signal[i]·g`,
+    /// `g = i/n`). `out[0] == start` so playback continues without a step,
+    /// and by sample `n` we're back on the real waveform. Runs on the mixer
+    /// actor's schedule path (never the render thread) — plain buffer math.
+    private func declickSeam(_ buf: AVAudioPCMBuffer, from start: Float) {
+        guard let ch = buf.floatChannelData else { return }
+        let p = ch[0]
+        let n = min(Int(buf.frameLength), Self.declickRampSamples)
+        guard n > 1 else { return }
+        for i in 0..<n {
+            let g = Float(i) / Float(n)
+            p[i] = start * (1 - g) + p[i] * g
+        }
     }
 
     /// Root-mean-square of a float32 PCM frame, used for periodic

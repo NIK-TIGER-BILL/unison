@@ -140,13 +140,7 @@ private struct AppKitSecretField: NSViewRepresentable {
         // per the design spec — `NSTextField.placeholderString` uses
         // a near-white tint by default, which is too loud against the
         // dark row background.
-        field.placeholderAttributedString = NSAttributedString(
-            string: placeholder,
-            attributes: [
-                .foregroundColor: NSColor.white.withAlphaComponent(0.32),
-                .font: font
-            ]
-        )
+        field.placeholderAttributedString = Self.placeholderAttributed(placeholder, font: font)
 
         field.stringValue = text
         field.delegate = context.coordinator
@@ -160,6 +154,27 @@ private struct AppKitSecretField: NSViewRepresentable {
         if nsView.stringValue != text {
             nsView.stringValue = text
         }
+        // Re-apply the placeholder so it tracks prop changes — e.g. the
+        // API-key hint switching from `sk-proj-…` to `AQ.…` when the user
+        // changes the translation engine. `makeNSView` runs only once (we
+        // recreate solely on the show/hide toggle via `.id`), so without
+        // this the placeholder would stay frozen at its first value.
+        if nsView.placeholderAttributedString?.string != placeholder {
+            let font = nsView.font ?? NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
+            nsView.placeholderAttributedString = Self.placeholderAttributed(placeholder, font: font)
+        }
+    }
+
+    /// Muted placeholder string shared by `makeNSView` / `updateNSView`
+    /// (near-white at 32% so the hint reads as «приглушённый» per the design).
+    private static func placeholderAttributed(_ string: String, font: NSFont) -> NSAttributedString {
+        NSAttributedString(
+            string: string,
+            attributes: [
+                .foregroundColor: NSColor.white.withAlphaComponent(0.32),
+                .font: font
+            ]
+        )
     }
 
     func makeCoordinator() -> Coordinator {

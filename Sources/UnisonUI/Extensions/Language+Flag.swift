@@ -7,7 +7,8 @@ import UnisonDomain
 public extension Language {
     /// Emoji flag for this language. Uses the regional indicator letters
     /// of the country most commonly associated with the language (English
-    /// → UK, Chinese → mainland CN, Korean → South).
+    /// → UK, Chinese → mainland CN, Korean → South). 🌐 is used where
+    /// there is no single representative country flag.
     var flagEmoji: String {
         switch self {
         case .ru: "🇷🇺"
@@ -23,6 +24,21 @@ public extension Language {
         case .hi: "🇮🇳"
         case .id: "🇮🇩"
         case .vi: "🇻🇳"
+        case .pl: "🇵🇱"
+        case .nl: "🇳🇱"
+        case .tr: "🇹🇷"
+        case .ar: "🌐"
+        case .uk: "🇺🇦"
+        case .he: "🇮🇱"
+        case .th: "🇹🇭"
+        case .sv: "🇸🇪"
+        case .no: "🇳🇴"
+        case .da: "🇩🇰"
+        case .fi: "🇫🇮"
+        case .cs: "🇨🇿"
+        case .el: "🇬🇷"
+        case .ro: "🇷🇴"
+        case .hu: "🇭🇺"
         }
     }
 }
