@@ -96,6 +96,16 @@ public enum Resampler {
     }
 
     public static func fromOpenAIWire(_ frame: AudioFrame, targetSampleRate: Int) -> AudioFrame {
+        resampleToMonoF32(frame, targetSampleRate: targetSampleRate)
+    }
+
+    /// Normalize any frame (int16 or float32, mono or multi-channel, any
+    /// sample rate) to **mono float32 at `targetSampleRate`**. Used by the
+    /// AEC stage to bring the device-native mic and far-reference (e.g. a
+    /// 16 kHz BT-HFP mic, a 44.1 kHz output device) to the canceller's
+    /// 48 kHz working rate — without this the frame is mislabeled and the
+    /// downstream wire conversion resamples from the wrong rate.
+    public static func resampleToMonoF32(_ frame: AudioFrame, targetSampleRate: Int) -> AudioFrame {
         let f32 = frame.format == .float32 ? frame : convertInt16ToFloat32(frame)
         return resampleFloat32(mixdownToMono(f32), targetSampleRate: targetSampleRate)
     }

@@ -411,11 +411,16 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         // orchestrator externally, never re-entrantly under the lock.
         engineLock.lock()
         defer { engineLock.unlock() }
-        echoSink = sink
-        if sink != nil {
+        if let sink {
+            echoSink = sink
             installEchoReferenceTap()
         } else {
+            // Remove the tap BEFORE clearing the sink so an in-flight render
+            // callback can't observe a torn write of the existential
+            // (`removeTap` drains pending callbacks first) — mirrors stop()'s
+            // ordering.
             removeEchoReferenceTap()
+            echoSink = nil
         }
     }
 
@@ -437,13 +442,31 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         mixer.removeTap(onBus: 0)
     }
 
-    /// Convert a rendered mono float buffer into a 48 kHz F32 mono
-    /// `AudioFrame`. Returns nil for a non-float or empty buffer.
+    /// Convert a rendered float buffer into a mono float32 `AudioFrame`
+    /// tagged with the buffer's ACTUAL sample rate. The mainMixer output is
+    /// the device-native format (commonly 44.1 kHz stereo), NOT the 48 kHz
+    /// mono the players feed in — so we must carry the real rate and downmix
+    /// to mono; the echo canceller resamples to its 48 kHz working rate.
+    /// Returns nil for a non-float or empty buffer.
     static func echoFrame(from buffer: AVAudioPCMBuffer) -> AudioFrame? {
         let n = Int(buffer.frameLength)
-        guard n > 0, let ch = buffer.floatChannelData?[0] else { return nil }
-        let data = Data(bytes: ch, count: n * MemoryLayout<Float>.size)
-        return AudioFrame(pcm: data, sampleRate: 48_000, channels: 1, format: .float32)
+        guard n > 0, let chans = buffer.floatChannelData else { return nil }
+        let chCount = Int(buffer.format.channelCount)
+        let rate = Int(buffer.format.sampleRate)
+        var data = Data(count: n * MemoryLayout<Float>.size)
+        data.withUnsafeMutableBytes { raw in
+            let dst = raw.bindMemory(to: Float.self).baseAddress!
+            if chCount <= 1 {
+                memcpy(dst, chans[0], n * MemoryLayout<Float>.size)
+            } else {
+                for i in 0..<n {
+                    var acc: Float = 0
+                    for c in 0..<chCount { acc += chans[c][i] }
+                    dst[i] = acc / Float(chCount)
+                }
+            }
+        }
+        return AudioFrame(pcm: data, sampleRate: rate, channels: 1, format: .float32)
     }
 
     public func stop() {

@@ -21,6 +21,15 @@ private func f32Frame(_ samples: [Float]) -> AudioFrame {
     return AudioFrame(pcm: data, sampleRate: 48_000, channels: 1, format: .float32)
 }
 
+private func f32FrameAt(_ samples: [Float], rate: Int) -> AudioFrame {
+    var data = Data(count: samples.count * 4)
+    data.withUnsafeMutableBytes { raw in
+        let p = raw.bindMemory(to: Float.self)
+        for i in samples.indices { p[i] = samples[i] }
+    }
+    return AudioFrame(pcm: data, sampleRate: rate, channels: 1, format: .float32)
+}
+
 private func samples(_ frame: AudioFrame) -> [Float] {
     var out = [Float](repeating: 0, count: frame.sampleCount)
     frame.pcm.withUnsafeBytes { raw in
@@ -121,4 +130,29 @@ private func rms(_ s: [Float]) -> Float {
     // One oversized far push: 40k samples can't fit → 40000-32768 dropped.
     aec.pushFarReference(f32Frame([Float](repeating: 0.1, count: 40_000)))
     #expect(aec.droppedFarSamples == 40_000 - 32_768)
+}
+
+@Test func speex_resamplesNonNativeMicRate_preservesDuration() {
+    // Regression for the 48 kHz-assumption bug: a 16 kHz mic frame must come
+    // out at 48 kHz with the SAME duration. 1600 samples @16k = 100 ms →
+    // ~4800 samples @48k (minus a <480 reblock remainder). The old code
+    // relabeled 1600 samples as 48 kHz (≈33 ms) → toWire shipped 3×-fast audio.
+    let aec = SpeexEchoCanceller()
+    var lcg = LCG(state: 11)
+    let near16k = (0..<1600).map { _ in lcg.next() * 0.2 }
+    aec.pushFarReference(f32FrameAt([Float](repeating: 0, count: 4410), rate: 44_100))
+    let out = samples(aec.processNear(f32FrameAt(near16k, rate: 16_000)))
+    #expect(out.count >= 4800 - 480)
+    #expect(out.count <= 4800)
+}
+
+@Test func speex_nonNativeNear_withSilentFar_preservesVoice() {
+    // AEC must not eat the voice just because device rates differ: a 16 kHz
+    // near against a silent 44.1 kHz far passes through (RMS preserved).
+    let aec = SpeexEchoCanceller()
+    var lcg = LCG(state: 13)
+    let near16k = (0..<3200).map { _ in lcg.next() * 0.3 }   // 200 ms @16k, RMS≈0.17
+    aec.pushFarReference(f32FrameAt([Float](repeating: 0, count: 8820), rate: 44_100))
+    let out = samples(aec.processNear(f32FrameAt(near16k, rate: 16_000)))
+    #expect(rms(out) > 0.1)
 }
