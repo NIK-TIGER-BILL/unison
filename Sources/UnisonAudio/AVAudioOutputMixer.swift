@@ -180,6 +180,16 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         // them to instrument anything themselves.
         startPlaybackDumpIfRequested()
 
+        // Re-arm the AEC far-reference tap when a sink is registered. A
+        // device-change self-heal rebuilds the graph (the engine stopped
+        // itself), dropping the mainMixerNode tap — without this, AEC would
+        // silently stop after a mid-session output-device change (e.g. a
+        // Bluetooth connect, the very case this self-heal exists for). Caller
+        // holds engineLock, as installEchoReferenceTap expects.
+        if echoSink != nil {
+            installEchoReferenceTap()
+        }
+
         if pacing == nil {
             pacing = PlaybackPacing(player: translatedPlayer,
                                     timePitch: timePitch,
@@ -395,6 +405,12 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     }
 
     public func setEchoReference(_ sink: (any EchoReferenceSink)?) {
+        // engineLock serializes the tap op with the device-change self-heal
+        // (which re-arms the tap from configureGraphAndStartLocked) and stop()
+        // — every echo-tap mutation runs under this lock. Called by the
+        // orchestrator externally, never re-entrantly under the lock.
+        engineLock.lock()
+        defer { engineLock.unlock() }
         echoSink = sink
         if sink != nil {
             installEchoReferenceTap()
