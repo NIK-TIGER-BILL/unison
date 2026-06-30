@@ -20,6 +20,20 @@ import Testing
         #expect(geminiSetupHasTranscriptionAtSetupLevel(json))
     }
 
+    @Test func setupConfiguresVADTurnDetectionAtSetupLevel() throws {
+        // Root-cause fix: realtimeInputConfig.automaticActivityDetection must
+        // be a top-level setup field, and silenceDurationMs must be the tuned
+        // value (default 300ms) — NOT the API's ~800ms default that made the
+        // model sit through clause-boundary pauses (the audible freeze).
+        let json = try encodeToJSONString(GeminiClientEvent.setup(.init(targetLanguage: "ru")))
+        #expect(json.contains("realtimeInputConfig"))
+        #expect(json.contains("automaticActivityDetection"))
+        #expect(json.contains("END_SENSITIVITY_HIGH"))
+        #expect(geminiSetupHasVADConfig(json, silenceMs: GeminiSetupPayload.silenceDurationMs))
+        // And the tuned window must be well under the ~800ms default.
+        #expect(GeminiSetupPayload.silenceDurationMs < 800)
+    }
+
     @Test func realtimeAudioEncodes16kMime() throws {
         let evt = GeminiClientEvent.realtimeAudio(base64: "QUJD")
         let json = try encodeToJSONString(evt)

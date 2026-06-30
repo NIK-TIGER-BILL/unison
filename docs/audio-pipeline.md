@@ -431,7 +431,8 @@ Stop-hang). При пустом резолве `.onlySelected` держим по
 | `UNISON_DUMP_WIRE_WAV=/tmp/x.wav` | Что **движок вернул** (после decode base64) — 24kHz int16 mono |
 | `UNISON_DUMP_SENT_WAV=/tmp/x.wav` | Что **мы послали** в движок (после Resampler.toWire) — int16 mono (24k/16k в зависимости от движка) |
 | `UNISON_NOISE_REDUCTION=off\|near_field\|far_field` | Override `noise_reduction` в `session.update` |
-| `UNISON_BUFFER_MS=1000` | Потолок джиттер-буфера (`PlaybackPacing.targetBufferSec`) в мс. Контроллер держит подушку ≤ него, сливает выше. Больше = меньше фризов, но +столько latency. Default 1000 |
+| `UNISON_BUFFER_MS=500` | Потолок джиттер-буфера (`PlaybackPacing.targetBufferSec`) в мс. Контроллер держит подушку ≤ него, сливает выше. Default **500** (хватает после VAD-фикса) |
+| `UNISON_VAD_SILENCE_MS=300` | **Gemini VAD `silenceDurationMs`** — сколько модель ждёт тишину перед концом тёрна. API default ~800мс = и был источник фризов. Default **300**. Меньше = плавнее/меньше latency, но риск рубить тёрн в середине клаузы (хуже связность перевода) |
 | `UNISON_FORCE_STATE=...` | Snapshot/harness mode forcings |
 
 Пример полной диагностической запуска:
@@ -451,7 +452,9 @@ open /Applications/Unison.app
 
 | Тег | Где | Что показывает |
 |---|---|---|
-| `[audio-rx <speaker>]` | Gemini/OpenAI stream | Меж-чанковый gap **от модели** (+Nms) и размер чанка. Большие gap здесь = модель/сеть, не мы |
+| `[ws-rx]` | URLSessionWSClient | Gap между WS-фреймами **на сокете** (>400мс), ДО актора/декода — истинная сетевая/модельная каденция. Если `[ws-rx]` гладкий, а `[audio-rx]` рваный → проблема в нашем актора |
+| `[turn <speaker>]` | Gemini stream | `turnComplete` — модель закончила тёрн (дальше пауза = VAD `silenceDurationMs`). Коррелирует большой `[audio-rx]` gap с границей тёрна |
+| `[audio-rx <speaker>]` | Gemini/OpenAI stream | Меж-чанковый gap (+Nms) и размер чанка, на акторе. Сверять с `[ws-rx]` |
 | `[pump <speaker>]` | TranslationOrchestrator | Длительность per-frame MainActor-hop'а; пишется только если >30мс = UI-конжешн тормозит audio-pump |
 | `[pipeline DROP …]` | TranslationOrchestrator | `resampled`-буфер переполнен, кадр **выброшен** (downstream-плеер не успевает) |
 | `[sched speakers]` | AVAudioOutputMixer | `schedGap` — wall-clock между подачами кадров в плеер (debug); `[sched-stall]` если >250мс |
@@ -502,8 +505,9 @@ swift run pacing-eval --audio /path/to/input.wav --playback-test
 - [ ] Минимальное repro для bug report провайдерам (fade — есть и у OpenAI, и у Gemini)
 - [x] **Громкость деградирует (fade)** — компенсируется адаптивным AGC (цель = peak RMS сессии, авто-калибровка под движок: OpenAI ≈ 0.05, Gemini ≈ 0.12)
 - [x] **«Звук резко пропадает и появляется» + «роботизированный»** — оба симптома были **наш v4 контроллер**: `arrivalRateEMA + correction` через медленный (τ≈2с) сглаживатель ускорялся на бёрсте и сливал подушку перед паузой (underrun 3%/8 окон, пик буфера 963мс), а floor 0.85× растягивал звук («робот»). Доказано офлайн-реплеем реального timeline. Чинит `PlaybackPacing` **v5** (asymmetric: `1.0 + correction`, никогда < 1.0×, мягкий cap 1.15×, τ≈0.6с) → underrun 0.8% (1 окно), пик 550мс, рейт [1.00,1.05]×, mean latency без изменений
-- [x] **Заметные фризы — БАГ переслива (не модель!)** — реальный лог: контроллер при тонком setpoint 0.30с сам разгонялся до ~1.08× и сливал здоровый буфер 0.5→0 прямо перед паузой (фризил даже когда модель отдавала вовремя). Фикс: `targetBufferSec` теперь **потолок** (держим подушку ≤ него, сливаем только выше), поднят 0.30→1.0с. Фризы 6.7%→3.8%, тишина 2300→1300мс. Тюнится `UNISON_BUFFER_MS`
-- [ ] Остаточные ~3.8% — **продолжительные** замедления модели (суммарный недобор > подушки), не одиночный gap и не баг. Лечится только **adaptive jitter buffer** (растить подушку в турбулентность, latency низкая в покое) — следующий шаг если 1.0с мало по live-логу. Растяжением (slow) не лечим — вернёт «робота»
+- [x] **Заметные фризы — НАСТОЯЩАЯ причина: Gemini VAD `silenceDurationMs` ~800мс default.** Распределение gap'ов в реальном логе: 93% чанков ≤350мс (39 из 138 — БЫСТРЕЕ realtime, модель бёрстит), и лишь **3 gap'а >500мс** (729/828/503мс). Эти 3 ≈ дефолтному окну тишины VAD ~800мс — мы **никогда не слали `realtimeInputConfig`**, поэтому модель высиживала ~800мс на каждой клаузо-паузе перед выдачей. Сами создавали gap'ы. Фикс: `setup.realtimeInputConfig.automaticActivityDetection` (top-level, как transcription поля) с `silenceDurationMs` default **300** (env `UNISON_VAD_SILENCE_MS`) + `END_SENSITIVITY_HIGH`. Меньше gap'ов И меньше latency → буфер опущен до **500мс** (запрос юзера)
+- [x] **Баг переслива** (по дороге) — контроллер при тонком setpoint сам сливал здоровый буфер 0.5→0 перед паузой. Фикс: `targetBufferSec` это **потолок** (держим ≤ него, сливаем только выше)
+- [ ] Проверить на live-логе что gap'ы сжались: `[ws-rx]` (socket-level, до актора) должен показать меньше >400мс gap'ов; `[turn]` коррелирует gap с turnComplete. Если VAD 300мс рубит связность перевода — поднять `UNISON_VAD_SILENCE_MS`
 - [ ] `[UNDERRUN speakers]` недосчитывает фризы при хронически тонком буфере (guard `depth_smooth>0.03`) — `[sched-stall]` надёжнее как прокси фриза
 - [ ] Деградация *качества* модели (не громкости, бустом не лечится) — отдельное расследование / репорт провайдеру
 - [ ] Per-frame MainActor hop в pump'ах оркестратора (`recordDeltaArrival`) — потенциальный доп. источник стартвейшна под UI-нагрузкой; квантифицируется логом `[pump …]`, если >30мс — увести с hot-path

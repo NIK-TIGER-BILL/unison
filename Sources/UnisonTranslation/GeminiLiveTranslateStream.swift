@@ -133,6 +133,12 @@ public actor GeminiLiveTranslateStream: TranslationStream {
             transcriptContinuation.yield(TranscriptDelta(
                 entryId: currentEntryId, speaker: speaker, kind: .translated, text: text, isFinal: false))
         case .turnComplete:
+            // Turn boundary — the model finished a turn and pauses until it
+            // decides the next turn started (governed by the VAD
+            // `silenceDurationMs`). Logged so a big `[audio-rx]` gap can be
+            // attributed to a turn boundary (VAD wait) vs. a mid-turn stall.
+            let sinceAudio = lastAudioAt.map { Int(clock.now().timeIntervalSince($0) * 1000) }
+            Self.log.debug("[turn \(speaker)] turnComplete (\(sinceAudio.map { "\($0)ms since last audio" } ?? "no audio yet"))")
             currentEntryId = UUID()
             lastInputDeltaAt = nil
         case .goAway:

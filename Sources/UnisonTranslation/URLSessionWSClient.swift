@@ -118,9 +118,23 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
 
     private func startReceiveLoop() {
         Task { [weak self] in
+            // Socket-level arrival cadence diagnostic. Timed HERE — the moment
+            // a frame leaves the OS socket, before any actor / decode / pipeline
+            // work — so a big `[ws-rx]` gap is the TRUE network/model cadence,
+            // not our processing. Cross-checks `[audio-rx]` (measured later on
+            // the stream actor): if they match, the gap is the model; if
+            // `[ws-rx]` is smooth but `[audio-rx]` is gappy, it's us. Local var
+            // (this loop is the only writer) to stay data-race-free.
+            var lastFrameAt: Date?
             while let task = self?.task, task.state == .running {
                 do {
                     let msg = try await task.receive()
+                    let now = Date()
+                    let gapMs = lastFrameAt.map { now.timeIntervalSince($0) * 1000 } ?? 0
+                    lastFrameAt = now
+                    if gapMs > 400 {
+                        Self.log.info("[ws-rx] \(Int(gapMs))ms since previous WS frame AT SOCKET — true network/model gap (before any actor/decode)")
+                    }
                     switch msg {
                     case .string(let s): self?.receiveContinuation?.yield(.text(s))
                     case .data(let d): self?.receiveContinuation?.yield(.data(d))

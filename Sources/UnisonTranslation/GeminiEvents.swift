@@ -25,6 +25,23 @@ public struct GeminiSetupPayload: Sendable {
     public let targetLanguage: String
     public init(targetLanguage: String) { self.targetLanguage = targetLanguage }
 
+    /// How long the server waits through silence before ending a speech
+    /// turn (`automaticActivityDetection.silenceDurationMs`). **This was the
+    /// freeze root cause.** We never configured `realtimeInputConfig`, so the
+    /// API's ~800 ms default applied: the model sat through ~800 ms of every
+    /// clause-boundary pause before committing+emitting the translation,
+    /// which is exactly the 700–830 ms gaps the real-session logs showed
+    /// draining the player dry. Dropping it makes the model translate more
+    /// eagerly → smaller output gaps AND lower latency. Lower = smoother but
+    /// risks ending a turn at a mid-clause micro-pause (choppier/less
+    /// coherent translation); 300 ms is the balance. Tune live with
+    /// `UNISON_VAD_SILENCE_MS` (e.g. 150 for smoothest, 500 for best clause
+    /// coherence). Set to a value ≥ 800 to restore the old default behaviour.
+    static var silenceDurationMs: Int {
+        ProcessInfo.processInfo.environment["UNISON_VAD_SILENCE_MS"]
+            .flatMap { Int($0) }.map { max(0, $0) } ?? 300
+    }
+
     func encode(to encoder: Encoder) throws {
         struct TranslationConfig: Encodable { let targetLanguageCode: String }
         struct Empty: Encodable {}
@@ -32,13 +49,29 @@ public struct GeminiSetupPayload: Sendable {
             let responseModalities: [String]
             let translationConfig: TranslationConfig
         }
-        // `inputAudioTranscription` / `outputAudioTranscription` are TOP-LEVEL
-        // `setup` fields (siblings of `model`/`generationConfig`), NOT nested
-        // inside `generationConfig` — the live API rejects them there with a
-        // 1007 "Unknown name … at 'setup.generation_config'" close.
+        // Tighten turn detection so the model doesn't sit through the API's
+        // ~800 ms default silence window before emitting each clause — that
+        // default WAS the audible freeze (see `silenceDurationMs`). HIGH
+        // end-of-speech sensitivity + a short silence window make it commit
+        // translations promptly; a small prefix pad still catches onsets.
+        struct ActivityDetection: Encodable {
+            let startOfSpeechSensitivity: String
+            let endOfSpeechSensitivity: String
+            let prefixPaddingMs: Int
+            let silenceDurationMs: Int
+        }
+        struct RealtimeInputConfig: Encodable {
+            let automaticActivityDetection: ActivityDetection
+        }
+        // `inputAudioTranscription` / `outputAudioTranscription` and
+        // `realtimeInputConfig` are TOP-LEVEL `setup` fields (siblings of
+        // `model`/`generationConfig`), NOT nested inside `generationConfig`
+        // — the live API rejects misplaced fields with a 1007 "Unknown name"
+        // close (learned the hard way with the transcription fields).
         struct Setup: Encodable {
             let model: String
             let generationConfig: GenerationConfig
+            let realtimeInputConfig: RealtimeInputConfig
             let inputAudioTranscription: Empty
             let outputAudioTranscription: Empty
         }
@@ -49,6 +82,12 @@ public struct GeminiSetupPayload: Sendable {
                 responseModalities: ["AUDIO"],
                 translationConfig: .init(targetLanguageCode: targetLanguage)
             ),
+            realtimeInputConfig: .init(automaticActivityDetection: .init(
+                startOfSpeechSensitivity: "START_SENSITIVITY_HIGH",
+                endOfSpeechSensitivity: "END_SENSITIVITY_HIGH",
+                prefixPaddingMs: 20,
+                silenceDurationMs: Self.silenceDurationMs
+            )),
             inputAudioTranscription: .init(),
             outputAudioTranscription: .init()
         )).encode(to: encoder)

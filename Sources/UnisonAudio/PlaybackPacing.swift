@@ -102,17 +102,20 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// residual freezes are sustained model slowdowns, not single gaps) —
     /// so 1.0 s is the knee.
     ///
-    /// **Override live with `UNISON_BUFFER_MS`** (=600 to claw back latency
-    /// on a calm network, =1400 for a very jittery one). We deliberately do
-    /// NOT stretch audio to bridge a stall longer than the cushion (that
-    /// re-introduces the "robotic" artefact): the rare sustained slowdown
-    /// is left as a brief freeze. See the frontier in audio-pipeline.md.
+    /// **Default 0.5 s.** Once the *source* of the big gaps is fixed — the
+    /// Gemini VAD `silenceDurationMs` (was sitting through the API's ~800 ms
+    /// default before emitting each clause; see `GeminiSetupPayload`) — the
+    /// arrival gaps shrink to fit a thin cushion, so a 500 ms buffer can be
+    /// glitch-free without the latency a 1 s cushion cost. Override live with
+    /// `UNISON_BUFFER_MS` (=1000 if a network is still jittery, =300 for
+    /// minimum latency). We do NOT stretch audio to bridge a stall longer
+    /// than the cushion (that re-introduces the "robotic" artefact).
     public static let targetBufferSec: Double = {
         if let raw = ProcessInfo.processInfo.environment["UNISON_BUFFER_MS"],
            let ms = Double(raw), ms >= 0 {
             return ms / 1000.0
         }
-        return 1.0
+        return 0.5
     }()
     /// Hard ceiling on `timePitch.rate`. v5 caps the drain at a GENTLE
     /// 1.15× (was 1.5×): the user reported "robotic" audio, and TimePitch

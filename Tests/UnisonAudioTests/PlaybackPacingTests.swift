@@ -169,13 +169,13 @@ import Testing
 
 // MARK: - buffer cushion
 
-@Test func pacing_targetBufferSec_defaultsTo1s() {
-    // The jitter-buffer cushion ceiling defaults to 1.0 s (the controller
-    // HOLDS the cushion at/below this, drains only above); live-overridable
-    // via UNISON_BUFFER_MS. Guard the default so it can't drift silently.
-    // Skip if the env override is set.
+@Test func pacing_targetBufferSec_defaultsTo500ms() {
+    // The jitter-buffer cushion ceiling defaults to 0.5 s (viable now that
+    // the Gemini VAD fix shrinks the source-side gaps); the controller HOLDS
+    // the cushion at/below this and drains only above. Live-overridable via
+    // UNISON_BUFFER_MS. Guard the default; skip if the env override is set.
     if ProcessInfo.processInfo.environment["UNISON_BUFFER_MS"] == nil {
-        #expect(abs(PlaybackPacing.targetBufferSec - 1.0) < 1e-9)
+        #expect(abs(PlaybackPacing.targetBufferSec - 0.5) < 1e-9)
     }
 }
 

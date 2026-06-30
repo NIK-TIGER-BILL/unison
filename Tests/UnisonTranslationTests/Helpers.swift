@@ -57,6 +57,23 @@ func geminiSetupHasTranscriptionAtSetupLevel(_ json: String) -> Bool {
         && gc?["outputAudioTranscription"] == nil
 }
 
+/// Structural check: `realtimeInputConfig` must be a TOP-LEVEL setup field
+/// (sibling of model/generationConfig) carrying
+/// `automaticActivityDetection.silenceDurationMs` — this is the VAD
+/// turn-detection fix (the ~800 ms API default was the freeze source).
+/// Misplacing it under generationConfig would 1007-reject like the
+/// transcription fields did.
+func geminiSetupHasVADConfig(_ json: String, silenceMs: Int) -> Bool {
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+          let setup = obj["setup"] as? [String: Any],
+          let ric = setup["realtimeInputConfig"] as? [String: Any],
+          let aad = ric["automaticActivityDetection"] as? [String: Any] else { return false }
+    let gc = setup["generationConfig"] as? [String: Any]
+    return gc?["realtimeInputConfig"] == nil
+        && (aad["silenceDurationMs"] as? Int) == silenceMs
+        && aad["endOfSpeechSensitivity"] != nil
+}
+
 struct GenericSendError: Error {}
 
 /// Clock whose `sleep` parks forever (until `releaseAll`). Lets tests
