@@ -21,31 +21,43 @@ import UnisonDomain
 /// too empty". Then slew-rate-limit the change so the rate moves
 /// smoothly (under 0.5/sec) and is imperceptible inside a single chunk.
 ///
-/// **v4 — bidirectional regulator (was v3's one-sided "speed-up only").**
-/// v3 floored the rate at 1.0× and targeted a 1.0 s buffer, which made it
-/// a no-op at the thin depths real sessions run at — and since the model
-/// emits at 0.92–0.99× wall-clock, playing at a hard 1.0× drained the
-/// buffer to silence (the "audio drops out then resumes" symptom). v4
-/// regulates the queue around a THIN setpoint (`targetBufferSec` ≈ 0.15 s,
-/// ≈ today's latency) and is allowed to play slightly slower than
-/// real-time (down to `minRate` 0.85×) so consumption matches arrival
-/// instead of out-running it. Net effect: no added steady-state latency,
-/// but the dropouts caused by our own 1.0× floor go away.
+/// **v5 — asymmetric "never slow, gently drain" (replaces v4's
+/// bidirectional regulator).** Offline replay of a *real* recorded arrival
+/// timeline (`pacing-eval`) showed v4 underran 3% of ticks in 8 distinct
+/// windows AND let the buffer balloon to ~960 ms, while a plain fixed 1.0×
+/// had ZERO underruns. The culprit was v4 itself: it set the target rate
+/// from `arrivalRateEMA + correction` through a slow (τ≈2 s) depth
+/// smoother, so on a burst it sped up — draining the cushion right before
+/// the next inter-chunk gap (the audible micropause) — and its 0.85× floor
+/// stretched audio at the wrong moments (the "robotic" artefact). Both
+/// symptoms the user reported were *our controller*, not the network.
+///
+/// v5 reacts only to the **actual** measured backlog. Baseline is a
+/// pitch-perfect 1.0×; the rate only ever *increases* (never below 1.0×),
+/// and only gently (ceiling `maxRate` 1.15×), to drain a buffer that has
+/// grown past `targetBufferSec` (0.30 s, ≈ the observed p90 inter-chunk
+/// jitter). A faster depth smoother (`depthSmoothAlpha` 0.15, τ≈0.6 s)
+/// tracks sub-second bursts. On the same real timeline this cut underruns
+/// to a single unavoidable window (a 505 ms network gap after a model
+/// slowdown), capped peak latency at 550 ms, held the rate in [1.00,1.05]×
+/// (no audible time-stretch), and kept mean latency unchanged (~315 ms).
 ///
 /// **Invariants enforced.**
-/// 1. `minRate <= timePitch.rate <= maxRate`. The floor is below 1.0 on
-///    purpose (match sub-real-time arrival); the ceiling drains bursts.
+/// 1. `1.0 == minRate <= timePitch.rate <= maxRate`. The floor is exactly
+///    1.0 — slowing below real-time builds latency AND adds time-stretch
+///    artefacts (v4's mistake); the ceiling gently drains bursts.
 /// 2. Rate changes are slew-limited to `maxRateStepPerTick` (0.05 = 0.5
 ///    per second) — imperceptible inside a single chunk.
 ///
-/// **What this does NOT solve.** Bluetooth driver clock skew and large
-/// per-chunk network-jitter spikes still live below this controller — a
-/// chunk arriving much later than its predecessor can still momentarily
-/// empty the thin buffer. Those residual gaps are smoothed at the
-/// playback boundary, and the model's own amplitude fade is handled by
-/// `CompensatingAGC`, not here. If the model ever emits slower than
-/// `minRate` for a sustained stretch some underrun is still unavoidable —
-/// but 0.85× covers the observed arrival range.
+/// **What this does NOT solve.** If the model emits slower than real-time
+/// for a *sustained* stretch the buffer drains and underruns — playing at
+/// 1.0× cannot invent audio that hasn't arrived, and we deliberately do
+/// NOT slow below 1.0× to paper over it (that re-introduces the robotic
+/// artefact for a worse trade). Observed arrival averages ≈1.0× with
+/// jitter, so this is rare; the residual gap is left briefly audible
+/// rather than smeared across the whole utterance. Bluetooth driver clock
+/// skew still lives below this controller; the model's amplitude fade is
+/// handled by `CompensatingAGC`, not here.
 ///
 /// Owned by the player; one instance per `AVAudioPlayerNode` whose
 /// output passes through the matching `AVAudioUnitTimePitch`. Call
@@ -68,50 +80,51 @@ public final class PlaybackPacing: @unchecked Sendable {
     // controller uses. There's no other reason to expose them and
     // the in-app callers don't reach for them.
 
-    /// Steady-state buffer **setpoint** in audio-seconds — the depth the
-    /// regulator holds the queue at. Kept THIN (≈ the empirically-observed
-    /// 0.08–0.15 s depth real sessions already run at) so the added
-    /// latency over the old behaviour is negligible: we are NOT pre-rolling
-    /// a cushion, just regulating around the depth the player already had.
-    /// v3 used 1.0 s here, but combined with the old `minRate = 1.0` floor
-    /// that made the controller a no-op which drained to underrun on
-    /// sub-real-time arrival. v4 regulates *bidirectionally* around this
-    /// thin setpoint: below it, ease slightly below arrival to rebuild;
-    /// above it, speed up to drain.
-    public static let targetBufferSec: Double = 0.15
-    /// Hard ceiling on `timePitch.rate`. Capped at 1.5× — TimePitch
-    /// supports much higher, but our policy is "stay close to real-
-    /// time playback unless the model is truly overflowing". 1.5×
-    /// is still audibly natural; higher values introduce noticeable
-    /// time-stretch artefacts.
-    public static let maxRate: Double = 1.5
-    /// Floor on `timePitch.rate`. v4 lets the player run *slightly* slower
-    /// than wall-clock so it can match the model's measured sub-real-time
-    /// arrival (0.92–0.99×) instead of out-running it and draining to
-    /// silence. This does NOT bloat latency — matching arrival keeps the
-    /// buffer stable at `targetBufferSec`; the rate only dips toward this
-    /// floor transiently to rebuild a critically-low buffer, and the
-    /// buffer-error term + `maxRate` ceiling still drain any burst. 0.85
-    /// is a safety margin below the observed arrival range — in practice
-    /// the rate hovers near `arrivalRateEMA` (~0.95×), not at the floor.
-    public static let minRate: Double = 0.85
+    /// Steady-state buffer **setpoint** in audio-seconds — the depth v5
+    /// gently drains the queue back toward (it never *adds* latency to
+    /// reach it; the cushion forms naturally from the model's own bursts).
+    /// Sized to ≈ the observed p90 inter-chunk arrival jitter (~0.30 s) so
+    /// a typical gap is absorbed without underrunning. v4 used 0.15 s,
+    /// which was too thin for the measured 0.30 s+ jitter and underran;
+    /// fixed-1.0× replay of real data ran a ~0.30–0.45 s natural depth, so
+    /// 0.30 s is not added latency, it's the depth the player already has.
+    public static let targetBufferSec: Double = 0.30
+    /// Hard ceiling on `timePitch.rate`. v5 caps the drain at a GENTLE
+    /// 1.15× (was 1.5×): the user reported "robotic" audio, and TimePitch
+    /// above ~1.15× is audibly time-stretched. v5 only ever speeds up to
+    /// drain, so this ceiling bounds the worst-case artefact; on real data
+    /// the rate never exceeded ~1.05×, so 1.15× is pure safety headroom
+    /// for an unusually large burst.
+    public static let maxRate: Double = 1.15
+    /// Floor on `timePitch.rate`. v5 pins this at **exactly 1.0×**: the
+    /// player never plays slower than real-time. v4's sub-1.0 floor (0.85)
+    /// was meant to bridge sub-real-time arrival by stretching audio, but
+    /// real-data replay showed it (a) added latency and (b) produced the
+    /// "robotic" time-stretch artefact the user reported — for *zero*
+    /// underrun benefit vs. a hard 1.0 floor, because by the time the slow
+    /// depth smoother reacts the buffer is already empty and there is
+    /// nothing left to stretch. So we don't slow at all: a genuine
+    /// model-slowdown gap is left briefly audible, not smeared.
+    public static let minRate: Double = 1.0
     /// Multiplier on `(depth_smooth - targetBufferSec)` to translate
-    /// buffer error into a rate correction around the thin setpoint.
-    /// 0.4 makes the regulator responsive enough to rebuild a near-empty
-    /// buffer within ~2 s (at depth 0, correction ≈ -0.06 → eases ~0.06
-    /// below arrival) and to drain a burst (depth 0.5 s → +0.14 → speeds
-    /// up), while the per-tick slew limit keeps every change smooth and
-    /// imperceptible inside a chunk.
+    /// buffer error into a rate correction. 0.4 drains gently: a buffer
+    /// 0.25 s over target → +0.10 rate (1.10×, imperceptible) that bleeds
+    /// the excess off over a couple of seconds. Below target the negative
+    /// correction is clamped away by the 1.0× floor (we never slow), so
+    /// this gain only ever governs how briskly we drain a too-full buffer.
     public static let correctionGain: Double = 0.4
     /// Maximum change in `timePitch.rate` per tick. At a 100 ms tick
     /// interval, 0.05 means the rate can move at most 0.5 per second
     /// — well below the threshold of audible glitching on TimePitch.
     public static let maxRateStepPerTick: Double = 0.05
-    /// EMA coefficient for the depth smoother. With `dt=0.1s` this is
-    /// `1 - exp(-dt/τ)` for τ ≈ 2 s, i.e. ≈ 0.05. Long enough to filter
-    /// per-chunk 0 ↔ 0.4 oscillation, short enough to respond to a
-    /// genuine clause-burst within a couple of seconds.
-    public static let depthSmoothAlpha: Double = 0.05
+    /// EMA coefficient for the depth smoother. v5 uses 0.15 (τ ≈ 0.6 s),
+    /// 3× faster than v4's 0.05 (τ ≈ 2 s). The slow v4 smoother was a root
+    /// cause of the micropauses: it tracked the buffer so sluggishly that
+    /// the controller reacted to the *previous* burst/gap, draining the
+    /// cushion right before the next gap. τ ≈ 0.6 s tracks the sub-second
+    /// arrival jitter while still filtering single-chunk 0 ↔ 0.25 s
+    /// impulses enough that the slew limit keeps the rate smooth.
+    public static let depthSmoothAlpha: Double = 0.15
     /// EMA coefficient for the arrival-rate tracker. τ ≈ 5 s — long
     /// enough to track a steady speaker pace, short enough to adapt
     /// when the speaker changes cadence.
@@ -147,14 +160,24 @@ public final class PlaybackPacing: @unchecked Sendable {
         }
     }
 
-    /// Pure rate-target computation. Combines a long-run arrival-rate
-    /// estimate with a buffer-error correction, then clamps the result
-    /// to `[minRate, maxRate]`. The caller applies the slew-rate limit
-    /// via `slewToward(currentRate:target:maxStep:)`.
+    /// Pure rate-target computation (v5, asymmetric). The target is
+    /// `1.0 + correction` clamped to `[minRate, maxRate]` (= `[1.0, 1.15]`),
+    /// where the correction is proportional to how far the *actual* smoothed
+    /// backlog sits above the setpoint. The caller applies the slew-rate
+    /// limit via `slewToward(currentRate:target:maxStep:)`.
+    ///
+    /// `arrivalRateEMA` is **intentionally not in the formula** — it is kept
+    /// as a parameter only so the diagnostic tick log can report it. v4 used
+    /// `arrivalRateEMA + correction`, predicting the drain from the long-run
+    /// arrival rate; on real data that overshot on bursts and drained the
+    /// cushion right before the next gap (the micropause). v5 reacts to the
+    /// measured backlog alone, so it can only ever ask to speed *up* (the
+    /// negative correction below target is clamped off by the 1.0× floor).
     public static func targetRate(arrivalRateEMA: Double, depthSmooth: Double) -> RateState {
+        _ = arrivalRateEMA  // diagnostic-only; see doc comment for why it's out of the formula
         let bufferError = depthSmooth - targetBufferSec
         let correction = bufferError * correctionGain
-        let unbounded = arrivalRateEMA + correction
+        let unbounded = 1.0 + correction
         let clamped = min(maxRate, max(minRate, unbounded))
         return RateState(
             bufferError: bufferError,
@@ -191,14 +214,19 @@ public final class PlaybackPacing: @unchecked Sendable {
     private var lastLoggedQueueSec: Double = 0
     /// DIAG: tick counter so we can force-log every Nth tick at info level.
     private var tickCount: Int = 0
+    /// True while the queue is currently dry (underrunning), so each
+    /// distinct dry spell logs one `[UNDERRUN]` line, not one per tick.
+    private var wasDry = false
     /// Previous-tick snapshots for per-tick arrival and consumption
     /// rates. Both are reset to 0 on each `reset()`.
     private var prevScheduledForRate: AVAudioFramePosition = 0
     private var prevCompletedForRate: AVAudioFramePosition = 0
-    /// Smoothed (EMA) arrival rate. Calibrates the steady-state player
-    /// rate: a healthy session converges this to the average wall-clock
-    /// ratio the server is emitting at (≈ 1.0× for real-time speakers,
-    /// 1.2–1.5× during clause-bursts).
+    /// Smoothed (EMA) arrival rate. **Diagnostic-only in v5** — it is
+    /// logged so the dump shows the wall-clock ratio the server emits at
+    /// (≈ 1.0× for real-time speakers, higher during clause-bursts), but it
+    /// no longer feeds the rate decision (see `targetRate`). Kept because a
+    /// sustained arrival ≠ 1.0× in the logs is the signal that would
+    /// justify revisiting the "never slow below 1.0×" policy.
     private var arrivalRateEMA: Double = 1.0
     /// Smoothed (EMA) consumption rate. Tracked for diagnostics so we
     /// can verify arrival ≈ consumption in steady state.
@@ -281,6 +309,7 @@ public final class PlaybackPacing: @unchecked Sendable {
         lastLoggedRate = 1.0
         lastLoggedQueueSec = 0
         tickCount = 0
+        wasDry = false
         arrivalRateEMA = 1.0
         consumptionRateEMA = 1.0
         depthSmooth = 0
@@ -325,6 +354,24 @@ public final class PlaybackPacing: @unchecked Sendable {
         arrivalRateEMA += (instantArrival - arrivalRateEMA) * Self.arrivalRateAlpha
         consumptionRateEMA += (instantConsumption - consumptionRateEMA) * Self.arrivalRateAlpha
         depthSmooth += (depth - depthSmooth) * Self.depthSmoothAlpha
+
+        // --- Underrun (dry-queue) detection — authoritative micropause signal.
+        // `depth` is the real scheduled-minus-completed backlog (driven by
+        // the .dataPlayedBack completion callbacks), so `depth ≈ 0` while
+        // we were recently playing (`depthSmooth` still warm) means the
+        // player has drained its queue and is emitting silence — exactly
+        // the audible micropause the user reports. One info line per spell
+        // (hysteresis via `wasDry`); the `depthSmooth` guard suppresses the
+        // benign depth=0 at session start/end. Cross-reference `[audio-rx]`
+        // (model late?), `[pump]` (MainActor stall?), `[sched-stall]`.
+        let isDry = depth < 0.005 && depthSmooth > 0.03
+        if isDry && !wasDry {
+            log.info("[UNDERRUN \(label)] queue DRY — player starved mid-stream"
+                + " (depth_smooth=\(String(format: "%.3fs", depthSmooth))"
+                + " arrival_ema=\(String(format: "%.3fx", arrivalRateEMA))"
+                + " applied_rate=\(String(format: "%.3f", appliedRate))) — audible micropause")
+        }
+        wasDry = isDry
 
         // Compute target and slew toward it.
         let state = Self.targetRate(arrivalRateEMA: arrivalRateEMA, depthSmooth: depthSmooth)
