@@ -277,6 +277,9 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// The player's currently-applied rate, kept in Double for slew
     /// arithmetic. Written to `timePitch.rate` as `Float` on each tick.
     private var appliedRate: Double = 1.0
+    /// Last value actually written to `timePitch.rate`, so we can skip
+    /// redundant re-writes of an unchanged rate (see `tick()`).
+    private var lastWrittenRate: Float = 1.0
 
     // MARK: - Init / lifecycle
 
@@ -357,6 +360,7 @@ public final class PlaybackPacing: @unchecked Sendable {
         // block). Safe to touch outside the lock, but we're already
         // holding it so do it here for readability.
         timePitch.rate = 1.0
+        lastWrittenRate = 1.0
     }
 
     // MARK: - Tick
@@ -417,7 +421,16 @@ public final class PlaybackPacing: @unchecked Sendable {
         appliedRate = Self.slewToward(currentRate: appliedRate,
                                       target: state.clampedTarget,
                                       maxStep: Self.maxRateStepPerTick)
-        timePitch.rate = Float(appliedRate)
+        // Only publish the rate parameter when it actually moved. v5 holds the
+        // rate at exactly 1.0 in the deadband for long stretches; re-writing
+        // the same value 10×/sec needlessly re-triggers the TimePitch phase-
+        // vocoder's parameter-ramp handling (a plausible source of residual
+        // texture). Write only on a meaningful change.
+        let newRate = Float(appliedRate)
+        if abs(newRate - lastWrittenRate) > 1e-4 {
+            timePitch.rate = newRate
+            lastWrittenRate = newRate
+        }
 
         // DIAG: log every 10th tick (1 s) at debug level so the
         // steady-state arrival/consumption ratio and the rate's

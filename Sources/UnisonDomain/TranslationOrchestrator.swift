@@ -1699,32 +1699,35 @@ public final class TranslationOrchestrator {
             let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingOldest(Self.pipelineFrameBuffer)) {
                 resampledContinuation = $0
             }
-            let pump = Task {
+            // DETACHED + userInitiated: the orchestrator is @MainActor, so a
+            // plain `Task {}` here would run the resample (buffer alloc +
+            // converter) and the yield ON the main thread, behind transcript /
+            // Liquid-Glass rendering. Detaching keeps audio delivery off the
+            // MainActor's critical path entirely (the #1 micropause finding).
+            let pump = Task.detached(priority: .userInitiated) {
+                var firstMarked = false
+                var lastHealthHopAt = Date.distantPast
                 for await wireFrame in stream.output {
-                    // Diagnostic dump of the raw model output (before
-                    // any Resampler / scheduling / playback). Guarded
-                    // by env var; silent no-op otherwise. Pairs with
-                    // UNISON_DUMP_PLAYBACK_WAV (the post-timePitch
-                    // tap) for A/B comparison of what the model
-                    // emits vs what the speakers receive.
                     WireDumper.shared.write(wireFrame.pcm)
-                    // Per-frame MainActor hop. Diagnostic: time it — if the
-                    // main thread is congested (transcript redraws, glass
-                    // re-render) the hop blocks the audio pump here, which
-                    // starves the thin playback buffer downstream and is a
-                    // prime micropause suspect. A clean hop is sub-ms.
-                    let beforeHop = Date()
-                    await MainActor.run { [weak self] in
-                        self?.recordDeltaArrival(speaker: .peer)
-                        self?.markFirstDataReceived()
-                    }
-                    let hopMs = Date().timeIntervalSince(beforeHop) * 1000
-                    if hopMs > 30 {
-                        Self.log.info("[pump peer] MainActor hop \(Int(hopMs))ms — UI congestion delayed the audio pump (starves playback buffer)")
-                    }
-                    let yieldResult = resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
+                    // Resample + yield FIRST, off the MainActor — never let the
+                    // audio frame wait behind UI work.
+                    let yieldResult = resampledContinuation.yield(
+                        transformer.fromWire(wireFrame, targetSampleRate: 48_000))
                     if case .dropped = yieldResult {
                         Self.log.error("[pipeline DROP peer→speakers] resampled buffer full — output frame DROPPED (downstream player too slow)")
+                    }
+                    // Health/first-data bookkeeping needs only eventual
+                    // consistency: hop to the MainActor WITHOUT awaiting (so it
+                    // never blocks delivery), and coalesce to ≤1 hop / 0.5s
+                    // instead of one per 250ms chunk.
+                    let now = Date()
+                    if !firstMarked || now.timeIntervalSince(lastHealthHopAt) > 0.5 {
+                        firstMarked = true
+                        lastHealthHopAt = now
+                        Task { @MainActor [weak self] in
+                            self?.recordDeltaArrival(speaker: .peer)
+                            self?.markFirstDataReceived()
+                        }
                     }
                 }
                 resampledContinuation.finish()
