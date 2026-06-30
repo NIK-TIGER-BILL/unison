@@ -209,7 +209,14 @@ public final class MockOpenAIRealtimeServer: @unchecked Sendable {
     /// Block until the next text frame arrives from the client. Resolves
     /// immediately if a frame is already queued. Used by tests to know
     /// when the orchestrator has finished its handshake step.
-    public func nextClientMessage(timeout: TimeInterval = 5.0) async -> String? {
+    ///
+    /// Timeout is generous (20s) on purpose: under CI's heavily-parallel
+    /// load the awaiting Task can be scheduler-starved well past a tight
+    /// budget, which made `mockServer_inputAudioBufferAppend_landsOnServer`
+    /// flaky (nil → assertion fail) on CI while passing locally. A healthy
+    /// localhost frame still resolves in well under a millisecond, so the
+    /// larger ceiling only affects the genuinely-stuck path.
+    public func nextClientMessage(timeout: TimeInterval = 20.0) async -> String? {
         // Slurp any already-received frame.
         let queued: String? = locked {
             if let next = receivedTextFrames.dropFirst(processedFrameCount).first {
