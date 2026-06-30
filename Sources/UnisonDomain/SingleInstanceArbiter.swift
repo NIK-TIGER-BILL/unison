@@ -26,13 +26,23 @@ public enum SingleInstanceArbiter {
     /// is a stale copy to terminate. Our own process (matched by PID) is
     /// never included, and apps with a different — or absent — bundle
     /// identifier are left alone.
+    ///
+    /// Non-positive PIDs are excluded: `NSRunningApplication` reports
+    /// `processIdentifier == -1` for an app that has terminated or has
+    /// not finished launching, and the caller signals victims with
+    /// `kill(2)` — `kill(-1, …)` / `kill(0, …)` would hit every process
+    /// the user can signal / our whole process group.
     public static func instancesToReplace(
         myProcessIdentifier: Int32,
         myBundleIdentifier: String,
         running: [Instance]
     ) -> [Int32] {
         running
-            .filter { $0.bundleIdentifier == myBundleIdentifier && $0.processIdentifier != myProcessIdentifier }
+            .filter {
+                $0.bundleIdentifier == myBundleIdentifier
+                    && $0.processIdentifier > 0
+                    && $0.processIdentifier != myProcessIdentifier
+            }
             .map(\.processIdentifier)
     }
 }

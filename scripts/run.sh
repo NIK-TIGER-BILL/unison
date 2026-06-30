@@ -20,7 +20,7 @@ cd "$(dirname "$0")/.."
 IDENTITY="${SIGN_IDENTITY:-Unison Dev}"
 # `-p codesigning` without `-v`: a self-signed dev cert is untrusted, so
 # `-v` would hide it even though codesign signs with it fine.
-if security find-identity -p codesigning 2>/dev/null | grep -qF "$IDENTITY"; then
+if security find-identity -p codesigning 2>/dev/null | grep -qF "\"$IDENTITY\""; then
   export SIGN_IDENTITY="$IDENTITY"
   echo "Using stable signing identity \"$IDENTITY\"."
 else

@@ -29,7 +29,7 @@ IDENTITY="${1:-Unison Dev}"
 # untrusted (`CSSMERR_TP_NOT_TRUSTED`), so `-v` (valid-only) hides it —
 # yet codesign signs with it fine. Treat a present-but-untrusted identity
 # as "already set up".
-if security find-identity -p codesigning 2>/dev/null | grep -qF "$IDENTITY"; then
+if security find-identity -p codesigning 2>/dev/null | grep -qF "\"$IDENTITY\""; then
   echo "Code-signing identity \"$IDENTITY\" already exists — nothing to do."
   exit 0
 fi
@@ -43,7 +43,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 # Self-signed cert with the codeSigning extended key usage. `-addext`
-# is supported by the system openssl (LibreSSL 3.x) on macOS 26.
+# is supported by both the system LibreSSL 3.x and Homebrew openssl 3.x.
 openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
   -keyout "$TMP/key.pem" -out "$TMP/cert.pem" \
   -subj "/CN=$IDENTITY" \
@@ -52,18 +52,21 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
   -addext "extendedKeyUsage=critical,codeSigning"
 
 # Bundle key+cert into a PKCS#12, then import as an identity.
-# - Legacy PBE/MAC (SHA1 + 3DES) + a non-empty password: macOS's
-#   `security import` rejects the system openssl's default p12
-#   (empty-password / newer MAC) with "MAC verification failed". The
-#   password is an internal throwaway — it only has to match between
-#   export and import.
-# - `-A` authorizes any app to use the key; `-T /usr/bin/codesign` also
-#   names codesign explicitly. Together they minimize the first-use
-#   keychain prompt.
+# - Legacy PBE/MAC (SHA1 + 3DES) + a non-empty password for
+#   `security import` compatibility: newer openssl (3.x — e.g. a Homebrew
+#   `openssl` ahead of LibreSSL on PATH) defaults to AES-256 PBE / SHA-256
+#   MAC, which macOS's `security import` rejects ("MAC verification
+#   failed"); an empty password is likewise rejected. Legacy SHA1/3DES +
+#   a throwaway password import cleanly on both the system LibreSSL and
+#   Homebrew openssl. The password only has to match export ↔ import.
+# - `-T /usr/bin/codesign` authorizes codesign to use the private key. We
+#   deliberately do NOT pass `-A` (which would let *any* app use the key
+#   silently); codesign still prompts once on first use — click
+#   "Always Allow".
 openssl pkcs12 -export -macalg sha1 -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES \
   -inkey "$TMP/key.pem" -in "$TMP/cert.pem" -out "$TMP/identity.p12" \
   -passout pass:unison-dev
-security import "$TMP/identity.p12" -k "$KEYCHAIN" -P unison-dev -A -T /usr/bin/codesign
+security import "$TMP/identity.p12" -k "$KEYCHAIN" -P unison-dev -T /usr/bin/codesign
 
 # Headless/CI only: let codesign use the key without the interactive
 # "Always Allow" click. Needs the keychain password, so it's best-effort
