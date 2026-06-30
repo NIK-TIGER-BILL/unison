@@ -13,6 +13,14 @@ public enum TranslationModel: String, CaseIterable, Codable, Sendable {
         }
     }
 
+    /// Short provider name for user-facing error copy (e.g. "серверами <X>").
+    public var providerName: String {
+        switch self {
+        case .openAIRealtime: "OpenAI"
+        case .geminiLiveTranslate: "Gemini"
+        }
+    }
+
     /// Keychain account (service is constant `com.unison.app`). The two
     /// engines store their keys in independent slots.
     public var keychainAccount: String {

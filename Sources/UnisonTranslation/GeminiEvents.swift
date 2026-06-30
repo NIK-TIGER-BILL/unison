@@ -56,6 +56,14 @@ public struct GeminiSetupPayload: Sendable {
 }
 
 /// Server → client messages we act on. Everything else → `.unknown`.
+///
+/// One event per WS message, decoded audio-first. If a single
+/// `serverContent` frame ever carried BOTH a `modelTurn` audio part AND
+/// `turnComplete`, the boundary signal would be dropped — but that's not
+/// observed in practice (audio and `turnComplete` arrive in separate
+/// frames), and a dropped boundary self-heals via the stream's
+/// `rotateOnInputGap` plus the turn-aware `TranscriptStore`. Kept simple
+/// deliberately; revisit only if the API starts coalescing them.
 public enum GeminiServerEvent: Sendable {
     case setupComplete
     case audio(base64: String)         // 24 kHz int16 PCM

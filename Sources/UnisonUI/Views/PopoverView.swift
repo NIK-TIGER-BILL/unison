@@ -61,7 +61,7 @@ public struct PopoverView: View {
             if let reason = vm.state.errorValue {
                 ErrorRow(
                     title: "Не удалось запустить",
-                    detail: PopoverViewModel.userMessage(for: reason),
+                    detail: PopoverViewModel.userMessage(for: reason, model: vm.settings.translationModel),
                     action: reason == .audioCaptureDenied
                         ? .openSettings(label: "Открыть Настройки") {
                             // macOS 14.4+ split AudioCapture into per-service panes; the
