@@ -51,7 +51,17 @@ let package = Package(
     targets: [
         .target(name: "UnisonDomain", swiftSettings: langModeV5),
         .target(name: "UnisonTranslation", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
-        .target(name: "UnisonAudio", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
+        .target(name: "UnisonAudio", dependencies: ["UnisonDomain", "CSpeexDSP"], swiftSettings: langModeV5),
+        .target(
+            name: "CSpeexDSP",
+            path: "Sources/CSpeexDSP",
+            publicHeadersPath: "include",
+            cSettings: [
+                .define("HAVE_CONFIG_H"),
+                .headerSearchPath("include"),
+                .headerSearchPath(".")
+            ]
+        ),
         .target(name: "UnisonSystem", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
         .target(name: "UnisonUI", dependencies: ["UnisonDomain", "UnisonAudio"], swiftSettings: langModeV5),
         .executableTarget(name: "UnisonApp", dependencies: [
