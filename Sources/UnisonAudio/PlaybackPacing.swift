@@ -80,33 +80,39 @@ public final class PlaybackPacing: @unchecked Sendable {
     // controller uses. There's no other reason to expose them and
     // the in-app callers don't reach for them.
 
-    /// Steady-state buffer **setpoint** in audio-seconds — the cushion the
-    /// controller holds the queue at (draining only *above* it; the cushion
-    /// forms from the model's own bursts, the controller just stops draining
-    /// it). This is the jitter buffer that absorbs the model's arrival-gap
-    /// jitter so the player doesn't run dry — the audible "freeze".
+    /// Jitter-buffer **cushion ceiling** in audio-seconds. The controller
+    /// plays a pitch-perfect 1.0× whenever the queue sits **at or below**
+    /// this — i.e. it HOLDS the cushion the model's bursts build up — and
+    /// only ever speeds up to *drain* the queue back down when it grows
+    /// ABOVE this (a runaway-latency cap, not a target it chases). So this
+    /// is the latency you trade for jitter protection: bigger = more held
+    /// cushion = fewer freezes, more steady-state delay.
     ///
-    /// Sizing (from real-session logs, 2026-06-30): the model delivers
-    /// ~real-time but **stalls 700–970 ms a handful of times per call**
-    /// (audio-rx gaps p90 ≈ 0.33 s, max ≈ 0.83 s). A thin 0.30 s cushion
-    /// underran ~6–7 % of ticks on those stalls (replaying the real arrival
-    /// timeline offline). Raised to **0.60 s** — a bigger cushion swallows
-    /// more of each stall, at the cost of exactly that much steady-state
-    /// latency. It's a direct latency ↔ smoothness dial.
+    /// **Why 1.0 s (0.30 and 0.60 were both too thin — a real bug).**
+    /// Real-session logs (2026-06-30) caught the controller speeding up to
+    /// ~1.08× to drain a *healthy* 0.5 s buffer down toward the thin 0.30 s
+    /// setpoint — **emptying the jitter cushion right before the next gap**,
+    /// so the player ran dry (the freeze). It even did this while the model
+    /// was delivering on time: a thin setpoint makes the controller trim
+    /// the very buffer it needs, then underrun, rebuild, and trim again.
+    /// Raising the ceiling to ~1.0 s means a 0.3–0.9 s cushion is now HELD
+    /// (played at 1.0×, never trimmed), which absorbs the model's typical
+    /// 0.3–0.8 s arrival jitter. Above ~1.0 s the controller is replaying
+    /// the frontier's flat region — extra ceiling stops helping (the
+    /// residual freezes are sustained model slowdowns, not single gaps) —
+    /// so 1.0 s is the knee.
     ///
-    /// **Override live with `UNISON_BUFFER_MS`** (e.g. `=900` for more
-    /// headroom on a jittery network, `=400` to claw back latency) to find
-    /// the per-network sweet spot without a rebuild. We deliberately do NOT
-    /// size it to fully hide the worst ~0.9 s stall (that latency is too
-    /// high) nor stretch audio to bridge it (re-introduces the "robotic"
-    /// artefact): the rare big stall is left as a brief freeze. See the
-    /// `pacing-eval` frontier in the type doc / audio-pipeline.md.
+    /// **Override live with `UNISON_BUFFER_MS`** (=600 to claw back latency
+    /// on a calm network, =1400 for a very jittery one). We deliberately do
+    /// NOT stretch audio to bridge a stall longer than the cushion (that
+    /// re-introduces the "robotic" artefact): the rare sustained slowdown
+    /// is left as a brief freeze. See the frontier in audio-pipeline.md.
     public static let targetBufferSec: Double = {
         if let raw = ProcessInfo.processInfo.environment["UNISON_BUFFER_MS"],
            let ms = Double(raw), ms >= 0 {
             return ms / 1000.0
         }
-        return 0.60
+        return 1.0
     }()
     /// Hard ceiling on `timePitch.rate`. v5 caps the drain at a GENTLE
     /// 1.15× (was 1.5×): the user reported "robotic" audio, and TimePitch
