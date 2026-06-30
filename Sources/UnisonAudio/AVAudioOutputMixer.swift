@@ -285,6 +285,10 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         originalPlayer.volume = min(max(gain, 0), 1)
     }
 
+    public func setEchoReference(_ sink: (any EchoReferenceSink)?) {
+        // Replaced with the mainMixerNode tap in a later task.
+    }
+
     public func stop() {
         pacing?.stop()
         closePlaybackDumpIfNeeded()

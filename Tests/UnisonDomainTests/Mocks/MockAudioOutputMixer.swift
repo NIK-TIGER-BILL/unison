@@ -40,6 +40,12 @@ public final class MockAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         originalTaskActive = false
     }
     public func setOriginalGain(_ gain: Float) { currentGain = gain }
+    /// Last sink handed to `setEchoReference`. `.some(nil)` records an
+    /// explicit clear; `.none` means it was never called.
+    public var echoReference: (any EchoReferenceSink)??
+    public func setEchoReference(_ sink: (any EchoReferenceSink)?) {
+        echoReference = .some(sink)
+    }
     public func stop() {
         countLock.lock(); _stopCalls += 1; countLock.unlock()
         guard blockStopUntilReleased else { return }
