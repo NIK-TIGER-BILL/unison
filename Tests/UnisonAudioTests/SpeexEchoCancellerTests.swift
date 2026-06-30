@@ -141,9 +141,41 @@ private func rms(_ s: [Float]) -> Float {
     var lcg = LCG(state: 11)
     let near16k = (0..<1600).map { _ in lcg.next() * 0.2 }
     aec.pushFarReference(f32FrameAt([Float](repeating: 0, count: 4410), rate: 44_100))
-    let out = samples(aec.processNear(f32FrameAt(near16k, rate: 16_000)))
-    #expect(out.count >= 4800 - 480)
-    #expect(out.count <= 4800)
+    let out = aec.processNear(f32FrameAt(near16k, rate: 16_000))
+    // Output tagged at the MIC rate with ~the same count (duration preserved at
+    // that rate). The bug labeled it 48 kHz → toWire shipped 1/3-duration audio.
+    #expect(out.sampleRate == 16_000)
+    #expect(out.sampleCount > 1600 - 160)
+    #expect(out.sampleCount <= 1600)
+}
+
+@Test func speex_cancelsEcho_acrossDeviceRates() {
+    // The live default: 44.1 kHz output device + 16 kHz mic. The mic captures
+    // the speaker output as a CONTINUOUS 16 kHz stream (the echo). Build near
+    // as one continuous downsample of far, then feed both frame-by-frame; with
+    // LTI resampling Speex must still cancel (the round-2 regression: stateless
+    // per-chunk resampling gave ~0 dB here).
+    let aec = SpeexEchoCanceller()
+    var lcg = LCG(state: 71)
+    let frames = 800
+    let far44 = (0..<(frames * 441)).map { _ in lcg.next() * 0.3 }   // continuous @44.1k
+    // Echo the mic hears: far downsampled to 16k, delayed by a realistic
+    // speaker→mic acoustic delay (10 ms) so the far reference leads the echo
+    // (causal — a real session always has this lead).
+    let echo = samples(Resampler.resampleToMonoF32(
+        f32FrameAt(far44, rate: 44_100), targetSampleRate: 16_000))
+    let near16 = [Float](repeating: 0, count: 160) + echo
+    var inRMS: Float = 0, outRMS: Float = 0
+    for i in 0..<frames {
+        let f = Array(far44[(i * 441)..<((i + 1) * 441)])
+        let nStart = i * 160, nEnd = min((i + 1) * 160, near16.count)
+        guard nStart < nEnd else { break }
+        let nFrame = Array(near16[nStart..<nEnd])
+        aec.pushFarReference(f32FrameAt(f, rate: 44_100))
+        let out = samples(aec.processNear(f32FrameAt(nFrame, rate: 16_000)))
+        if i >= frames - 100 { inRMS += rms(nFrame); outRMS += rms(out) }
+    }
+    #expect(outRMS < inRMS * 0.3)   // strong cancellation once far is band-limited to the mic rate
 }
 
 @Test func speex_nonNativeNear_withSilentFar_preservesVoice() {

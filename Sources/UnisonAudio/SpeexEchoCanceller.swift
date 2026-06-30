@@ -5,94 +5,83 @@ import UnisonDomain
 
 /// `EchoCanceller` backed by SpeexDSP's MDF acoustic echo canceller.
 ///
-/// Works internally at 48 kHz F32 mono. Real devices are NOT 48 kHz (a
-/// built-in or BT-HFP mic is often 16 kHz; the output device is commonly
-/// 44.1 kHz), so both inputs are resampled to 48 kHz before Speex sees them
-/// — otherwise a frame mislabeled 48 kHz makes the downstream wire
-/// conversion resample from the wrong rate (sped-up / pitch-shifted audio)
-/// and Speex can't align the echo. Speex int16 internally.
+/// **Runs at the microphone's native rate.** Real devices are rarely 48 kHz
+/// (a built-in or BT-HFP mic is often 16 kHz; the output device is commonly
+/// 44.1 kHz). Two things must hold for the canceller to both not corrupt the
+/// outgoing audio AND actually cancel:
+///   1. The near (mic) signal is left at its native rate and the cleaned frame
+///      is tagged with THAT rate, so the downstream wire conversion resamples
+///      from the correct rate (a mislabel = sped-up / pitch-shifted audio).
+///   2. The far (speaker) reference is resampled DOWN to the mic rate. This
+///      band-limits it to the mic's bandwidth — crucial: if far carried energy
+///      above the mic's Nyquist (e.g. a 48 kHz far vs a 16 kHz mic), that
+///      out-of-band energy has no near counterpart and dilutes Speex's
+///      adaptive normalization, collapsing cancellation to ~0 dB. Measured:
+///      band-limited far → ~34 dB, full-band far → ~0 dB at 16 k/44.1 k.
 ///
-/// Two-thread contract: `pushFarReference` runs on the render thread and
-/// only writes the far samples (at their native rate) into the lock-free
+/// The Speex state is (re)created for the current mic rate (`frameSize` =
+/// `frameMs` of it; `filterLength` = `tailMs`). A stateful `StreamingResampler`
+/// brings the far from its device rate to the mic rate (LTI; a per-chunk-reset
+/// resampler injects boundary transients that also defeat cancellation).
+///
+/// Two-thread contract: `pushFarReference` runs on the render thread and only
+/// writes far samples (at their native rate) into the lock-free
 /// `FarReferenceRing`; `processNear` runs on the mic task, owns the Speex
-/// state, and does the (off-RT) resampling of both near and far to 48 kHz.
-/// `reset` is guarded so a session restart can't race an in-flight
-/// `processNear`.
+/// state, and does all (off-RT) resampling. `reset` is guarded.
 public final class SpeexEchoCanceller: EchoCanceller, @unchecked Sendable {
     private static let log = UnisonLog(category: "AEC")
 
     public struct Config: Sendable {
-        public let sampleRate: Int32
-        public let frameSize: Int       // samples per speex_echo_cancellation (@ 48 kHz)
-        public let filterLength: Int    // echo tail in samples (~100 ms @ 48 kHz)
+        public let frameMs: Int     // Speex frame = this many ms of the mic rate (10)
+        public let tailMs: Int      // echo tail length in ms (100); multiple of frameMs
         public let ringCapacity: Int
-        public static let `default` = Config(
-            sampleRate: 48_000, frameSize: 480, filterLength: 4_800,
-            ringCapacity: 1 << 15)
+        public static let `default` = Config(frameMs: 10, tailMs: 100, ringCapacity: 1 << 15)
     }
 
     private let config: Config
-    private let echoState: OpaquePointer
-    /// Holds far samples at their NATIVE rate (whatever the output device
-    /// runs at); `processNear` resamples them to 48 kHz on the mic thread.
+    private var echoState: OpaquePointer?   // created for `currentRate`
+    private var currentRate = 0             // mic rate Speex is configured for (0 = none)
+    private var frameSize = 0               // samples per speex_echo_cancellation @ currentRate
     private let farRing: FarReferenceRing
-    private var nearReblocker: Int16Reblocker
-    private var farReblocker: Int16Reblocker
-    /// Output-device sample rate of the far reference, published by the
-    /// render thread (`pushFarReference`) and read by the mic thread.
-    private let farNativeRate = Atomic<Int>(48_000)
-    /// Mic-thread-only (under `stateLock`): fractional accumulator so the
-    /// per-frame "native far samples to consume" has no rounding drift.
+    private var nearReblocker = Int16Reblocker(blockSize: 1)   // re-created per rate
+    private var farReblocker = Int16Reblocker(blockSize: 1)
+    /// Far→mic-rate resampler (LTI), created lazily / recreated on rate change.
+    private var farResampler: StreamingResampler?
+    /// Far samples (at the MIC rate) produced ahead of the matching near;
+    /// carried so far stays continuous and aligned without lossy truncation.
+    private var farCarry: [Int16] = []
+    /// Native output-device rate of the far reference (0 until first push).
+    private let farNativeRate = Atomic<Int>(0)
+    /// Mic-thread-only: fractional accumulator so the per-frame native-far
+    /// consumption has no rounding drift.
     private var farReadAccum: Double = 0
-    /// Guards `echoState` + the reblockers + `farReadAccum` between
-    /// `processNear` (mic task) and `reset`. The render thread never touches
-    /// them — it only writes the ring — so this lock is off the RT path.
     private let stateLock = NSLock()
-    /// Render-thread-only scratch for F32→int16 conversion. Single producer,
-    /// so no synchronization needed.
+    /// Render-thread-only scratch for F32→int16 conversion.
     private var farScratch: [Int16]
-    /// Far-reference loss counters — observability for the render/mic
-    /// clock-drift risk flagged as the AEC design's #1 open question. A
-    /// *constant* lead/lag is harmless (Speex's adaptive filter absorbs a
-    /// fixed delay within its tail); *growing* counters mean the reference
-    /// is mis-paced and cancellation is silently degrading. `farDropped`
-    /// (render thread) counts samples dropped on ring overflow; `farUnderrun`
-    /// (mic thread) counts samples zero-filled when no reference was queued.
+    /// Far-reference loss counters — observability for the render/mic clock-
+    /// drift open question. Growing = the reference is mis-paced.
     private let farDroppedSamples = Atomic<Int>(0)
     private let farUnderrunSamples = Atomic<Int>(0)
-    /// Read-only diagnostic snapshots (also logged internally when growing).
     public var droppedFarSamples: Int { farDroppedSamples.load(ordering: .relaxed) }
     public var underrunFarSamples: Int { farUnderrunSamples.load(ordering: .relaxed) }
-    /// Mic-thread-only (touched under `stateLock`): log-cadence counter +
-    /// last-logged loss total, so we emit a diagnostic only when far-loss
-    /// actually grows rather than every check.
     private var processCallCount = 0
     private var lastLoggedFarLoss = 0
 
     public init(config: Config = .default) {
-        precondition(config.frameSize > 0, "frameSize must be positive")
-        precondition(config.filterLength % config.frameSize == 0,
-                     "filterLength must be a multiple of frameSize for the MDF block decomposition")
+        precondition(config.frameMs > 0, "frameMs must be positive")
+        precondition(config.tailMs % config.frameMs == 0,
+                     "tailMs must be a multiple of frameMs for the MDF block decomposition")
         self.config = config
-        self.echoState = speex_echo_state_init(Int32(config.frameSize),
-                                               Int32(config.filterLength))
         self.farRing = FarReferenceRing(capacity: config.ringCapacity)
-        self.nearReblocker = Int16Reblocker(blockSize: config.frameSize)
-        self.farReblocker = Int16Reblocker(blockSize: config.frameSize)
         self.farScratch = [Int16](repeating: 0, count: 8192)
-        var rate = config.sampleRate
-        speex_echo_ctl(echoState, SPEEX_ECHO_SET_SAMPLING_RATE, &rate)
     }
 
-    deinit { speex_echo_state_destroy(echoState) }
+    deinit { if let echoState { speex_echo_state_destroy(echoState) } }
 
     // MARK: EchoReferenceSink (render thread)
 
     public func pushFarReference(_ frame: AudioFrame) {
         guard frame.format == .float32 else { return }
-        // Publish the far's native rate so the mic thread knows how to
-        // resample it. The ring carries native-rate samples — resampling
-        // here would mean an AVAudioConverter on the render thread.
         farNativeRate.store(frame.sampleRate, ordering: .relaxed)
         frame.pcm.withUnsafeBytes { raw in
             let src = raw.bindMemory(to: Float.self)
@@ -113,33 +102,32 @@ public final class SpeexEchoCanceller: EchoCanceller, @unchecked Sendable {
 
     // MARK: EchoCanceller (mic task)
 
-    /// Echo-cancel one mic frame. The input is resampled to 48 kHz mono
-    /// first (device mics are rarely 48 kHz), so the returned frame is
-    /// 48 kHz with the SAME duration as the input. Because the near path is
-    /// reblocked to `frameSize`, the returned frame may have **0 samples**
-    /// when the input only adds to the pending remainder — callers must
-    /// tolerate an empty (but valid) frame rather than treating it as
-    /// end-of-stream.
+    /// Echo-cancel one mic frame. Output is at the **mic's rate** with the same
+    /// duration as the input. Because the path is reblocked to `frameSize`, the
+    /// returned frame may have **0 samples** when the input only adds to the
+    /// pending remainder — callers must tolerate an empty (but valid) frame.
     public func processNear(_ frame: AudioFrame) -> AudioFrame {
-        // Near → 48 kHz F32 mono (proper resample, off the RT path). Without
-        // this a non-48k mic is mislabeled 48k and `toWire` resamples from the
-        // wrong rate → sped-up / pitch-shifted audio to the backend.
-        let near48 = Resampler.resampleToMonoF32(frame, targetSampleRate: 48_000)
-        let nearInt16 = Self.int16Samples(near48)
-        let m = nearInt16.count
+        let micRate = frame.sampleRate
+        // Normalize to mono F32 at the native rate (handles int16 / multi-
+        // channel mics). No resampling of the near/voice signal.
+        let nearMono = Self.floats(Resampler.resampleToMonoF32(frame, targetSampleRate: micRate))
 
         stateLock.lock()
         defer { stateLock.unlock() }
 
-        let farInt16 = pullFar48(matchingNearSamples: m)
+        guard micRate > 0, configureForRate(micRate), let echoState else {
+            return AudioFrame(pcm: Data(), sampleRate: micRate, channels: 1, format: .float32)
+        }
+
+        let nearInt16 = nearMono.map { Self.toInt16($0) }
+        let m = nearInt16.count
+        let farInt16 = pullFar(matchingNear: m, micRate: micRate)
 
         var out = [Int16]()
         out.reserveCapacity(m)
-        var outBlock = [Int16](repeating: 0, count: config.frameSize)
+        var outBlock = [Int16](repeating: 0, count: frameSize)
         let nearBlocks = nearReblocker.push(nearInt16)
         let farBlocks = farReblocker.push(farInt16)
-        // near and far are pushed in equal-length arrays every call, so the
-        // reblockers stay length-synced; `min` is belt-and-braces.
         for k in 0..<min(nearBlocks.count, farBlocks.count) {
             nearBlocks[k].withUnsafeBufferPointer { near in
                 farBlocks[k].withUnsafeBufferPointer { far in
@@ -154,29 +142,66 @@ public final class SpeexEchoCanceller: EchoCanceller, @unchecked Sendable {
 
         logFarLossIfGrowing()
         return AudioFrame(pcm: Self.f32Data(fromInt16: out),
-                          sampleRate: 48_000, channels: 1, format: .float32)
+                          sampleRate: micRate, channels: 1, format: .float32)
     }
 
-    /// Pull `m` samples of far reference at 48 kHz, aligned with the near
-    /// frame. The ring holds far at the output device's native rate; we
-    /// consume a proportional number of native samples and resample them.
-    /// Zero-fills (and counts) any ring underrun.
-    private func pullFar48(matchingNearSamples m: Int) -> [Int16] {
+    /// (Re)create the Speex state + reblockers for `rate` if it changed.
+    /// Returns false if the Speex state couldn't be created. Caller holds the
+    /// lock.
+    private func configureForRate(_ rate: Int) -> Bool {
+        if rate == currentRate, echoState != nil { return true }
+        if let old = echoState { speex_echo_state_destroy(old); echoState = nil }
+        let fSize = max(1, Int((Double(rate) * Double(config.frameMs) / 1000.0).rounded()))
+        let blocksPerTail = config.tailMs / config.frameMs
+        let filterLength = fSize * blocksPerTail
+        guard let state = speex_echo_state_init(Int32(fSize), Int32(filterLength)) else { return false }
+        var r = Int32(rate)
+        speex_echo_ctl(state, SPEEX_ECHO_SET_SAMPLING_RATE, &r)
+        echoState = state
+        frameSize = fSize
+        currentRate = rate
+        nearReblocker = Int16Reblocker(blockSize: fSize)
+        farReblocker = Int16Reblocker(blockSize: fSize)
+        farResampler = nil
+        farCarry.removeAll(keepingCapacity: true)
+        farReadAccum = 0
+        return true
+    }
+
+    /// Produce exactly `m` samples of far reference at the mic rate, aligned
+    /// with the near frame. Far is stored at the device's native rate; we
+    /// consume a proportional (drift-free) count and resample DOWN to the mic
+    /// rate (band-limiting it), serving `m` from a carry buffer.
+    private func pullFar(matchingNear m: Int, micRate: Int) -> [Int16] {
         guard m > 0 else { return [] }
-        let farRate = farNativeRate.load(ordering: .relaxed)
-        if farRate == 48_000 {
-            return readFarFromRing(count: m)
+        let stored = farNativeRate.load(ordering: .relaxed)
+        let farRate = stored == 0 ? micRate : stored   // no far yet → count underruns at mic rate
+        let nativeNeeded: Int
+        if farRate == micRate {
+            nativeNeeded = m
+        } else {
+            farReadAccum += Double(m) * Double(farRate) / Double(micRate)
+            nativeNeeded = Int(farReadAccum)
+            farReadAccum -= Double(nativeNeeded)
         }
-        // Fractional accumulator avoids rounding drift across calls.
-        farReadAccum += Double(m) * Double(farRate) / 48_000.0
-        let nativeNeeded = Int(farReadAccum)
-        farReadAccum -= Double(nativeNeeded)
-        guard nativeNeeded > 0 else { return [Int16](repeating: 0, count: m) }
-        let nativeFar = readFarFromRing(count: nativeNeeded)
-        let nativeFrame = AudioFrame(pcm: Self.data(fromInt16: nativeFar),
-                                     sampleRate: farRate, channels: 1, format: .int16)
-        let far48 = Resampler.resampleToMonoF32(nativeFrame, targetSampleRate: 48_000)
-        return Self.int16Samples(far48, padOrTruncateTo: m)
+        if nativeNeeded > 0 {
+            let nativeFar = readFarFromRing(count: nativeNeeded)   // zero-filled + counted on underrun
+            let atMic = resampleFar(nativeFar.map { Self.toFloat($0) }, srcRate: farRate, dstRate: micRate)
+            farCarry.append(contentsOf: atMic.map { Self.toInt16($0) })
+        }
+        let take = min(m, farCarry.count)
+        var block = Array(farCarry[0..<take])
+        if take > 0 { farCarry.removeFirst(take) }
+        if take < m { block.append(contentsOf: repeatElement(0, count: m - take)) }
+        return block
+    }
+
+    private func resampleFar(_ x: [Float], srcRate: Int, dstRate: Int) -> [Float] {
+        if srcRate == dstRate { return x }
+        if farResampler?.srcRate != srcRate || farResampler?.dstRate != dstRate {
+            farResampler = StreamingResampler(srcRate: srcRate, dstRate: dstRate)
+        }
+        return farResampler?.resample(x) ?? x
     }
 
     private func readFarFromRing(count: Int) -> [Int16] {
@@ -185,16 +210,11 @@ public final class SpeexEchoCanceller: EchoCanceller, @unchecked Sendable {
         let got = buf.withUnsafeMutableBufferPointer { farRing.read(into: $0) }
         if got < count {
             _ = farUnderrunSamples.wrappingAdd(count - got, ordering: .relaxed)
-            // tail already zero-filled by the `repeating: 0` init
         }
         return buf
     }
 
     private func logFarLossIfGrowing() {
-        // Drift observability (spec open-question #1): emit only when the
-        // cumulative far-loss grows, throttled to every 500th call, so a
-        // healthy session stays quiet and a render/mic clock drift shows up
-        // as a growing dropped/underrun count in the diagnostic log.
         processCallCount += 1
         guard processCallCount % 500 == 0 else { return }
         let dropped = farDroppedSamples.load(ordering: .relaxed)
@@ -208,18 +228,19 @@ public final class SpeexEchoCanceller: EchoCanceller, @unchecked Sendable {
     public func reset() {
         stateLock.lock()
         defer { stateLock.unlock() }
-        speex_echo_state_reset(echoState)
+        if let echoState { speex_echo_state_reset(echoState) }
         farRing.clear()
         nearReblocker.reset()
         farReblocker.reset()
+        farResampler?.reset()
+        farCarry.removeAll(keepingCapacity: true)
         farReadAccum = 0
     }
 
     // MARK: Conversion
 
-    // Deliberate asymmetry: encode ×32767 (so +1.0 → Int16.max, no overflow),
-    // decode ÷32768 (symmetric full-scale, output can't exceed 1.0). Sibling
-    // `Resampler` decodes ÷32767; the round-trip error here is ~3e-5.
+    // Encode ×32767 (so +1.0 → Int16.max, no overflow), decode ÷32768
+    // (symmetric full-scale). Round-trip error ~3e-5.
     private static func toInt16(_ f: Float) -> Int16 {
         Int16(max(-1.0, min(1.0, f)) * 32_767.0)
     }
@@ -227,26 +248,13 @@ public final class SpeexEchoCanceller: EchoCanceller, @unchecked Sendable {
         Float(i) / 32_768.0
     }
 
-    /// Float32 `AudioFrame` → `[Int16]`.
-    private static func int16Samples(_ frame: AudioFrame) -> [Int16] {
-        frame.pcm.withUnsafeBytes { raw -> [Int16] in
-            let src = raw.bindMemory(to: Float.self)
-            return (0..<src.count).map { toInt16(src[$0]) }
+    /// Float32 `AudioFrame` → `[Float]` (empty frame → empty array).
+    private static func floats(_ frame: AudioFrame) -> [Float] {
+        frame.pcm.withUnsafeBytes { raw -> [Float] in
+            let p = raw.bindMemory(to: Float.self)
+            guard let base = p.baseAddress, p.count > 0 else { return [] }
+            return Array(UnsafeBufferPointer(start: base, count: p.count))
         }
-    }
-
-    private static func int16Samples(_ frame: AudioFrame, padOrTruncateTo m: Int) -> [Int16] {
-        var s = int16Samples(frame)
-        if s.count > m {
-            s.removeLast(s.count - m)
-        } else if s.count < m {
-            s.append(contentsOf: repeatElement(0, count: m - s.count))
-        }
-        return s
-    }
-
-    private static func data(fromInt16 s: [Int16]) -> Data {
-        s.withUnsafeBufferPointer { Data(buffer: $0) }
     }
 
     private static func f32Data(fromInt16 s: [Int16]) -> Data {

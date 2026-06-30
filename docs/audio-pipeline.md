@@ -220,12 +220,26 @@ teardown, поэтому отдельная пересборка `AVAudioEngine`
   — реальный рендер (translated post-timePitch/AGC + original), а **не**
   запланированные кадры (timePitch и AGC меняют сигнал относительно того, что
   мы планировали).
-- **Рейт:** 48 kHz F32 mono (нативный far + mic; AEC3-апгрейд остаётся
-  native-rate). Внутри Speex — int16.
-- **Два потока:** render-поток только пишет far в lock-free `FarReferenceRing`
-  (RT-safe, без локов/аллокаций), mic-поток единолично владеет Speex-стейтом
-  под `stateLock` и зовёт `speex_echo_cancellation`. `Int16Reblocker` режет near
-  на кадры по 480 сэмплов.
+- **Рейт — на нативной частоте микрофона** (Speex (пере)создаётся под текущий
+  mic-rate: `frameSize` = 10 ms, tail = 100 ms от него). Микрофон **не**
+  ресемплим (чистый голос + корректная длительность); far **down**-ресемплим к
+  mic-rate. Это критично: 🔥 **far нужно band-limit'ить до полосы микрофона**.
+  Если far несёт энергию выше Nyquist микрофона (напр. 48 kHz far против 16 kHz
+  mic), у этой энергии нет аналога в near, и она разваливает нормировку
+  адаптивного фильтра Speex → cancellation ~0 dB. Замерено: band-limited far →
+  ~34 dB, full-band far → ~0 dB на 16k/44.1k. Down-ресемпл far к mic-rate
+  band-limit'ит его естественно. Ресемпл — `StreamingResampler` (stateful
+  AVAudioConverter, LTI; per-chunk-reset резет ломает cancellation так же).
+  Реальные устройства редко 48 kHz (mic 16k у BT-HFP, выход 44.1k).
+- **Причинность:** far должен **опережать** эхо (reference раньше отражения) —
+  как в любом AEC. Акустическая задержка динамик→микрофон даёт это опережение;
+  pipeline-задержка far (ring + ресемпл) меньше её. Без опережения (far позже
+  эха) фильтр не каузален → не отменяет.
+- **Два потока:** render-поток только пишет far (нативный rate) в lock-free
+  `FarReferenceRing` (RT-safe, без локов/аллокаций); mic-поток единолично владеет
+  Speex-стейтом под `stateLock`, ресемплит far к mic-rate и зовёт
+  `speex_echo_cancellation`. far выравнивается к near через `farCarry` (без
+  lossy-обрезки).
 - **Движок swappable** за `EchoCanceller`-протоколом (UnisonDomain) — WebRTC
   AEC3 подменяется без правок call-site. Speex вендорится как C-таргет
   `CSpeexDSP` (subset SpeexDSP 1.2.1, float build + KISS FFT, revised-BSD).
