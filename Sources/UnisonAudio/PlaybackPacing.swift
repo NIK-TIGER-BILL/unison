@@ -102,28 +102,38 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// residual freezes are sustained model slowdowns, not single gaps) —
     /// so 1.0 s is the knee.
     ///
-    /// **Default 0.5 s.** Once the *source* of the big gaps is fixed — the
-    /// Gemini VAD `silenceDurationMs` (was sitting through the API's ~800 ms
-    /// default before emitting each clause; see `GeminiSetupPayload`) — the
-    /// arrival gaps shrink to fit a thin cushion, so a 500 ms buffer can be
-    /// glitch-free without the latency a 1 s cushion cost. Override live with
-    /// `UNISON_BUFFER_MS` (=1000 if a network is still jittery, =300 for
-    /// minimum latency). We do NOT stretch audio to bridge a stall longer
-    /// than the cushion (that re-introduces the "robotic" artefact).
+    /// Drain threshold (a **deadband edge**, NOT a setpoint we pull toward).
+    /// While the queue depth is at or below this, the rate is held at **exactly
+    /// 1.0×** — no time-stretch, no rate wobble — so the audio plays through
+    /// untouched. Only when depth climbs ABOVE this does the controller speed
+    /// up (gently) to cap runaway latency. The actual playback latency is the
+    /// queue's *natural* depth (the model front-loads to ~0.5–0.75 s), NOT this
+    /// number — this is just where draining kicks in.
+    ///
+    /// **Why 0.75 s (0.5 was too low — it caused the "constant on/off").** Real
+    /// session: the model delivers ~1.015× real-time, so the queue naturally
+    /// sits at 0.5–0.75 s. With the threshold at 0.5 the controller was ALWAYS
+    /// just above it, so it drained nonstop at 1.04–1.15×, out-running arrival
+    /// and pumping the queue to ZERO ~15 % of ticks — a rhythmic drain-to-empty
+    /// the user heard as the sound cutting in and out. Setting the threshold to
+    /// 0.75 (the top of the natural range) puts the common depths INSIDE the
+    /// 1.0× deadband, so playback is untouched; only genuine bursts (>0.75 s)
+    /// get a gentle trim. Override live with `UNISON_BUFFER_MS`.
     public static let targetBufferSec: Double = {
         if let raw = ProcessInfo.processInfo.environment["UNISON_BUFFER_MS"],
            let ms = Double(raw), ms >= 0 {
             return ms / 1000.0
         }
-        return 0.5
+        return 0.75
     }()
-    /// Hard ceiling on `timePitch.rate`. v5 caps the drain at a GENTLE
-    /// 1.15× (was 1.5×): the user reported "robotic" audio, and TimePitch
-    /// above ~1.15× is audibly time-stretched. v5 only ever speeds up to
-    /// drain, so this ceiling bounds the worst-case artefact; on real data
-    /// the rate never exceeded ~1.05×, so 1.15× is pure safety headroom
-    /// for an unusually large burst.
-    public static let maxRate: Double = 1.15
+    /// Hard ceiling on `timePitch.rate`. Capped at a VERY gentle 1.06×: any
+    /// time-stretch is an artefact, and the only job here is to bleed off a
+    /// burst slowly, not to chase a setpoint. 1.06× is enough to out-pace the
+    /// model's ~1.015× delivery (so latency can't run away) while staying
+    /// near-inaudible. Earlier 1.15× let the controller slam the rate up and
+    /// drain the queue to empty (the "on/off" artefact); keeping the ceiling
+    /// this close to 1.0 means even a burst-drain is barely perceptible.
+    public static let maxRate: Double = 1.06
     /// Floor on `timePitch.rate`. v5 pins this at **exactly 1.0×**: the
     /// player never plays slower than real-time. v4's sub-1.0 floor (0.85)
     /// was meant to bridge sub-real-time arrival by stretching audio, but
@@ -134,13 +144,14 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// nothing left to stretch. So we don't slow at all: a genuine
     /// model-slowdown gap is left briefly audible, not smeared.
     public static let minRate: Double = 1.0
-    /// Multiplier on `(depth_smooth - targetBufferSec)` to translate
-    /// buffer error into a rate correction. 0.4 drains gently: a buffer
-    /// 0.25 s over target → +0.10 rate (1.10×, imperceptible) that bleeds
-    /// the excess off over a couple of seconds. Below target the negative
-    /// correction is clamped away by the 1.0× floor (we never slow), so
-    /// this gain only ever governs how briskly we drain a too-full buffer.
-    public static let correctionGain: Double = 0.4
+    /// Multiplier on `(depth_smooth - targetBufferSec)` → rate correction.
+    /// 0.15 (was 0.4) keeps draining barely perceptible: a queue 0.5 s past
+    /// the threshold → +0.075 (clamped to the 1.06× ceiling), bleeding off
+    /// over several seconds rather than slamming the rate up and emptying the
+    /// queue. Below the threshold the negative correction is clamped away by
+    /// the 1.0× floor, so the rate sits at EXACTLY 1.0 in the deadband — this
+    /// gain only governs how gently we trim a genuinely too-full queue.
+    public static let correctionGain: Double = 0.15
     /// Maximum change in `timePitch.rate` per tick. At a 100 ms tick
     /// interval, 0.05 means the rate can move at most 0.5 per second
     /// — well below the threshold of audible glitching on TimePitch.

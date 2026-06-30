@@ -80,7 +80,7 @@ import Testing
     let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.2, depthSmooth: 3.0)
     #expect(r.unboundedTarget > PlaybackPacing.maxRate)
     #expect(r.clampedTarget == PlaybackPacing.maxRate)
-    #expect(PlaybackPacing.maxRate == 1.15)
+    #expect(PlaybackPacing.maxRate == 1.06)
 }
 
 // MARK: - Emergent behaviour over a synthetic timeline
@@ -169,13 +169,12 @@ import Testing
 
 // MARK: - buffer cushion
 
-@Test func pacing_targetBufferSec_defaultsTo500ms() {
-    // The jitter-buffer cushion ceiling defaults to 0.5 s (viable now that
-    // the Gemini VAD fix shrinks the source-side gaps); the controller HOLDS
-    // the cushion at/below this and drains only above. Live-overridable via
-    // UNISON_BUFFER_MS. Guard the default; skip if the env override is set.
+@Test func pacing_targetBufferSec_defaultsTo750ms() {
+    // The drain-threshold / deadband edge defaults to 0.75 s — the top of the
+    // model's natural queue depth, so the common depths play at exactly 1.0×
+    // (no time-stretch, no on/off). Live-overridable via UNISON_BUFFER_MS.
     if ProcessInfo.processInfo.environment["UNISON_BUFFER_MS"] == nil {
-        #expect(abs(PlaybackPacing.targetBufferSec - 0.5) < 1e-9)
+        #expect(abs(PlaybackPacing.targetBufferSec - 0.75) < 1e-9)
     }
 }
 
