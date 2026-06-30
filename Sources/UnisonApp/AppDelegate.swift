@@ -46,6 +46,30 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             message: "applicationDidFinishLaunching — pid=\(ProcessInfo.processInfo.processIdentifier)"
         )
 
+        // Single-instance guard — "new replaces old". Dev builds are
+        // launched by exec'ing the binary directly, which bypasses
+        // Launch Services' one-instance coalescing, and the app is
+        // menubar-only — so without this a rebuild-and-run leaves the
+        // previous build running beside this one (two menubar icons).
+        // Terminate any prior instance and wait for it to exit.
+        //
+        // Runs BEFORE `CrashReporter.startSession()`: a replaced instance
+        // is intentional, not a crash. A graceful exit removes its own
+        // session marker; a force-killed wedged straggler does not — so
+        // clear the marker here when we replaced something, or
+        // `startSession()` would surface a false "previous session
+        // crashed" alert. When nothing was replaced we leave the marker
+        // untouched so a genuine prior crash is still detected.
+        let replacedInstances = SingleInstanceGuard.replaceOtherInstances()
+        if !replacedInstances.isEmpty {
+            FileLogStore.shared.write(
+                category: "AppDelegate",
+                level: "info",
+                message: "single-instance guard — replaced prior instance(s) pid=\(replacedInstances)"
+            )
+            CrashReporter.markCleanShutdown()
+        }
+
         // Crash detection: writes a session marker and surfaces a
         // modal alert if the previous session's marker is still
         // present (i.e. the previous run didn't reach
