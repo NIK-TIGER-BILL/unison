@@ -9,8 +9,11 @@ public protocol EchoReferenceSink: Sendable {
 /// Acoustic echo canceller. The orchestrator runs `processNear` on each mic
 /// frame before it is sent to the translation backend.
 public protocol EchoCanceller: EchoReferenceSink {
-    /// 48 kHz F32 mono in → 48 kHz F32 mono out, with the echo of the
-    /// far-end reference removed.
+    /// Mono float32 in at the mic's native rate → mono float32 out at that
+    /// SAME rate, with the echo of the far reference removed. May return a
+    /// 0-sample frame (the internal reblocking remainder); callers must
+    /// tolerate it. (Do NOT assume a fixed rate — a literal 48 kHz contract is
+    /// exactly the mislabel that ships sped-up audio on a non-48 kHz mic.)
     func processNear(_ frame: AudioFrame) -> AudioFrame
     /// Clear adaptive state + far buffer. Called once per session start.
     func reset()

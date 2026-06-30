@@ -55,6 +55,20 @@ enum WavIO {
         return AudioFrame(pcm: data, sampleRate: 48_000, channels: 1, format: .float32)
     }
 
+    static func frameAt(_ s: [Float], rate: Int) -> AudioFrame {
+        var data = Data(count: s.count * 4)
+        data.withUnsafeMutableBytes { raw in
+            let p = raw.bindMemory(to: Float.self)
+            for i in s.indices { p[i] = s[i] }
+        }
+        return AudioFrame(pcm: data, sampleRate: rate, channels: 1, format: .float32)
+    }
+
+    static func resample(_ s: [Float], from: Int, to: Int) -> [Float] {
+        if from == to { return s }
+        return samples(Resampler.resampleToMonoF32(frameAt(s, rate: from), targetSampleRate: to))
+    }
+
     static func samples(_ frame: AudioFrame) -> [Float] {
         guard frame.format == .float32 else { return [] }
         var out = [Float](repeating: 0, count: frame.sampleCount)
