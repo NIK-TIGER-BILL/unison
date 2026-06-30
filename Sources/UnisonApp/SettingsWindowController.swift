@@ -88,6 +88,7 @@ public final class SettingsWindowController {
         // during the change. Re-probe each show.
         viewModel.refreshDeviceList()
         viewModel.refreshBlackHoleStatus()
+        viewModel.refreshHistoryUsage()
 
         window?.center()
         window?.makeKeyAndOrderFront(nil)

@@ -8,6 +8,8 @@ public struct Settings: Equatable, Codable, Sendable {
     public var tapScopeMode: TapScopeMode
     public var translationModel: TranslationModel
     private var _originalMixVolume: Float
+    public var saveHistoryEnabled: Bool
+    public var historySizeLimitMB: Int
 
     public var originalMixVolume: Float {
         get { _originalMixVolume }
@@ -28,7 +30,9 @@ public struct Settings: Equatable, Codable, Sendable {
         includedTapBundleIDs: [String] = [],
         tapScopeMode: TapScopeMode = .allExcept,
         translationModel: TranslationModel = .openAIRealtime,
-        originalMixVolume: Float = 0.2
+        originalMixVolume: Float = 0.2,
+        saveHistoryEnabled: Bool = true,
+        historySizeLimitMB: Int = 50
     ) {
         self.sessionMode = sessionMode
         self.languagePair = languagePair
@@ -39,6 +43,8 @@ public struct Settings: Equatable, Codable, Sendable {
         self.tapScopeMode = tapScopeMode
         self.translationModel = translationModel
         self._originalMixVolume = min(max(originalMixVolume, 0.0), 1.0)
+        self.saveHistoryEnabled = saveHistoryEnabled
+        self.historySizeLimitMB = historySizeLimitMB
     }
 
     public static let `default` = Settings()
@@ -48,6 +54,7 @@ public struct Settings: Equatable, Codable, Sendable {
         case excludedTapBundleIDs, includedTapBundleIDs, tapScopeMode
         case translationModel
         case _originalMixVolume = "originalMixVolume"
+        case saveHistoryEnabled, historySizeLimitMB
     }
 
     public init(from decoder: Decoder) throws {
@@ -66,5 +73,7 @@ public struct Settings: Equatable, Codable, Sendable {
                                                       forKey: .translationModel) ?? .openAIRealtime
         let raw = try c.decode(Float.self, forKey: ._originalMixVolume)
         self._originalMixVolume = min(max(raw, 0.0), 1.0)
+        self.saveHistoryEnabled = try c.decodeIfPresent(Bool.self, forKey: .saveHistoryEnabled) ?? true
+        self.historySizeLimitMB = try c.decodeIfPresent(Int.self, forKey: .historySizeLimitMB) ?? 50
     }
 }

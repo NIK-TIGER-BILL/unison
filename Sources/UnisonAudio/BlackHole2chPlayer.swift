@@ -21,6 +21,18 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
     private let timePitch = AVAudioUnitTimePitch()
     private let registry: CoreAudioDeviceRegistry
     private var started = false
+    /// Serializes engine-lifecycle transitions (start / stop / device-change
+    /// reconfigure) so a config-change self-heal can't race a stop().
+    private let engineLock = NSLock()
+    /// Observes `AVAudioEngineConfigurationChange` on `engine` and restarts the
+    /// BlackHole 2ch route. Same self-heal the speakers path
+    /// (`AVAudioOutputMixer`) uses; created on first start. NOTE: this engine is
+    /// pinned to the explicit BlackHole 2ch device (not the system default), so
+    /// a plain default-output change (the BT-connect case) usually won't notify
+    /// it — this covers a BlackHole *format renegotiation* and keeps the
+    /// self-heal uniform across the output engines; the BT fix proper lives in
+    /// `AVAudioOutputMixer`.
+    private var configObserver: DebouncedNotificationObserver?
     /// Latches on first `startIfNeeded()` so a stop-restart cycle doesn't
     /// `engine.attach(_:)` already-attached nodes — same contract as
     /// `AVAudioOutputMixer.attached` (attach-twice throws an Obj-C
@@ -92,15 +104,39 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
     }
 
     public func stop() {
+        engineLock.lock()
+        defer { engineLock.unlock() }
+        // Latch stopped + tear down the device-change observer first so a
+        // config-change landing during teardown can't restart the engine.
+        started = false
+        configObserver?.stop()
         pacing?.stop()
         player.stop()
         engine.stop()
-        started = false
         closeDumpFileIfNeeded()
     }
 
     private func startIfNeeded() throws {
+        engineLock.lock()
+        defer { engineLock.unlock() }
         guard !started else { return }
+        try configureAndStartLocked()
+        started = true
+        // Self-heal on output-device changes (same as the speakers path).
+        if configObserver == nil {
+            configObserver = DebouncedNotificationObserver(
+                name: .AVAudioEngineConfigurationChange, object: engine
+            ) { [weak self] in
+                self?.handleConfigurationChange()
+            }
+        }
+        configObserver?.start()
+    }
+
+    /// Resolve + bind the BlackHole 2ch device, wire the graph, and start the
+    /// engine + player. Shared by `startIfNeeded()` and the device-change
+    /// self-heal. Caller must hold `engineLock`.
+    private func configureAndStartLocked() throws {
         guard let bh2 = registry.findBlackHole2ch() else {
             Self.log.error("startIfNeeded — BlackHole 2ch device not found in registry")
             throw NSError(domain: "BlackHole2chPlayer", code: -1)
@@ -150,7 +186,6 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
             throw error
         }
         player.play()
-        started = true
         if pacing == nil {
             pacing = PlaybackPacing(player: player,
                                     timePitch: timePitch,
@@ -158,6 +193,30 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
                                     label: "blackhole2ch")
         }
         Self.log.info("startIfNeeded — engine started; player playing; ready to schedule buffers")
+    }
+
+    /// Self-heal after an `AVAudioEngineConfigurationChange` — the engine
+    /// stopped itself on a device/format change. Re-resolve + re-bind the
+    /// BlackHole 2ch route and restart, re-priming pacing (the `play(_:)`
+    /// loop is still feeding frames). No-op once stopped. Runs on the
+    /// observer's serial queue; `engineLock` serializes it with stop().
+    private func handleConfigurationChange() {
+        engineLock.lock()
+        defer { engineLock.unlock() }
+        guard started else {
+            Self.log.info("AVAudioEngineConfigurationChange ignored — BlackHole player already stopped")
+            return
+        }
+        Self.log.info("AVAudioEngineConfigurationChange — output device/format changed; rebuilding BlackHole 2ch route and restarting")
+        player.reset()
+        do {
+            try configureAndStartLocked()
+            pacing?.reset()
+            pacing?.start()
+            Self.log.info("reconfigure — BlackHole engine restarted (isRunning=\(engine.isRunning))")
+        } catch {
+            Self.log.error("reconfigure — failed to restart BlackHole engine after device change: \(String(describing: error))")
+        }
     }
 
     private func schedule(_ frame: AudioFrame) {

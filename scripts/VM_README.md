@@ -85,6 +85,7 @@ driving the UI manually. Production launches never set them.
 | `UNISON_DEV_MODE=1`    | Swap the real BlackHole installer for an in-process mock.              |
 | `UNISON_FORCE_STATE=onboarding-done` | Mark all 3 onboarding steps satisfied at boot.            |
 | `UNISON_FORCE_STATE=transcript-demo` | Seed `TranscriptStore` with demo bubbles + open window.   |
+| `UNISON_FORCE_STATE=history-demo`    | Seed the archive with demo meetings (in-memory) + open the History window. |
 | `UNISON_FORCE_STATE=settings-open`   | Open the Settings window immediately after launch.        |
 | `UNISON_FORCE_STATE=popover-open`    | Clear onboarding + show the menubar popover programmatically (avoids fragile AppleScript clicks). |
 

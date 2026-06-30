@@ -2,7 +2,7 @@ import Foundation
 
 public enum Speaker: String, Sendable, Codable { case me, peer }
 
-public struct TranscriptEntry: Identifiable, Sendable, Equatable {
+public struct TranscriptEntry: Identifiable, Sendable, Equatable, Codable {
     public let id: UUID
     public let speaker: Speaker
     public var originalText: String?
@@ -23,6 +23,9 @@ public struct TranscriptEntry: Identifiable, Sendable, Equatable {
     /// late-arriving translation delta clears this flag (see
     /// `TranscriptStore.apply`).
     public var translationAtRisk: Bool
+    /// Set when the user edits this entry's text in the meeting archive.
+    /// Persisted with the record; ignored by the live transcript.
+    public var edited: Bool
 
     public init(
         id: UUID, speaker: Speaker,
@@ -30,7 +33,8 @@ public struct TranscriptEntry: Identifiable, Sendable, Equatable {
         sourceLanguage: Language?, targetLanguage: Language,
         timestamp: Date,
         lastActivityAt: Date? = nil,
-        translationAtRisk: Bool = false
+        translationAtRisk: Bool = false,
+        edited: Bool = false
     ) {
         self.id = id
         self.speaker = speaker
@@ -41,6 +45,7 @@ public struct TranscriptEntry: Identifiable, Sendable, Equatable {
         self.timestamp = timestamp
         self.lastActivityAt = lastActivityAt ?? timestamp
         self.translationAtRisk = translationAtRisk
+        self.edited = edited
     }
 }
 

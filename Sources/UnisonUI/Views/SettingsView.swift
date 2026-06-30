@@ -40,6 +40,7 @@ public struct SettingsView: View {
     private static let defaultDeviceTag = ""
 
     @SwiftUI.State private var saveIndicator = SaveIndicatorController()
+    @SwiftUI.State private var showClearHistoryConfirm = false
 
     public var body: some View {
         // `Form { }.formStyle(.grouped)` was the obvious choice but
@@ -59,6 +60,7 @@ public struct SettingsView: View {
                 hotkeysSection
                 blackHoleSection
                 behaviorSection
+                historySection
                 aboutSection
             }
             .padding(.horizontal, 18)
@@ -419,6 +421,56 @@ public struct SettingsView: View {
                 ))
                 .labelsHidden()
             }
+        }
+    }
+
+    // MARK: - Section: История
+
+    private static let historySizePresets: [Int] = [25, 50, 100, 250, 500, 0]   // 0 = без лимита
+
+    private func sizeLimitLabel(_ mb: Int) -> String { mb == 0 ? "Без лимита" : "\(mb) МБ" }
+
+    private var historySection: some View {
+        card(title: "История") {
+            LabeledContent("Сохранять историю встреч") {
+                Toggle("Сохранять историю встреч", isOn: Binding(
+                    get: { vm.settings.saveHistoryEnabled },
+                    set: { vm.setSaveHistoryEnabled($0) }
+                ))
+                .labelsHidden()
+            }
+            LabeledContent("Лимит размера") {
+                Picker("Лимит размера", selection: Binding(
+                    get: { vm.settings.historySizeLimitMB },
+                    set: { vm.setHistorySizeLimitMB($0) }
+                )) {
+                    ForEach(Self.historySizePresets, id: \.self) { mb in
+                        Text(sizeLimitLabel(mb)).tag(mb)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+            }
+            LabeledContent("Сейчас в архиве") {
+                Text("\(vm.historyMeetingCount) \(russianPlural(vm.historyMeetingCount, "встреча", "встречи", "встреч")) · \(String(format: "%.1f", Double(vm.historyTotalBytes) / (1024 * 1024))) МБ")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            LabeledContent {
+                InlineButton(
+                    "Очистить всю историю",
+                    icon: Image(systemName: "trash"),
+                    variant: .base,
+                    isLoading: false,
+                    action: { showClearHistoryConfirm = true }
+                )
+            } label: {
+                Text("Удалить все сохранённые встречи")
+            }
+        }
+        .confirmationDialog("Очистить всю историю?", isPresented: $showClearHistoryConfirm) {
+            Button("Очистить", role: .destructive) { vm.clearHistory() }
+            Button("Отмена", role: .cancel) {}
         }
     }
 
