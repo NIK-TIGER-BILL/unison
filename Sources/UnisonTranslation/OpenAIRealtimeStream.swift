@@ -56,6 +56,10 @@ public actor OpenAIRealtimeStream: TranslationStream {
     /// genuinely marks "started a new utterance"; output deltas in
     /// between don't reset the clock.
     private var lastInputDeltaAt: Date?
+    /// Wall-clock of the previous audio chunk — for the arrival-gap
+    /// diagnostic (model/network gap vs our playback pipeline as the
+    /// source of audible micropauses).
+    private var lastAudioAt: Date?
     /// Pause threshold between consecutive input transcript deltas
     /// to count as a new utterance. 5 s is comfortably longer than
     /// a natural mid-sentence pause (typically <2 s) while still
@@ -401,6 +405,10 @@ public actor OpenAIRealtimeStream: TranslationStream {
         case .outputAudioDelta(let p):
             guard let pcm = Data(base64Encoded: p.delta) else { return }
             let frame = AudioFrame(pcm: pcm, sampleRate: 24_000, channels: 1, format: .int16)
+            let nowAt = clock.now()
+            let gapMs = lastAudioAt.map { nowAt.timeIntervalSince($0) * 1000 } ?? 0
+            lastAudioAt = nowAt
+            Self.log.debug("[audio-rx \(speaker)] +\(Int(gapMs))ms gap, \(pcm.count)B (~\(pcm.count / 48)ms audio)")
             receivedAnyData = true
             if !loggedFirstAudioDelta {
                 loggedFirstAudioDelta = true

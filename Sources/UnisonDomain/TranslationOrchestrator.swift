@@ -1584,11 +1584,22 @@ public final class TranslationOrchestrator {
                     // the stream's handle()) means we mark "we
                     // actually delivered data" rather than just "we
                     // parsed an event".
+                    // Per-frame MainActor hop — timed for the same reason as
+                    // the peer pump (see there): a congested main thread
+                    // blocks the audio pump and starves playback.
+                    let beforeHop = Date()
                     await MainActor.run { [weak self] in
                         self?.recordDeltaArrival(speaker: .me)
                         self?.markFirstDataReceived()
                     }
-                    resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
+                    let hopMs = Date().timeIntervalSince(beforeHop) * 1000
+                    if hopMs > 30 {
+                        Self.log.info("[pump me] MainActor hop \(Int(hopMs))ms — UI congestion delayed the audio pump (starves playback buffer)")
+                    }
+                    let yieldResult = resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
+                    if case .dropped = yieldResult {
+                        Self.log.error("[pipeline DROP me→\(destination)] resampled buffer full — output frame DROPPED (downstream player too slow)")
+                    }
                 }
                 resampledContinuation.finish()
             }
@@ -1697,11 +1708,24 @@ public final class TranslationOrchestrator {
                     // tap) for A/B comparison of what the model
                     // emits vs what the speakers receive.
                     WireDumper.shared.write(wireFrame.pcm)
+                    // Per-frame MainActor hop. Diagnostic: time it — if the
+                    // main thread is congested (transcript redraws, glass
+                    // re-render) the hop blocks the audio pump here, which
+                    // starves the thin playback buffer downstream and is a
+                    // prime micropause suspect. A clean hop is sub-ms.
+                    let beforeHop = Date()
                     await MainActor.run { [weak self] in
                         self?.recordDeltaArrival(speaker: .peer)
                         self?.markFirstDataReceived()
                     }
-                    resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
+                    let hopMs = Date().timeIntervalSince(beforeHop) * 1000
+                    if hopMs > 30 {
+                        Self.log.info("[pump peer] MainActor hop \(Int(hopMs))ms — UI congestion delayed the audio pump (starves playback buffer)")
+                    }
+                    let yieldResult = resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
+                    if case .dropped = yieldResult {
+                        Self.log.error("[pipeline DROP peer→speakers] resampled buffer full — output frame DROPPED (downstream player too slow)")
+                    }
                 }
                 resampledContinuation.finish()
             }

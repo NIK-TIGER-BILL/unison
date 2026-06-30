@@ -82,6 +82,13 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     private let counterLock = NSLock()
     private var scheduledBufferCount: Int = 0
     private var playedBackBufferCount: Int = 0
+    /// Schedule-cadence instrumentation (always-on dev diagnostic): the
+    /// wall-clock of the last `scheduleTranslated` call, so each new frame
+    /// can log the inter-schedule gap (`schedGap`). Authoritative
+    /// queue-depth / underrun is tracked by `PlaybackPacing` (real
+    /// completion counters); this only measures how steadily frames reach
+    /// the player.
+    private var lastScheduleAt: Date?
 
     public init() {
         self.playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
@@ -377,6 +384,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         counterLock.lock(); defer { counterLock.unlock() }
         scheduledBufferCount = 0
         playedBackBufferCount = 0
+        lastScheduleAt = nil
     }
 
     public func playOriginal(_ frames: AsyncStream<AudioFrame>) async {
@@ -444,6 +452,32 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         }
         translatedChunkIndex += 1
         let frameLength = buf.frameLength
+
+        // --- Schedule-cadence instrumentation (always-on dev diagnostic) ---
+        // `schedGap` is the wall-clock gap between consecutive schedule
+        // calls = the cadence at which fresh frames actually reach the
+        // player. A spike here means the upstream pipeline stalled (no
+        // frame to schedule); cross-reference `[audio-rx]` (was the model
+        // late?) and `[pump peer]` (did the MainActor hop stall?) to
+        // localise it. Authoritative queue-depth / underrun lives in
+        // PlaybackPacing's tick log (`[speakers] pacing …` and
+        // `[UNDERRUN speakers]`), which uses the real .dataPlayedBack
+        // completion counters rather than the version-sensitive
+        // playerTime clock.
+        counterLock.lock()
+        let nowAt = Date()
+        let schedGapMs = lastScheduleAt.map { nowAt.timeIntervalSince($0) * 1000 } ?? 0
+        lastScheduleAt = nowAt
+        counterLock.unlock()
+        Self.log.debug("[sched speakers] schedGap=\(Int(schedGapMs))ms"
+            + " frame=\(String(format: "%.0f", Double(frameLength) / 48.0))ms"
+            + " rate=\(String(format: "%.3f", Double(timePitch.rate)))")
+        if schedGapMs > 250 {
+            Self.log.info("[sched-stall speakers] \(Int(schedGapMs))ms gap before this frame reached"
+                + " the player — upstream starved (cross-check [audio-rx]/[pump peer])")
+        }
+        // --- end instrumentation ---
+
         // Use the explicit `.dataPlayedBack` callback type so we can
         // distinguish "buffer was played by hardware" from "buffer was
         // consumed by the next node" (the default callback). When the

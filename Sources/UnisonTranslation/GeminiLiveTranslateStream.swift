@@ -25,6 +25,10 @@ public actor GeminiLiveTranslateStream: TranslationStream {
     private var closeReasonTask: Task<Void, Never>?
     private var currentEntryId = UUID()
     private var lastInputDeltaAt: Date?
+    /// Wall-clock of the previous audio chunk from the model — for the
+    /// arrival-gap diagnostic (distinguishes model/network gaps from our
+    /// playback pipeline as the source of audible micropauses).
+    private var lastAudioAt: Date?
     private static let turnGapSeconds: TimeInterval = 5.0
     private var receivedAnyData = false
     private var closeStarted = false
@@ -113,6 +117,10 @@ public actor GeminiLiveTranslateStream: TranslationStream {
             break
         case .audio(let b64):
             guard let pcm = Data(base64Encoded: b64) else { return }
+            let nowAt = clock.now()
+            let gapMs = lastAudioAt.map { nowAt.timeIntervalSince($0) * 1000 } ?? 0
+            lastAudioAt = nowAt
+            Self.log.debug("[audio-rx \(speaker)] +\(Int(gapMs))ms gap, \(pcm.count)B (~\(pcm.count / 48)ms audio)")
             receivedAnyData = true
             outputContinuation.yield(AudioFrame(pcm: pcm, sampleRate: 24_000, channels: 1, format: .int16))
         case .inputTranscript(let text):
