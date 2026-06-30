@@ -34,9 +34,10 @@ import UnisonDomain
 ///
 /// v5 reacts only to the **actual** measured backlog. Baseline is a
 /// pitch-perfect 1.0×; the rate only ever *increases* (never below 1.0×),
-/// and only gently (ceiling `maxRate` 1.15×), to drain a buffer that has
-/// grown past `targetBufferSec` (0.30 s, ≈ the observed p90 inter-chunk
-/// jitter). A faster depth smoother (`depthSmoothAlpha` 0.15, τ≈0.6 s)
+/// and only gently (ceiling `maxRate` 1.06×), to drain a buffer that has
+/// grown past `targetBufferSec` (now a 0.75 s deadband edge — see the
+/// constant; below it the rate is held at exactly 1.0×, no draining). A
+/// faster depth smoother (`depthSmoothAlpha` 0.15, τ≈0.6 s)
 /// tracks sub-second bursts. On the same real timeline this cut underruns
 /// to a single unavoidable window (a 505 ms network gap after a model
 /// slowdown), capped peak latency at 550 ms, held the rate in [1.00,1.05]×
@@ -200,7 +201,7 @@ public final class PlaybackPacing: @unchecked Sendable {
     }
 
     /// Pure rate-target computation (v5, asymmetric). The target is
-    /// `1.0 + correction` clamped to `[minRate, maxRate]` (= `[1.0, 1.15]`),
+    /// `1.0 + correction` clamped to `[minRate, maxRate]` (= `[1.0, 1.06]`),
     /// where the correction is proportional to how far the *actual* smoothed
     /// backlog sits above the setpoint. The caller applies the slew-rate
     /// limit via `slewToward(currentRate:target:maxStep:)`.

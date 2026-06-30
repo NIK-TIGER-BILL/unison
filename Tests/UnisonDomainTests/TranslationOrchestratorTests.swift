@@ -628,6 +628,33 @@ final class ScaledRealClock: Clock, @unchecked Sendable {
     #expect(o.state.errorValue == TranslationError.apiKeyInvalid)
 }
 
+@Test @MainActor func orchestrator_releasesAudioActivityToken_onTerminalError() async throws {
+    // C1 regression: the App Nap / latency-critical activity token must be
+    // released on EVERY session-end path — including a terminal auto-failure,
+    // not just a user-initiated stop(). Otherwise a backgrounded session that
+    // errored (WiFi drop, bad key, no data) keeps pinning high-precision
+    // timers and blocking system sleep until the user manually presses Stop.
+    let fakeClock = FakeClock(now: epochDate(0))
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: fakeClock)
+    await o.start(mode: .call, languages: .default)
+    #expect(o.isHoldingAudioActivity, "token should be held while translating")
+
+    // Drive a terminal error (single empty close → .apiKeyInvalid), which
+    // goes through stopAllStreams() but NOT stop().
+    factory.streams[.peer]?.emitConnectionState(.failed(.networkLost, receivedAnyData: false))
+    for _ in 0..<100 {
+        try await Task.sleep(nanoseconds: 10_000_000)
+        if case .error = o.state { break }
+    }
+    guard case .error = o.state else {
+        Issue.record("Expected terminal .error, got \(o.state)")
+        return
+    }
+    #expect(o.isHoldingAudioActivity == false,
+            "App Nap token must be released when the session auto-fails to a terminal error")
+}
+
 @Test @MainActor func orchestrator_emptyCloseOnAnySpeaker_escalates() async throws {
     // With threshold=1, an empty close on EITHER speaker terminates the
     // session immediately. Previously the test covered the per-speaker

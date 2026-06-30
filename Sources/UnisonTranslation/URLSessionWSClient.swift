@@ -48,6 +48,14 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
         return true
     }
 
+    /// Peek (without claiming) whether a close was already emitted, so the
+    /// receive-loop error path can skip its 100ms delegate-race delay on a
+    /// client-initiated `close()`.
+    private func closeAlreadyEmitted() -> Bool {
+        closeEmitLock.lock(); defer { closeEmitLock.unlock() }
+        return closeEventEmitted
+    }
+
     public override init() {
         let q = OperationQueue()
         q.maxConcurrentOperationCount = 1
@@ -145,8 +153,14 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
                     // win the one-shot — its typed close code + server
                     // reason payload is strictly richer than the generic
                     // transport NSError this path sees. URLSession does not
-                    // guarantee the ordering between the two.
-                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    // guarantee the ordering between the two. BUT skip the
+                    // delay when the close was already emitted — a
+                    // client-initiated `close()` (the normal Stop path) has
+                    // already yielded `.normal`, so the 100ms would just add
+                    // dead latency to teardown for no benefit.
+                    if self?.closeAlreadyEmitted() != true {
+                        try? await Task.sleep(nanoseconds: 100_000_000)
+                    }
                     let ns = error as NSError
                     if self?.tryMarkCloseEmitted() == true {
                         Self.log.error("receive loop error: domain=\(ns.domain) code=\(ns.code) desc=\(ns.localizedDescription)")

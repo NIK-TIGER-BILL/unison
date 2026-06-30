@@ -1260,6 +1260,16 @@ public final class TranslationOrchestrator {
     /// state at `.error(...)` instead of clobbering it back to `.idle`,
     /// which would hide the failure from the popover.
     private func stopAllStreams() async {
+        // Release the App Nap / latency-critical activity token here, not in
+        // stop(): stop() is only one of the session-end paths. The six
+        // terminal-error transitions (no-data, reconnect-exhausted, failResume,
+        // pause-recovery, connection-observer terminal, empty-close escalation)
+        // all reach stopAllStreams() but NOT stop(), so ending the token only
+        // in stop() leaked it on every auto-failure — pinning high-precision
+        // timers and blocking system sleep until the user manually pressed
+        // Stop. stopAllStreams() is NOT on the reconnect / network-pause paths,
+        // so the token correctly survives those. Idempotent.
+        endAudioActivity()
         cancelReconnectWatchdog()
         cancelNoDataWatchdog()
         stopNetworkObserver()
@@ -1345,10 +1355,9 @@ public final class TranslationOrchestrator {
 
     public func stop() async {
         Self.log.info("stop() — tearing down session from state=\(String(describing: self.state))")
-        await stopAllStreams()
+        await stopAllStreams()   // also releases the App Nap activity token
         consecutiveEmptyCloses = [.me: 0, .peer: 0]
         state = .idle
-        endAudioActivity()
         // Finalise any diagnostic dumps so the WAV `data` chunk size
         // gets patched from `0xFFFF_FFFF` to the actual byte count.
         // No-op when the env vars aren't set.
@@ -1368,6 +1377,12 @@ public final class TranslationOrchestrator {
     /// `stop()` — holding it while idle would also needlessly block system
     /// sleep. Idempotent so reconnects don't stack tokens.
     private var audioActivityToken: (any NSObjectProtocol)?
+
+    #if DEBUG
+    /// Test hook: is the App Nap / latency-critical activity token currently
+    /// held? Regression-guards that every session-end path releases it (C1).
+    var isHoldingAudioActivity: Bool { audioActivityToken != nil }
+    #endif
 
     private func beginAudioActivity() {
         guard audioActivityToken == nil else { return }
@@ -1591,39 +1606,40 @@ public final class TranslationOrchestrator {
             let resampled = AsyncStream<AudioFrame>(bufferingPolicy: .bufferingOldest(Self.pipelineFrameBuffer)) {
                 resampledContinuation = $0
             }
-            let pump = Task {
+            // DETACHED + userInitiated — same fix as the peer pump: the
+            // enclosing task2 inherits the orchestrator's @MainActor, so a
+            // plain `Task {}` here would run the resample (buffer alloc +
+            // converter) and the yield ON the main thread, behind transcript /
+            // Liquid-Glass rendering. The me path drives `.call` (virtual mic —
+            // what the PEER hears) and `.test` (local speakers), so the same
+            // congestion would stutter the outgoing direction. Keep audio
+            // delivery off the MainActor's critical path.
+            let pump = Task.detached(priority: .userInitiated) {
+                var firstMarked = false
+                var lastHealthHopAt = Date.distantPast
                 for await wireFrame in stream.output {
-                    // Diagnostic dump of the raw model output. Both
-                    // the me-stream pump (this site, used in `.call`
-                    // and `.test`) AND the peer-stream pump (the
-                    // wireIncomingPipeline equivalent below) write to
-                    // the shared `WireDumper.shared`. In `.call` mode
-                    // the resulting WAV interleaves both directions
-                    // — interpret per arrival timestamps if you need
-                    // to separate them.
+                    // Shared dumper with the peer pump in `.call` mode — the WAV
+                    // interleaves both directions; split by arrival timestamps.
                     WireDumper.shared.write(wireFrame.pcm)
-                    // First audio delta from the server — disarm the
-                    // no-data watchdog. `markFirstDataReceived` is
-                    // @MainActor-isolated; this Task isn't, so hop
-                    // explicitly. Doing it in the pipeline (not in
-                    // the stream's handle()) means we mark "we
-                    // actually delivered data" rather than just "we
-                    // parsed an event".
-                    // Per-frame MainActor hop — timed for the same reason as
-                    // the peer pump (see there): a congested main thread
-                    // blocks the audio pump and starves playback.
-                    let beforeHop = Date()
-                    await MainActor.run { [weak self] in
-                        self?.recordDeltaArrival(speaker: .me)
-                        self?.markFirstDataReceived()
-                    }
-                    let hopMs = Date().timeIntervalSince(beforeHop) * 1000
-                    if hopMs > 30 {
-                        Self.log.info("[pump me] MainActor hop \(Int(hopMs))ms — UI congestion delayed the audio pump (starves playback buffer)")
-                    }
-                    let yieldResult = resampledContinuation.yield(transformer.fromWire(wireFrame, targetSampleRate: 48_000))
+                    // Resample + yield FIRST, off the MainActor.
+                    let yieldResult = resampledContinuation.yield(
+                        transformer.fromWire(wireFrame, targetSampleRate: 48_000))
                     if case .dropped = yieldResult {
                         Self.log.error("[pipeline DROP me→\(destination)] resampled buffer full — output frame DROPPED (downstream player too slow)")
+                    }
+                    // First-data / health bookkeeping: hop to the MainActor
+                    // WITHOUT awaiting (never blocks delivery), coalesced to ≤1
+                    // hop / 0.5s. `markFirstDataReceived` disarms the no-data
+                    // watchdog; `recordDeltaArrival` feeds slow-detection (3s
+                    // threshold ≫ 0.5s, so coalescing is safe).
+                    let now = Date()
+                    if !firstMarked || now.timeIntervalSince(lastHealthHopAt) > 0.5 {
+                        firstMarked = true
+                        lastHealthHopAt = now
+                        Task { @MainActor [weak self] in
+                            self?.recordDeltaArrival(speaker: .me)
+                            self?.markFirstDataReceived()
+                        }
                     }
                 }
                 resampledContinuation.finish()

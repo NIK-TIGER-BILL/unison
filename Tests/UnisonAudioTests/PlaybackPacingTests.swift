@@ -6,8 +6,8 @@ import Testing
 // speed UP (gently) to drain a buffer grown past the setpoint. The target
 // is `1.0 + correction`, arrival rate is NOT in the formula.
 // Constants (kept in sync with PlaybackPacing.swift):
-//   targetBufferSec  = 0.30
-//   maxRate          = 1.15
+//   targetBufferSec  = 0.75   (deadband edge; env UNISON_BUFFER_MS)
+//   maxRate          = 1.06
 //   minRate          = 1.00   (hard floor — never slow below real-time)
 //   correctionGain   = 0.4
 //   depthSmoothAlpha = 0.15
@@ -76,7 +76,7 @@ import Testing
 
 @Test func pacing_severeOverSetpoint_saturatesAtMaxRate() {
     // A large sustained buffer (big burst / verbose target) saturates the
-    // drain rate at the GENTLE maxRate ceiling (1.15× — bounds the artefact).
+    // drain rate at the GENTLE maxRate ceiling (1.06× — bounds the artefact).
     let r = PlaybackPacing.targetRate(arrivalRateEMA: 1.2, depthSmooth: 3.0)
     #expect(r.unboundedTarget > PlaybackPacing.maxRate)
     #expect(r.clampedTarget == PlaybackPacing.maxRate)
@@ -90,8 +90,8 @@ import Testing
     // the REAL recorded model cadence (see pacing-eval): 0.25 s audio chunks
     // whose inter-arrival gaps jitter around ~0.245 s (mean arrival ≈ 1.02×,
     // exactly the measured value) with bursts (0.12 s) and gaps (0.42 s).
-    // v5 must keep underrun low, hold latency bounded near the 0.30 s
-    // setpoint (NOT ballooning like v4's ~0.96 s peak), and — the key
+    // v5 must keep underrun low, hold latency bounded near the 0.75 s
+    // deadband edge (NOT ballooning like v4's ~0.96 s peak), and — the key
     // invariant — NEVER play below 1.0×.
     let dt = PlaybackPacing.tickIntervalSec       // 0.1
     let sr = 48_000.0

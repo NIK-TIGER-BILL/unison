@@ -498,17 +498,34 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         //    buffer's last sample. If the signal is already continuous the
         //    ramp ≈ the signal (no-op); if the resampler/AGC introduced a
         //    small step at the seam, it's smoothed.
-        //  • Resume after the player ran dry (queue empty, or a long
-        //    schedule gap): the player has been emitting digital silence, so
-        //    ramp up from 0 — otherwise the first non-zero sample steps from
-        //    silence and clicks.
+        //  • Resume after the player TRULY ran dry: ramp up from 0, otherwise
+        //    the first non-zero sample steps from the digital silence the
+        //    player emitted and clicks.
+        //
+        // Dryness signal: `scheduledBufferCount == playedBackBufferCount` —
+        // every scheduled buffer has FINISHED hardware playout (.dataPlayedBack
+        // fired), so nothing is left to render. The completion lag only makes
+        // this read dry LATE, never falsely early (you cannot play back more
+        // than was scheduled), so there are no false positives on a healthy
+        // seam. We deliberately do NOT also trigger on a large `schedGap`: a
+        // normal 0.3–0.8s inter-chunk gap is absorbed by the ~0.75s cushion
+        // (the player keeps playing through it), so gating on the gap would
+        // ramp healthy clause boundaries from 0 — a 2ms notch on exactly the
+        // seams this is meant to smooth.
+        //
+        // `lastTranslatedSample` is read+written under `counterLock` (this type
+        // is a class, not an actor — it's only serialized in practice by the
+        // single `playTranslated` consumer; the lock guards the stop→restart
+        // handoff where a late in-flight schedule can race the next session's
+        // `resetPlaybackCounters`).
         counterLock.lock()
-        let queuedBuffers = scheduledBufferCount - playedBackBufferCount
+        let resumingFromSilence = scheduledBufferCount <= playedBackBufferCount
+        let prevSample = lastTranslatedSample
         counterLock.unlock()
-        let resumingFromSilence = queuedBuffers <= 0 || schedGapMs > 350
-        declickSeam(buf, from: resumingFromSilence ? 0 : lastTranslatedSample)
+        declickSeam(buf, from: resumingFromSilence ? 0 : prevSample)
         if let ch = buf.floatChannelData, buf.frameLength > 0 {
-            lastTranslatedSample = ch[0][Int(buf.frameLength) - 1]
+            let last = ch[0][Int(buf.frameLength) - 1]
+            counterLock.lock(); lastTranslatedSample = last; counterLock.unlock()
         }
         // --- end seam declick -----------------------------------------------
 
