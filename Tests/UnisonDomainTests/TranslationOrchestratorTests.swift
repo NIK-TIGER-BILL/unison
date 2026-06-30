@@ -27,7 +27,8 @@ private func makeOrchestrator(
     registry: MockAudioDeviceRegistry? = nil,
     clock: any Clock = SystemClock(),
     transformer: any AudioFormatTransformer = MockAudioFormatTransformer(),
-    networkMonitor: any NetworkPathMonitoring = MockNetworkPathMonitor(initial: .satisfied)
+    networkMonitor: any NetworkPathMonitoring = MockNetworkPathMonitor(initial: .satisfied),
+    echoCanceller: (any EchoCanceller)? = nil
 ) -> TranslationOrchestrator {
     let resolvedRegistry = registry ?? defaultRegistry()
     let resolvedPerms = perms ?? defaultPerms()
@@ -36,7 +37,8 @@ private func makeOrchestrator(
         virtualMicPlayer: bhPlayer, translationFactory: factory,
         permissions: resolvedPerms, deviceRegistry: resolvedRegistry, clock: clock,
         transformer: transformer,
-        networkMonitor: networkMonitor
+        networkMonitor: networkMonitor,
+        echoCanceller: echoCanceller
     )
 }
 
@@ -1181,4 +1183,49 @@ final class GateSwitchFactory: TranslationStreamFactory, @unchecked Sendable {
     } else {
         Issue.record("State must remain .paused(.networkLost) after aborted resume, got \(o.state)")
     }
+}
+
+@Test @MainActor func orchestrator_callMode_registersEchoReferenceAndResets() async {
+    let mixer = MockAudioOutputMixer()
+    let aec = MockEchoCanceller()
+    let o = makeOrchestrator(mixer: mixer, echoCanceller: aec)
+    await o.start(mode: .call, languages: .default)
+    if case .some(.some) = mixer.echoReference {} else {
+        Issue.record("expected setEchoReference(non-nil) in call mode")
+    }
+    #expect(aec.resetCalls == 1)
+}
+
+@Test @MainActor func orchestrator_listenMode_doesNotRegisterEchoReference() async {
+    let mixer = MockAudioOutputMixer()
+    let aec = MockEchoCanceller()
+    let o = makeOrchestrator(mixer: mixer, echoCanceller: aec)
+    await o.start(mode: .listen, languages: .default)
+    if case .some(.some) = mixer.echoReference {
+        Issue.record("listen mode must not register an echo reference")
+    }
+    #expect(aec.resetCalls == 0)
+}
+
+@Test @MainActor func orchestrator_stop_clearsEchoReference() async {
+    let mixer = MockAudioOutputMixer()
+    let aec = MockEchoCanceller()
+    let o = makeOrchestrator(mixer: mixer, echoCanceller: aec)
+    await o.start(mode: .call, languages: .default)
+    await o.stop()
+    if case .some(.none) = mixer.echoReference {} else {
+        Issue.record("expected setEchoReference(nil) on stop")
+    }
+}
+
+@Test @MainActor func orchestrator_callMode_runsMicFramesThroughCanceller() async {
+    let mic = MockMicrophoneCapture()
+    let aec = MockEchoCanceller()
+    let o = makeOrchestrator(mic: mic, echoCanceller: aec)
+    await o.start(mode: .call, languages: .default)
+    let frame = AudioFrame(pcm: Data(count: 960 * 4), sampleRate: 48_000,
+                           channels: 1, format: .float32)
+    mic.emit(frame)
+    for _ in 0..<200 where aec.processNearCount == 0 { await Task.yield() }
+    #expect(aec.processNearCount >= 1)
 }

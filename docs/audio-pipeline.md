@@ -207,6 +207,71 @@ teardown, поэтому отдельная пересборка `AVAudioEngine`
 не нужна; бюджет + сериализация остаются как защита от перманентного
 залипания HAL (устройство физически исчезло).
 
+### `SpeexEchoCanceller` — Acoustic Echo Cancellation (Sources/UnisonAudio/SpeexEchoCanceller.swift)
+
+Убирает акустическое эхо в **speaker mode**: без него перевод, играющий из
+динамиков, переловится микрофоном, уйдёт в outgoing-перевод и зациклится. С
+наушниками проблемы нет (нет акустического пути динамик→микрофон).
+
+- **Где в цепочке:** в `wireOutgoingPipeline` `task1` — `echoCanceller.processNear(frame)`
+  **до** `transformer.toWire`. Включается в `.call` и `.test` (есть микрофон,
+  `mode.requiresMicrophone`); `.listen` — нет.
+- **Far-reference:** tap на `AVAudioOutputMixer.mainMixerNode` (`setEchoReference`)
+  — реальный рендер (translated post-timePitch/AGC + original), а **не**
+  запланированные кадры (timePitch и AGC меняют сигнал относительно того, что
+  мы планировали).
+- **Рейт — на нативной частоте микрофона** (Speex (пере)создаётся под текущий
+  mic-rate: `frameSize` = 10 ms, tail = 100 ms от него). Микрофон **не**
+  ресемплим (чистый голос + корректная длительность); far **down**-ресемплим к
+  mic-rate. Это критично: 🔥 **far нужно band-limit'ить до полосы микрофона**.
+  Если far несёт энергию выше Nyquist микрофона (напр. 48 kHz far против 16 kHz
+  mic), у этой энергии нет аналога в near, и она разваливает нормировку
+  адаптивного фильтра Speex → cancellation ~0 dB. Замерено: band-limited far →
+  ~34 dB, full-band far → ~0 dB на 16k/44.1k. Down-ресемпл far к mic-rate
+  band-limit'ит его естественно. Ресемпл — `StreamingResampler` (stateful
+  AVAudioConverter, LTI; per-chunk-reset резет ломает cancellation так же).
+  Реальные устройства редко 48 kHz (mic 16k у BT-HFP, выход 44.1k).
+- **Причинность:** far должен **опережать** эхо (reference раньше отражения) —
+  как в любом AEC. Акустическая задержка динамик→микрофон даёт это опережение;
+  pipeline-задержка far (ring + ресемпл) меньше её. Без опережения (far позже
+  эха) фильтр не каузален → не отменяет.
+- **Два потока:** render-поток только пишет far (нативный rate) в lock-free
+  `FarReferenceRing` (RT-safe, без локов/аллокаций); mic-поток единолично владеет
+  Speex-стейтом под `stateLock`, ресемплит far к mic-rate и зовёт
+  `speex_echo_cancellation`. far выравнивается к near через `farCarry` (без
+  lossy-обрезки).
+- **Движок swappable** за `EchoCanceller`-протоколом (UnisonDomain) — WebRTC
+  AEC3 подменяется без правок call-site. Speex вендорится как C-таргет
+  `CSpeexDSP` (subset SpeexDSP 1.2.1, float build + KISS FFT, revised-BSD).
+- **`noise_reduction: near_field` ≠ AEC** — это шумодав на стороне OpenAI, эхо
+  не убирает; на это рассчитывать нельзя.
+- **Diagnostics:** `droppedFarSamples` / `underrunFarSamples` — счётчики потери
+  far-reference. Устойчивый рост = рассинхрон render/mic-часов (open risk —
+  дрейф), а не разовый лаг: фиксированную задержку Speex поглощает хвостом
+  фильтра (`filterLength` ≈ 100 ms).
+
+#### 🔥 Teardown — снимаем tap первым
+
+`AVAudioOutputMixer.stop()` снимает mainMixer-tap **до** `reset()`/`engine.stop()`
+(как `closePlaybackDumpIfNeeded`), а оркестратор зовёт `setEchoReference(nil)` в
+начале `stopAllStreams()` на MainActor — до detached HAL-teardown. Иначе
+`pushFarReference` мог бы дёрнуться на render-потоке посреди teardown (класс
+Stop-hang-бага). Canceller — **singleton** (создаётся в Composition, `reset()`
+на старте сессии), не уничтожается в teardown → Speex alloc/dealloc вне
+Stop-пути.
+
+#### Eval — `aec-eval`
+
+`swift run aec-eval --near <wav> --far <wav> [--delay-ms N] [--echo-gain G]` —
+синтезирует `mic = near + gain·delay(far)`, гонит через `SpeexEchoCanceller`,
+печатает ERLE/сек + overall (`EchoMetrics.erleDB`). Фикстуры — 24 kHz int16 mono
+(`Tests/Fixtures/audio/*.wav`, включая `far-monologue-normal.wav`); читаются
+честным RIFF-парсером (afconvert вставляет `FLLR`-чанк, фикс-оффсет 44 не
+годится) и реземплятся в 48 kHz F32 на входе. Это gate для «нужен ли AEC3»:
+прогнать те же входы через будущую AEC3-реализацию и сравнить. Юнит-тесты дают
+~25 dB ERLE на синтетическом чистом эхе; aec-eval — форма сходимости фильтра на
+реальной речи (метрика против полного mic'а консервативна — near сохраняется).
+
 ### 🔥 Известный баг — нет звука после подключения BT в середине сессии
 
 **Симптом:** запускаешь Unison с выключенными BT-наушниками, потом
@@ -362,4 +427,4 @@ swift run pacing-eval --audio /path/to/input.wav --playback-test
 
 ---
 
-*Last updated: 2026-06-23*
+*Last updated: 2026-06-30*

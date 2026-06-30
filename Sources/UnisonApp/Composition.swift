@@ -162,6 +162,10 @@ public final class Composition {
                 : .allExcept(s.excludedTapBundleIDs)
         })
         let mixer = AVAudioOutputMixer()
+        // One persistent echo canceller, reused across sessions (reset per
+        // start). Never destroyed mid-teardown — keeps Speex alloc/dealloc
+        // off the Stop path. See the AEC design + audio-pipeline.md.
+        let echoCanceller = SpeexEchoCanceller()
         let bhPlayer = BlackHole2chPlayer(registry: registry)
         self.virtualMicPlayer = bhPlayer
         self.outputMixer = mixer
@@ -178,6 +182,7 @@ public final class Composition {
             clock: SystemClock(),
             transformer: ResamplerAdapter(),
             networkMonitor: NetworkMonitor(),
+            echoCanceller: echoCanceller,
             meetingStore: self.meetingStore
         )
 

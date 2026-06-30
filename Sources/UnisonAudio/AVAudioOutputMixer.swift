@@ -73,6 +73,11 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// to its own output over long continuous sessions (verified by
     /// harness measurement; tests in CompensatingAGCTests).
     private let agc = CompensatingAGCRunner()
+    /// AEC far-end reference sink. Set per session by the orchestrator in
+    /// mic modes. While non-nil, a tap on `mainMixerNode` forwards every
+    /// rendered block here so the echo canceller knows what is on the
+    /// speakers. Render-thread access; the sink itself is RT-safe.
+    private var echoSink: (any EchoReferenceSink)?
     /// Diagnostic counters for the "audio chunks cut off mid-play" bug.
     /// Compare schedule count (each successful scheduleBuffer call) vs
     /// playback count (from `.dataPlayedBack` completion type). If the
@@ -174,6 +179,16 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         // the user-reported fade on Bluetooth output without needing
         // them to instrument anything themselves.
         startPlaybackDumpIfRequested()
+
+        // Re-arm the AEC far-reference tap when a sink is registered. A
+        // device-change self-heal rebuilds the graph (the engine stopped
+        // itself), dropping the mainMixerNode tap — without this, AEC would
+        // silently stop after a mid-session output-device change (e.g. a
+        // Bluetooth connect, the very case this self-heal exists for). Caller
+        // holds engineLock, as installEchoReferenceTap expects.
+        if echoSink != nil {
+            installEchoReferenceTap()
+        }
 
         if pacing == nil {
             pacing = PlaybackPacing(player: translatedPlayer,
@@ -389,6 +404,71 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         originalPlayer.volume = min(max(gain, 0), 1)
     }
 
+    public func setEchoReference(_ sink: (any EchoReferenceSink)?) {
+        // engineLock serializes the tap op with the device-change self-heal
+        // (which re-arms the tap from configureGraphAndStartLocked) and stop()
+        // — every echo-tap mutation runs under this lock. Called by the
+        // orchestrator externally, never re-entrantly under the lock.
+        engineLock.lock()
+        defer { engineLock.unlock() }
+        if let sink {
+            echoSink = sink
+            installEchoReferenceTap()
+        } else {
+            // Remove the tap BEFORE clearing the sink so an in-flight render
+            // callback can't observe a torn write of the existential
+            // (`removeTap` drains pending callbacks first) — mirrors stop()'s
+            // ordering.
+            removeEchoReferenceTap()
+            echoSink = nil
+        }
+    }
+
+    private func installEchoReferenceTap() {
+        // Tap the post-mix output (translated post-timePitch/AGC + original)
+        // — exactly what reaches the speaker. Mono 48k (playerFormat). A
+        // second tap alongside the optional UNISON_DUMP_PLAYBACK_WAV tap
+        // (which is on `timePitch`, a different node) is fine.
+        mixer.removeTap(onBus: 0)   // idempotent re-install on stop-restart
+        let fmt = mixer.outputFormat(forBus: 0)
+        mixer.installTap(onBus: 0, bufferSize: 4096, format: fmt) { [weak self] buffer, _ in
+            guard let self, let sink = self.echoSink,
+                  let frame = Self.echoFrame(from: buffer) else { return }
+            sink.pushFarReference(frame)
+        }
+    }
+
+    private func removeEchoReferenceTap() {
+        mixer.removeTap(onBus: 0)
+    }
+
+    /// Convert a rendered float buffer into a mono float32 `AudioFrame`
+    /// tagged with the buffer's ACTUAL sample rate. The mainMixer output is
+    /// the device-native format (commonly 44.1 kHz stereo), NOT the 48 kHz
+    /// mono the players feed in — so we must carry the real rate and downmix
+    /// to mono; the echo canceller resamples to its 48 kHz working rate.
+    /// Returns nil for a non-float or empty buffer.
+    static func echoFrame(from buffer: AVAudioPCMBuffer) -> AudioFrame? {
+        let n = Int(buffer.frameLength)
+        guard n > 0, let chans = buffer.floatChannelData else { return nil }
+        let chCount = Int(buffer.format.channelCount)
+        let rate = Int(buffer.format.sampleRate)
+        var data = Data(count: n * MemoryLayout<Float>.size)
+        data.withUnsafeMutableBytes { raw in
+            let dst = raw.bindMemory(to: Float.self).baseAddress!
+            if chCount <= 1 {
+                memcpy(dst, chans[0], n * MemoryLayout<Float>.size)
+            } else {
+                for i in 0..<n {
+                    var acc: Float = 0
+                    for c in 0..<chCount { acc += chans[c][i] }
+                    dst[i] = acc / Float(chCount)
+                }
+            }
+        }
+        return AudioFrame(pcm: data, sampleRate: rate, channels: 1, format: .float32)
+    }
+
     public func stop() {
         engineLock.lock()
         defer { engineLock.unlock() }
@@ -399,6 +479,12 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         configObserver?.stop()
         pacing?.stop()
         closePlaybackDumpIfNeeded()
+        // Remove the AEC tap before any player/engine teardown so no
+        // pushFarReference runs on the render thread mid-teardown (the
+        // Process-Tap Stop-hang class of bug). removeTap drains pending
+        // render callbacks before returning.
+        removeEchoReferenceTap()
+        echoSink = nil
         // Reset (not stop) the players. `AVAudioPlayerNode.stop()` flushes the
         // pending `.dataPlayedBack` completion handlers from `scheduleTranslated`,
         // and that flush *wedges* whenever a CoreAudio Process Tap was active in

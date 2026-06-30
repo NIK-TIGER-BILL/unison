@@ -21,6 +21,12 @@ EN_TEXT="Today we are looking at an interesting problem: how to make real-time s
 # English: fast-paced for testing speedup behaviour.
 EN_FAST_TEXT="The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog. The quick brown fox jumps over the lazy dog."
 
+# Far-end reference for aec-eval: a "translation playing on the speakers"
+# monologue in a voice distinct from the near fixtures (Milena, ru_RU) so
+# the synthesized double-talk uses uncorrelated content. This is the echo
+# source the acoustic-echo-cancellation harness tries to remove.
+FAR_TEXT="Это пример переведённой речи, которая звучит из динамиков во время звонка. Представьте, что собеседник говорит на другом языке, а вы слышите перевод в реальном времени. Именно этот звук микрофон может случайно записать и отправить обратно, создавая эхо. Наша задача — убрать это эхо, чтобы разговор оставался чистым и разборчивым."
+
 generate() {
     local out_basename="$1"
     local voice="$2"
@@ -45,6 +51,7 @@ generate() {
 generate "ru-monologue-normal"  "Yuri"   180 "${RU_TEXT}"
 generate "en-monologue-normal"  "Daniel" 180 "${EN_TEXT}"
 generate "en-monologue-fast"    "Daniel" 280 "${EN_FAST_TEXT}"
+generate "far-monologue-normal" "Milena" 180 "${FAR_TEXT}"
 
 echo "[gen] done. Fixtures in $(pwd)"
 ls -la *.wav

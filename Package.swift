@@ -42,7 +42,8 @@ let package = Package(
         .library(name: "UnisonUI", targets: ["UnisonUI"]),
         .executable(name: "Unison", targets: ["UnisonApp"]),
         .executable(name: "tap-benchmark", targets: ["TapBenchmark"]),
-        .executable(name: "pacing-eval", targets: ["PacingEval"])
+        .executable(name: "pacing-eval", targets: ["PacingEval"]),
+        .executable(name: "aec-eval", targets: ["AecEval"])
     ],
     // Note: swift-snapshot-testing requires XCTest, which is not
     // available on Command Line Tools-only setups. We ship our own
@@ -51,7 +52,17 @@ let package = Package(
     targets: [
         .target(name: "UnisonDomain", swiftSettings: langModeV5),
         .target(name: "UnisonTranslation", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
-        .target(name: "UnisonAudio", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
+        .target(name: "UnisonAudio", dependencies: ["UnisonDomain", "CSpeexDSP"], swiftSettings: langModeV5),
+        .target(
+            name: "CSpeexDSP",
+            path: "Sources/CSpeexDSP",
+            publicHeadersPath: "include",
+            cSettings: [
+                .define("HAVE_CONFIG_H"),
+                .headerSearchPath("include"),
+                .headerSearchPath(".")
+            ]
+        ),
         .target(name: "UnisonSystem", dependencies: ["UnisonDomain"], swiftSettings: langModeV5),
         .target(name: "UnisonUI", dependencies: ["UnisonDomain", "UnisonAudio"], swiftSettings: langModeV5),
         .executableTarget(name: "UnisonApp", dependencies: [
@@ -69,6 +80,12 @@ let package = Package(
             name: "PacingEval",
             dependencies: ["UnisonAudio", "UnisonTranslation", "UnisonDomain"],
             path: "Sources/Tools/PacingEval",
+            swiftSettings: langModeV5
+        ),
+        .executableTarget(
+            name: "AecEval",
+            dependencies: ["UnisonAudio", "UnisonDomain"],
+            path: "Sources/Tools/AecEval",
             swiftSettings: langModeV5
         ),
         .testTarget(name: "UnisonDomainTests", dependencies: ["UnisonDomain", "UnisonUI", "UnisonAudio"], swiftSettings: langModeV5),

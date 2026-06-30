@@ -104,6 +104,9 @@ public final class TranslationOrchestrator {
     private let deviceRegistry: any AudioDeviceRegistry
     private let clock: any Clock
     private let transformer: any AudioFormatTransformer
+    /// Optional acoustic echo canceller. Present in production for the
+    /// speaker-mode echo loop; nil in tests/tools that don't need it.
+    private let echoCanceller: (any EchoCanceller)?
     /// System-network path watcher. The orchestrator subscribes to its
     /// `statusStream` once per session start; an `.unsatisfied` event
     /// tears down streams + captures and flips to
@@ -247,6 +250,7 @@ public final class TranslationOrchestrator {
         clock: any Clock,
         transformer: any AudioFormatTransformer,
         networkMonitor: any NetworkPathMonitoring,
+        echoCanceller: (any EchoCanceller)? = nil,
         meetingStore: any MeetingStore = InMemoryMeetingStore()
     ) {
         self.transcript = TranscriptStore()
@@ -260,6 +264,7 @@ public final class TranslationOrchestrator {
         self.clock = clock
         self.transformer = transformer
         self.networkMonitor = networkMonitor
+        self.echoCanceller = echoCanceller
         self.meetingStore = meetingStore
     }
 
@@ -317,6 +322,10 @@ public final class TranslationOrchestrator {
         do {
             try await outputMixer.start(deviceUID: settings.outputDeviceUID)
             outputMixer.setOriginalGain(settings.originalMixVolume)
+            if mode.requiresMicrophone {
+                echoCanceller?.reset()
+                outputMixer.setEchoReference(echoCanceller)
+            }
         } catch {
             Self.log.error("start() output mixer failed: \(String(describing: error)) → .error(.outputDeviceUnavailable)")
             state = .error(.outputDeviceUnavailable)
@@ -859,6 +868,7 @@ public final class TranslationOrchestrator {
             }
         }
         if mode == .call || mode == .test {
+            echoCanceller?.reset()
             // Re-arm the outbound ring buffer so post-resume reconnect
             // flaps continue to enjoy the brief-blip recovery path.
             audioBufferBySpeaker[.me] = AudioRingBuffer(maxFrames: Self.audioBufferFrames)
@@ -1265,6 +1275,10 @@ public final class TranslationOrchestrator {
         cancelPauseRecoveryWatchdog()
         cancelRecoveringFlash()
         stopSlowDetectionLoop()
+        // Remove the AEC far-reference (tap off) before the detached HAL
+        // teardown tears the engine down. Idempotent with the mixer's own
+        // stop()-time tap removal; also clears the mock's recorded sink.
+        outputMixer.setEchoReference(nil)
         healthBySpeaker = [:]
         lastDeltaAtBySpeaker = [:]
         lastAudibleMicAt = nil
@@ -1520,6 +1534,7 @@ public final class TranslationOrchestrator {
     private func wireOutgoingPipeline(stream: any TranslationStream, destination: OutgoingDestination) {
         let micFrames = micCapture.start(deviceUID: currentSettings.inputDeviceUID)
         let transformer = self.transformer
+        let echoCanceller = self.echoCanceller
         // Capture the buffer reference on @MainActor (right here) so
         // the off-actor mic pump doesn't read `audioBufferBySpeaker`
         // — a Dictionary — concurrently with MainActor mutations
@@ -1550,7 +1565,8 @@ public final class TranslationOrchestrator {
                     self?.markMicFrameReceived(format: formatLabel, sampleRate: sampleRate, rms: rms)
                     self?.logMicLevel(rms: rms, frameIndex: idx)
                 }
-                let wire = transformer.toWire(frame)
+                let near = echoCanceller?.processNear(frame) ?? frame
+                let wire = transformer.toWire(near)
                 outboundBuffer?.append(wire)
                 await stream.send(wire)
                 frameIndex += 1
