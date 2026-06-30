@@ -181,6 +181,34 @@ swift run Unison
 UNISON_DEV_MODE=1 swift run Unison
 ```
 
+### Build, sign & run in one command
+
+```bash
+make run        # = scripts/run.sh — builds, bundles, and launches build/Unison.app
+```
+
+A single-instance guard means launching a fresh build terminates the
+previous one, so you won't accumulate menu-bar icons across rebuilds.
+
+### Stop the per-rebuild permission & keychain prompts
+
+Ad-hoc-signed dev builds get a fresh code signature on every rebuild, so
+macOS treats each build as a new app and re-asks for microphone / system-
+audio permission (TCC) and the login keychain (your OpenAI key). Create a
+stable self-signed signing identity **once**:
+
+```bash
+make dev-cert   # = scripts/make_dev_cert.sh — creates "Unison Dev" in your keychain
+```
+
+After that, `make run` (or `SIGN_IDENTITY="Unison Dev" scripts/bundle_app.sh`)
+signs with that stable identity, so you grant permissions and the keychain
+once and never again. The first build asks once to let codesign use the new
+key — click **Always Allow**.
+
+> Production builds are unaffected: the release pipeline signs with a real
+> Developer ID, so end users grant everything once, ever.
+
 ### Tests
 
 ```bash

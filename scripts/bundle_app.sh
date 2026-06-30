@@ -83,7 +83,19 @@ if [ -n "${ICON_FILE:-}" ] && [ -f "$ICON_FILE" ]; then
   cp "$ICON_FILE" "$RESOURCES/AppIcon.icns"
 fi
 
-# Optional Developer ID signing for unison; tap-benchmark always ad-hoc.
+# Signing precedence:
+#   1. DEVELOPER_ID  → release: Developer ID + hardened runtime
+#      (notarization-ready). unison target only; injected by the
+#      release pipeline (see scripts/build_release.sh).
+#   2. SIGN_IDENTITY → local dev: a STABLE self-signed identity (create
+#      one once with scripts/make_dev_cert.sh). A stable identity gives
+#      the bundle a stable designated requirement that survives
+#      rebuilds, so macOS stops re-prompting for mic / system-audio
+#      (TCC) and for the login keychain (the OpenAI API key's ACL) on
+#      every rebuild. No hardened runtime: keeps lldb attach simple and
+#      isn't needed for the stability win.
+#   3. Otherwise      → ad-hoc: the signature changes every build, which
+#      is what causes the per-rebuild permission / keychain prompts.
 if [ "$TARGET" = "unison" ] && [ "${DEVELOPER_ID:-}" != "" ]; then
   echo "Signing with $DEVELOPER_ID..."
   codesign --force \
@@ -91,8 +103,14 @@ if [ "$TARGET" = "unison" ] && [ "${DEVELOPER_ID:-}" != "" ]; then
     --options runtime \
     --entitlements "$ENTITLEMENTS" \
     "$BUNDLE_DIR"
+elif [ "${SIGN_IDENTITY:-}" != "" ]; then
+  echo "Signing with local identity \"$SIGN_IDENTITY\"..."
+  codesign --force \
+    --sign "$SIGN_IDENTITY" \
+    --entitlements "$ENTITLEMENTS" \
+    "$BUNDLE_DIR"
 else
-  echo "(Ad-hoc signing)"
+  echo "(Ad-hoc signing — permissions/keychain will re-prompt each rebuild; see scripts/make_dev_cert.sh)"
   codesign --force --sign - --entitlements "$ENTITLEMENTS" "$BUNDLE_DIR"
 fi
 
