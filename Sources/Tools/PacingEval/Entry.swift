@@ -315,7 +315,32 @@ private func convertFloatToInt16AtSampleRate(floatPCM: Data,
 
 @main
 struct PacingEvalCLI {
+    /// Harness helper: if `--emit-settings-hex <gemini|openai>` is present,
+    /// print the hex of a JSON-encoded `Settings` on that provider and return
+    /// true (caller returns). The VM audio-capture script seeds it via
+    /// `defaults write com.unison.app com.unison.settings.v1 -data <hex>` to
+    /// force the app onto a provider — using the REAL Codable, so no
+    /// hand-guessed enum raw values can silently pick the wrong engine.
+    static func emitSettingsHexIfRequested() -> Bool {
+        let raw = CommandLine.arguments
+        guard let i = raw.firstIndex(of: "--emit-settings-hex"), i + 1 < raw.count else { return false }
+        let model: TranslationModel = raw[i + 1] == "gemini" ? .geminiLiveTranslate : .openAIRealtime
+        guard let data = try? JSONEncoder().encode(Settings(translationModel: model)) else { return false }
+        print(data.map { String(format: "%02x", $0) }.joined())
+        return true
+    }
+
+    /// Drive a model-output WAV through the real production `AVAudioOutputMixer`
+    /// and dump the post-chain audio. See `FullChainRender` / `--full-chain-render`.
+    static func runFullChainRender(_ decoded: AudioReader.Decoded, _ args: CLIArgs) async throws {
+        let renderer = FullChainRender(pcm24kInt16: decoded.pcm, outputDir: args.outputDir,
+                                       label: args.label, chunkMs: 250)
+        let dumpURL = try await renderer.run()
+        print("[full-chain] done → \(dumpURL.path)")
+    }
+
     static func main() async {
+        if emitSettingsHexIfRequested() { return }
         do {
             let args = try CLIArgs.parse()
             // Playback-test mode doesn't talk to any provider; skip the API
@@ -361,12 +386,7 @@ struct PacingEvalCLI {
             }
 
             if args.fullChainRender {
-                let renderer = FullChainRender(pcm24kInt16: decoded.pcm,
-                                               outputDir: args.outputDir,
-                                               label: args.label,
-                                               chunkMs: 250)
-                let dumpURL = try await renderer.run()
-                print("[full-chain] done → \(dumpURL.path)")
+                try await runFullChainRender(decoded, args)
                 return
             }
 
