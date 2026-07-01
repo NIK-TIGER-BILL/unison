@@ -129,10 +129,24 @@ public final class FileLogStore: @unchecked Sendable {
     /// banner before any UnisonLog has been instantiated).
     public func write(category: String, level: String, message: String) {
         guard enabled else { return }
-        let timestamp = Self.timestampFormatter.string(from: Date())
-        let line = "\(timestamp) [\(category):\(level)] \(message)\n"
+        // Capture the wall-clock NOW cheaply on the caller (a bare `Date()`
+        // is a lock-free time snapshot), then move EVERYTHING expensive — the
+        // shared `DateFormatter` (an internal ObjC lock + ICU/locale work,
+        // NOT thread-safe) and the line interpolation — onto the serial I/O
+        // queue. This is load-bearing, not cosmetic: `write` is called from
+        // the CoreAudio render thread, both detached audio pumps, the WS
+        // receive loop and the MainActor, often concurrently and at high
+        // volume. Formatting the timestamp here would serialize all those hot
+        // threads on the one `DateFormatter` lock — a real-time-audio
+        // violation that hitches the render thread and stutters playback.
+        // Formatting on the single-consumer queue keeps the formatter
+        // effectively single-threaded and the caller non-blocking.
+        let now = Date()
         queue.async { [weak self] in
-            self?.appendLine(line)
+            guard let self else { return }
+            let timestamp = Self.timestampFormatter.string(from: now)
+            let line = "\(timestamp) [\(category):\(level)] \(message)\n"
+            self.appendLine(line)
         }
     }
 

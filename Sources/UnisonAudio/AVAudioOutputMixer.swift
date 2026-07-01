@@ -575,11 +575,17 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
                 // sustained gap > a few buffers indicates real drops.
                 if played % 50 == 0 {
                     let gap = scheduled - played
-                    // Debug-level: this is per-session periodic
-                    // diagnostic; lifecycle (gap suddenly growing
-                    // beyond a threshold) would warrant an info-level
-                    // alert but we don't have one yet.
-                    Self.log.debug("[speakers] playback counters: scheduled=\(scheduled) played=\(played) gap=\(gap)")
+                    // This closure runs on the CoreAudio render/completion
+                    // thread — a real-time context. Building the message
+                    // string and handing it to os_log/UnisonLog must NOT run
+                    // inline here; hop it to a utility queue so a logging
+                    // hiccup can never stall playback. Counters are value
+                    // types, captured by copy. Debug-level: per-session
+                    // periodic diagnostic (a gap growing past a threshold
+                    // would warrant an info alert, but we don't have one yet).
+                    DispatchQueue.global(qos: .utility).async {
+                        Self.log.debug("[speakers] playback counters: scheduled=\(scheduled) played=\(played) gap=\(gap)")
+                    }
                 }
             }
         }

@@ -104,3 +104,49 @@ private func waitForFlush() async {
     #expect(contents.contains("[TestProbe:info]"))
     #expect(contents.contains(sentinel))
 }
+
+@Test func fileLogStore_concurrentWritesFromManyThreads_allLandIntact() async throws {
+    // Regression guard for the "format the timestamp OFF the caller thread"
+    // fix. Before it, `write()` formatted a SHARED, non-thread-safe
+    // `DateFormatter` synchronously on the caller — so concurrent logging
+    // from the two audio pumps + the CoreAudio render thread + the MainActor
+    // + the WS loop raced on the formatter's internal state (undefined
+    // behaviour) AND serialized on its lock, stalling whichever hot thread
+    // lost the race → stuttered playback. Now the caller only snapshots a
+    // lock-free `Date()`; all formatting happens on the single serial I/O
+    // queue. Hammer write() from many threads at once and assert every line
+    // lands intact and well-formed — no crash, no torn/corrupted lines.
+    let store = makeTempStore(maxFileBytes: 8 * 1024 * 1024) // large: no rotation mid-test
+    let threads = 8, perThread = 250
+    await withTaskGroup(of: Void.self) { group in
+        for t in 0..<threads {
+            group.addTask {
+                for i in 0..<perThread {
+                    store.write(category: "T\(t)", level: "info", message: "msg-\(t)-\(i)")
+                }
+            }
+        }
+    }
+    // Poll until the serial queue drains (robust vs a fixed sleep).
+    let expected = threads * perThread
+    for _ in 0..<50 {
+        let landed = store.readAll().split(separator: "\n").filter { $0.contains(":info] msg-") }.count
+        if landed >= expected { break }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+    }
+    let contents = store.readAll()
+    // Every unique (thread,index) line present.
+    var missing = 0
+    for t in 0..<threads {
+        for i in 0..<perThread where !contents.contains("[T\(t):info] msg-\(t)-\(i)") { missing += 1 }
+    }
+    #expect(missing == 0, "\(missing) of \(expected) lines missing under concurrent logging")
+    // Every emitted line carries a well-formed "YYYY-MM-DD HH:MM:SS.mmm "
+    // prefix — a concurrently-corrupted DateFormatter would have torn it.
+    var malformed = 0
+    for line in contents.split(separator: "\n") where line.contains(":info] msg-") {
+        let p = String(line.prefix(23))
+        if !(p.hasPrefix("20") && p.contains("-") && p.contains(":") && p.contains(".")) { malformed += 1 }
+    }
+    #expect(malformed == 0, "\(malformed) lines had a malformed timestamp prefix")
+}
