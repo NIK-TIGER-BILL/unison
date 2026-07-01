@@ -17,6 +17,11 @@ struct CLIArgs {
     /// (player → timePitch → mixer) offline. Used to test whether the
     /// fade-out the user reports is introduced by our nodes.
     let playbackTestOnly: Bool
+    /// When set, feed `--audio` (an assembled model-output WAV) through the
+    /// REAL `AVAudioOutputMixer` (production AGC + declick + timePitch +
+    /// scheduling) and dump the post-chain audio, reproducing chunk seams so
+    /// we can verify the declick removes clicks. A/B via `UNISON_DISABLE_DECLICK`.
+    let fullChainRender: Bool
 
     static func parse() throws -> CLIArgs {
         let args = CommandLine.arguments
@@ -27,6 +32,7 @@ struct CLIArgs {
         var runs: Int = 1
         var provider: TranslationModel = .openAIRealtime
         var playbackTestOnly = false
+        var fullChainRender = false
         var i = 1
         while i < args.count {
             switch args[i] {
@@ -55,6 +61,8 @@ struct CLIArgs {
                 }
             case "--playback-test":
                 playbackTestOnly = true
+            case "--full-chain-render":
+                fullChainRender = true
             case "--help", "-h":
                 printHelp()
                 exit(0)
@@ -84,7 +92,8 @@ struct CLIArgs {
             label: finalLabel,
             runs: max(1, runs),
             provider: provider,
-            playbackTestOnly: playbackTestOnly
+            playbackTestOnly: playbackTestOnly,
+            fullChainRender: fullChainRender
         )
     }
 
@@ -312,7 +321,7 @@ struct PacingEvalCLI {
             // Playback-test mode doesn't talk to any provider; skip the API
             // key check so we can run fade diagnosis without exposing a key.
             let apiKey: String
-            if args.playbackTestOnly {
+            if args.playbackTestOnly || args.fullChainRender {
                 apiKey = ""
             } else {
                 let envVar: String
@@ -333,9 +342,10 @@ struct PacingEvalCLI {
 
             print("[pacing-eval] audio=\(args.audioPath) target=\(args.targetLang.rawValue) provider=\(args.provider.rawValue) out=\(args.outputDir.path) runs=\(args.runs) playback-test=\(args.playbackTestOnly)")
 
-            // Playback-test always uses 24 kHz (tests the AVAudioEngine chain,
-            // independent of provider). Live session decodes to wireSampleRate.
-            let readerRate = args.playbackTestOnly ? 24_000 : wireSampleRate
+            // Playback-test + full-chain-render always use 24 kHz (they replay a
+            // model-output WAV through our chain, independent of provider). Live
+            // session decodes to wireSampleRate.
+            let readerRate = (args.playbackTestOnly || args.fullChainRender) ? 24_000 : wireSampleRate
             let reader = AudioReader(url: URL(fileURLWithPath: args.audioPath), chunkMs: 100, targetSampleRate: readerRate)
             let decoded = try reader.decode()
             print(String(format: "[pacing-eval] decoded %.2fs audio (%d chunks of %dms) at %dHz",
@@ -347,6 +357,16 @@ struct PacingEvalCLI {
             if args.playbackTestOnly {
                 try runPlaybackTest(decoded: decoded, args: args)
                 try await runLivePlaybackTest(decoded: decoded, args: args)
+                return
+            }
+
+            if args.fullChainRender {
+                let renderer = FullChainRender(pcm24kInt16: decoded.pcm,
+                                               outputDir: args.outputDir,
+                                               label: args.label,
+                                               chunkMs: 250)
+                let dumpURL = try await renderer.run()
+                print("[full-chain] done → \(dumpURL.path)")
                 return
             }
 

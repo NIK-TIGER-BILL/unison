@@ -100,6 +100,13 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// Declick ramp length in samples (~2ms at 48k). Long enough to remove a
     /// boundary click, short enough to be inaudible as a smear.
     private static let declickRampSamples = 96
+    /// Diagnostic A/B gate: when `UNISON_DISABLE_DECLICK=1`, skip the seam
+    /// declick entirely so the full-chain click-verification harness
+    /// (`pacing-eval --full-chain-render`) can measure the click floor WITH vs
+    /// WITHOUT the ramp and prove the ramp is what removes the seam clicks.
+    /// Launch-constant (same-process env is immutable).
+    private static let declickDisabled =
+        ProcessInfo.processInfo.environment["UNISON_DISABLE_DECLICK"] == "1"
 
     public init() {
         self.playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
@@ -113,6 +120,18 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// diagnostic state — used by the device-change repro/tests to detect the
     /// engine stopping itself on an `AVAudioEngineConfigurationChange`.
     public var isEngineRunning: Bool { engine.isRunning }
+
+    /// Harness affordance: mute the engine's FINAL output to the audio device
+    /// (mainMixer → outputNode) while leaving the pre-mixer
+    /// `UNISON_DUMP_PLAYBACK_WAV` capture tap intact — it taps `timePitch`,
+    /// upstream of this mixer, so the captured signal is unchanged. Lets the
+    /// full-chain click-verification harness (`pacing-eval --full-chain-render`)
+    /// drive the real production chain (AGC + declick + timePitch + scheduling)
+    /// without blasting translated audio at whoever runs it. No production
+    /// caller — diagnostics only.
+    public func muteFinalOutputForCapture() {
+        mixer.outputVolume = 0
+    }
 
     public func start(deviceUID: String?) async throws {
         Self.log.info("start(deviceUID=\(deviceUID ?? "<system default>"))")
@@ -522,7 +541,9 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         let resumingFromSilence = scheduledBufferCount <= playedBackBufferCount
         let prevSample = lastTranslatedSample
         counterLock.unlock()
-        declickSeam(buf, from: resumingFromSilence ? 0 : prevSample)
+        if !Self.declickDisabled {
+            Self.declickSeam(buf, from: resumingFromSilence ? 0 : prevSample)
+        }
         if let ch = buf.floatChannelData, buf.frameLength > 0 {
             let last = ch[0][Int(buf.frameLength) - 1]
             counterLock.lock(); lastTranslatedSample = last; counterLock.unlock()
@@ -601,7 +622,9 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// `g = i/n`). `out[0] == start` so playback continues without a step,
     /// and by sample `n` we're back on the real waveform. Runs on the mixer
     /// actor's schedule path (never the render thread) — plain buffer math.
-    private func declickSeam(_ buf: AVAudioPCMBuffer, from start: Float) {
+    /// `static` + `internal` (not `private`) so `DeclickTests` can prove the
+    /// seam-smoothing property deterministically without a live engine.
+    static func declickSeam(_ buf: AVAudioPCMBuffer, from start: Float) {
         guard let ch = buf.floatChannelData else { return }
         let p = ch[0]
         let n = min(Int(buf.frameLength), Self.declickRampSamples)
