@@ -511,7 +511,31 @@ GEMINI_API_KEY=$(security find-generic-password -s "com.unison.app" -a "gemini-a
 
 # Offline + Live playback тест (без подключения к движку)
 swift run pacing-eval --audio /path/to/input.wav --playback-test
+
+# Full-chain: прогнать model-output WAV через НАСТОЯЩИЙ AVAudioOutputMixer
+# (реальные AGC + declick + timePitch + scheduling, реальные стыки чанков),
+# дамп post-chain через UNISON_DUMP_PLAYBACK_WAV. A/B клика: UNISON_DISABLE_DECLICK=1.
+swift run pacing-eval --audio /path/to/model-output.wav --full-chain-render --output ./out
+UNISON_DISABLE_DECLICK=1 swift run pacing-eval --audio /path/to/model-output.wav --full-chain-render --output ./out
 ```
+
+### Автономная проверка щелчков / артефактов (без юзера)
+
+«Щелчки на стыках» и «внезапные деградации» проверяются **без прослушивания**:
+
+1. **`Tests/UnisonAudioTests/DeclickTests.swift`** — детерминированный юнит-пруф,
+   что `AVAudioOutputMixer.declickSeam` гасит стык: resume-from-silence 0.6→<0.02,
+   AGC/resampler-step 0.9→<0.03 (≥10×), no-op когда уже непрерывно. Гоняется в CI/VM.
+2. **`--full-chain-render`** (выше) — прогон реального выхода модели через **реальный**
+   микшер; A/B `UNISON_DISABLE_DECLICK` доказал на живом Gemini RU→EN, что declick
+   вдвое режет худший sample-step (0.50→0.28) и число click-scale шагов (30→16).
+3. **`scripts/analyze_audio.py <wav> [label]`** — numpy-сканер WAV (int16 **и** float32-
+   дампов) на glitch/dropout/RMS-jump/clip/fade. Калибруй против natural speech.
+   `TimePitchProbe.swift` (gate `UNISON_RUN_PROBES=1`) — latency/fidelity замер узлов.
+
+> ⚠️ `BlackHole2chPlayer` (peer/virtual-mic путь) **declick НЕ имеет** — только
+> `AVAudioOutputMixer` (speakers, что слышит юзер). Пир может слышать стыковые
+> щелчки; симметричный фикс — отдельно.
 
 Возможности:
 - Прогон через реальную OpenAI Realtime API сессию
