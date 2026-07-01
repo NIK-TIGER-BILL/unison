@@ -97,6 +97,15 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// player ran dry) ramps up from silence. Touched only from the mixer
     /// actor's schedule path — no extra locking needed.
     private var lastTranslatedSample: Float = 0
+    /// Host-clock (`DispatchTime`) seconds at which the currently-queued
+    /// translated audio finishes playing. The seam declick reads this to tell a
+    /// REAL underrun (player on silence → ramp the next buffer from 0) from
+    /// jitter the cushion absorbed (queue still has audio → ramp from the last
+    /// sample). Wall-clock based, so it's immune to the `.dataPlayedBack`
+    /// completion lag that made the old `scheduled<=played` test miss brief
+    /// gaps and click. Read/written under `counterLock`; reset in
+    /// `resetPlaybackCounters`.
+    private var translatedQueueEndsAt: Double = 0
     /// Declick ramp length in samples (~2ms at 48k). Long enough to remove a
     /// boundary click, short enough to be inaudible as a smear.
     private static let declickRampSamples = 96
@@ -416,6 +425,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         playedBackBufferCount = 0
         lastScheduleAt = nil
         lastTranslatedSample = 0
+        translatedQueueEndsAt = 0
     }
 
     public func playOriginal(_ frames: AsyncStream<AudioFrame>) async {
@@ -532,24 +542,31 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         //    the first non-zero sample steps from the digital silence the
         //    player emitted and clicks.
         //
-        // Dryness signal: `scheduledBufferCount == playedBackBufferCount` —
-        // every scheduled buffer has FINISHED hardware playout (.dataPlayedBack
-        // fired), so nothing is left to render. The completion lag only makes
-        // this read dry LATE, never falsely early (you cannot play back more
-        // than was scheduled), so there are no false positives on a healthy
-        // seam. We deliberately do NOT also trigger on a large `schedGap`: a
-        // normal 0.3–0.8s inter-chunk gap is absorbed by the ~0.75s cushion
-        // (the player keeps playing through it), so gating on the gap would
-        // ramp healthy clause boundaries from 0 — a 2ms notch on exactly the
-        // seams this is meant to smooth.
+        // Dryness signal: a WALL-CLOCK model of when the queued audio ends.
+        // `scheduledBufferCount <= playedBackBufferCount` was unreliable — it
+        // rode the `.dataPlayedBack` completion, which lags real playout by the
+        // HAL/Bluetooth output latency, so a brief gap read "dry" LATE and this
+        // buffer got ramped from a stale non-zero `prevSample` even though the
+        // player had already emitted digital silence → the 0→prevSample resume
+        // click the user heard. Instead we track `translatedQueueEndsAt` (host
+        // time the queued audio finishes): if `now` has passed it, the player
+        // drained → ramp from 0. Cushion-absorbed jitter keeps
+        // `now < translatedQueueEndsAt` (the queue still holds audio), so this
+        // does NOT false-fire on healthy clause boundaries — which is why
+        // gating on the raw `schedGap` was wrong (a late chunk within the
+        // ~0.75s cushion is not a real underrun).
         //
-        // `lastTranslatedSample` is read+written under `counterLock` (this type
-        // is a class, not an actor — it's only serialized in practice by the
-        // single `playTranslated` consumer; the lock guards the stop→restart
-        // handoff where a late in-flight schedule can race the next session's
-        // `resetPlaybackCounters`).
+        // `lastTranslatedSample` / `translatedQueueEndsAt` are read+written
+        // under `counterLock` (this type is a class, not an actor — it's only
+        // serialized in practice by the single `playTranslated` consumer; the
+        // lock guards the stop→restart handoff where a late in-flight schedule
+        // can race the next session's `resetPlaybackCounters`).
+        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+        let bufDurSec = Double(buf.frameLength) / playerFormat.sampleRate / Double(max(0.5, timePitch.rate))
         counterLock.lock()
-        let resumingFromSilence = scheduledBufferCount <= playedBackBufferCount
+        let (resumingFromSilence, newQueueEnd) = Self.seamResumeDecision(
+            now: now, queueEndsAt: translatedQueueEndsAt, bufferDurationSec: bufDurSec)
+        translatedQueueEndsAt = newQueueEnd
         let prevSample = lastTranslatedSample
         counterLock.unlock()
         if !Self.declickDisabled {
@@ -650,6 +667,23 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
             let g = Float(i) / Float(n)
             p[i] = start * (1 - g) + p[i] * g
         }
+    }
+
+    /// Pure: model the translated queue's end in host-clock seconds to decide
+    /// whether the player drained to silence before this buffer. Returns
+    /// `(resumingFromSilence, updatedQueueEndsAt)`. `now >= queueEndsAt` ⟺ the
+    /// queue emptied and the player is on digital silence → the caller ramps
+    /// the seam from 0. Otherwise a chunk landed while audio was still queued
+    /// (the cushion absorbed the jitter) → continuous seam, ramp from the last
+    /// sample. The new end is `max(now, queueEndsAt) + bufferDurationSec`: a
+    /// buffer arriving after a drain restarts the clock at `now`; one that
+    /// appends extends the existing queue. `static` + `internal` so it's
+    /// unit-testable without a live engine (see `DeclickTests`).
+    static func seamResumeDecision(now: Double, queueEndsAt: Double,
+                                   bufferDurationSec: Double) -> (resumingFromSilence: Bool, queueEndsAt: Double) {
+        let resuming = now >= queueEndsAt
+        let start = Swift.max(now, queueEndsAt)
+        return (resuming, start + bufferDurationSec)
     }
 
     /// Root-mean-square of a float32 PCM frame, used for periodic

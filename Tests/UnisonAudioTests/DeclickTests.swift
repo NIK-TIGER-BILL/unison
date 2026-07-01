@@ -93,4 +93,54 @@ import Testing
         #expect(s[96] == 1.0)                         // back on the signal at 96
         #expect(s[200] == 1.0)
     }
+
+    // MARK: - resume-from-silence detection (which `start` to hand declickSeam)
+    //
+    // declickSeam is correct GIVEN the right `start`; the surviving click was in
+    // DECIDING it. `scheduledBufferCount <= playedBackBufferCount` rode the
+    // `.dataPlayedBack` completion lag (the HAL/Bluetooth output latency), so a
+    // brief gap read "not dry" and a post-silence buffer got ramped from a stale
+    // non-zero prevSample → the 0→prevSample click. `seamResumeDecision` replaces
+    // that with a wall-clock queue-end model: no completion lag, and no false
+    // positive on cushion-absorbed jitter (why the raw schedGap test was wrong).
+
+    @Test func seamResume_firstBufferOrReset_isResumeFromSilence() {
+        // Fresh queue (queueEndsAt reset to 0): the first buffer resumes from
+        // silence → ramp from 0; the queue clock starts at `now`.
+        let (resuming, end) = AVAudioOutputMixer.seamResumeDecision(
+            now: 1000, queueEndsAt: 0, bufferDurationSec: 0.25)
+        #expect(resuming == true)
+        #expect(abs(end - 1000.25) < 1e-9)
+    }
+
+    @Test func seamResume_absorbedJitter_isNotResume_noFalsePositive() {
+        // A chunk lands late but the cushion still holds ~0.65s (queue ends at
+        // 1000.75, now 1000.10) — NOT an underrun. Must NOT ramp from 0 (that was
+        // the schedGap false-positive that notched healthy seams); it appends to
+        // the existing queue.
+        let (resuming, end) = AVAudioOutputMixer.seamResumeDecision(
+            now: 1000.10, queueEndsAt: 1000.75, bufferDurationSec: 0.25)
+        #expect(resuming == false)
+        #expect(abs(end - 1001.0) < 1e-9)
+    }
+
+    @Test func seamResume_realGap_detectedImmediately() {
+        // The queue drained 0.25s ago (ends at 1000.75, now 1001.0) → the player
+        // is on silence → resume from 0. The wall-clock model catches this AT the
+        // gap (the `.dataPlayedBack` count would still read "not dry" here, the
+        // bug), and restarts the clock at `now`.
+        let (resuming, end) = AVAudioOutputMixer.seamResumeDecision(
+            now: 1001.0, queueEndsAt: 1000.75, bufferDurationSec: 0.25)
+        #expect(resuming == true)
+        #expect(abs(end - 1001.25) < 1e-9)
+    }
+
+    @Test func seamResume_exactlyAtQueueEnd_countsAsResume() {
+        // Boundary: now == queueEndsAt. The queued audio has just finished, so
+        // treat it as drained (`>=`) — ramp from 0, not from a sample no longer
+        // playing.
+        let (resuming, _) = AVAudioOutputMixer.seamResumeDecision(
+            now: 1000.75, queueEndsAt: 1000.75, bufferDurationSec: 0.25)
+        #expect(resuming == true)
+    }
 }
