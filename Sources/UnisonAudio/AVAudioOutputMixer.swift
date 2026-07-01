@@ -458,6 +458,17 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// same instance used to connect the node graph, so a buffer built
     /// from it is guaranteed accepted.
     private func scheduleTranslated(frame: AudioFrame) {
+        // Hard latency cap. If the queue has blown past the catch-up ceiling
+        // — a burst, e.g. the model dumping tens of seconds of buffered audio
+        // the instant a slow network recovers — DROP this frame so playback
+        // resyncs to live instead of playing ~30 s stale (the "transcript
+        // updates but nothing is voiced" bug). The gentle pacing rate (≤1.06×)
+        // can't drain a multi-second backlog; only dropping can. `admit()`'s
+        // hysteresis keeps dropping until the queue drains to the floor, so we
+        // don't flip-flop mid-burst. Skipping the schedule leaves the queue to
+        // drain via the render thread; the seam declick re-applies on resume
+        // because the drained queue makes `resumingFromSilence` true.
+        if let pacing, !pacing.admit() { return }
         // Apply compensating AGC BEFORE building the AVAudioPCMBuffer
         // so the gain ends up baked into the samples we schedule. We
         // chose this over modulating `player.volume` because volume

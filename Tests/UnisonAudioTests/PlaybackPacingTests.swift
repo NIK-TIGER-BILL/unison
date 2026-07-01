@@ -210,3 +210,55 @@ import Testing
     let next = PlaybackPacing.slewToward(currentRate: 1.2, target: 1.2, maxStep: 0.05)
     #expect(next == 1.2)
 }
+
+// MARK: - catch-up (hard latency cap)
+//
+// The rate controller only ever drains at ≤1.06×, so a multi-second backlog
+// (the model dumping buffered audio in one burst when a slow network recovers)
+// is un-drainable by rate — playback ends up permanently seconds behind live
+// ("transcript updates but nothing is voiced"). `catchUpDecision` is the
+// hysteresis latch that makes the scheduler DROP frames until the queue
+// drains back to the floor, resyncing to live.
+
+@Test func pacing_catchUp_entersAboveCeiling_holdsUntilFloor_noFlipFlop() {
+    let ceil = PlaybackPacing.catchUpCeilingSec
+    let floor = PlaybackPacing.catchUpFloorSec
+    #expect(ceil > floor)  // hysteresis gap must be positive
+    // Not already catching up: a normal (sub-ceiling) cushion must NOT drop.
+    #expect(PlaybackPacing.catchUpDecision(depthSec: 0.0, catchingUp: false) == false)
+    #expect(PlaybackPacing.catchUpDecision(depthSec: ceil - 0.01, catchingUp: false) == false)
+    // A burst past the ceiling enters catch-up (drop).
+    #expect(PlaybackPacing.catchUpDecision(depthSec: ceil + 5.0, catchingUp: false) == true)
+    // Once catching up, keep dropping through the whole hysteresis band…
+    #expect(PlaybackPacing.catchUpDecision(depthSec: (ceil + floor) / 2, catchingUp: true) == true)
+    #expect(PlaybackPacing.catchUpDecision(depthSec: floor + 0.01, catchingUp: true) == true)
+    // …until it drains to the floor, then resume admitting.
+    #expect(PlaybackPacing.catchUpDecision(depthSec: floor - 0.01, catchingUp: true) == false)
+    // Hysteresis: a mid-band depth must NOT trigger a fresh entry (no flip-flop).
+    #expect(PlaybackPacing.catchUpDecision(depthSec: (ceil + floor) / 2, catchingUp: false) == false)
+}
+
+@Test func pacing_catchUp_boundsLatencyAfterBurst() {
+    // Reproduce the field bug: a slow-network stall then recovery dumps ~33 s
+    // of audio in one burst (user log: depth 0 → 33.25 s, arrival 5×). The
+    // rate controller caps drain at 1.06×, so without catch-up latency stays
+    // ~33 s forever. With catch-up the scheduler drops until the queue drains
+    // to the floor, then holds latency at/under the ceiling.
+    var depth = 33.25
+    var catchingUp = PlaybackPacing.catchUpDecision(depthSec: depth, catchingUp: false)
+    #expect(catchingUp)  // a 33 s backlog must enter catch-up immediately
+    // Model 0.1 s ticks: playback always drains ~real-time; an ADMITTED frame
+    // re-adds ~real-time worth (post-burst arrival ≈ 1.0×), a DROPPED one does
+    // not. This converges the backlog down to the floor.
+    var maxDepthOnceSettled = 0.0
+    for tick in 0..<600 {
+        catchingUp = PlaybackPacing.catchUpDecision(depthSec: depth, catchingUp: catchingUp)
+        depth = max(0, depth - 0.1)          // player drains real-time
+        if !catchingUp { depth += 0.1 }      // admitted → re-add real-time
+        if tick > 400 { maxDepthOnceSettled = max(maxDepthOnceSettled, depth) }
+    }
+    // Latency is pinned under the ceiling once drained (vs the un-drainable
+    // 33 s the bug left), and settles near the floor.
+    #expect(maxDepthOnceSettled <= PlaybackPacing.catchUpCeilingSec + 0.11)
+    #expect(depth <= PlaybackPacing.catchUpFloorSec + 0.11)
+}
