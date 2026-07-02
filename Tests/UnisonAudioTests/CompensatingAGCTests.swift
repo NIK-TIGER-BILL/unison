@@ -98,7 +98,7 @@ import Testing
 @Test func agc_voicedFrameAfterReset_freshStart() {
     // After reset, the next voiced frame bootstraps longTermRMS fresh
     // (no carry-over from before the silence).
-    var state = AGCState.initial
+    let state = AGCState.initial
     let voiced: [Float] = .init(repeating: 0.06, count: 4800)
     let (newState, _) = CompensatingAGC.processed(
         samples: voiced, frameDurationSec: 0.1,

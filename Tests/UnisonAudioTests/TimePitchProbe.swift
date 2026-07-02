@@ -74,7 +74,7 @@ struct TimePitchProbe {
         let inBuf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(input.count))!
         inBuf.frameLength = AVAudioFrameCount(input.count)
         input.withUnsafeBufferPointer {
-            memcpy(inBuf.floatChannelData![0], $0.baseAddress!, input.count * MemoryLayout<Float>.size)
+            _ = memcpy(inBuf.floatChannelData![0], $0.baseAddress!, input.count * MemoryLayout<Float>.size)
         }
         player.scheduleBuffer(inBuf, at: nil, options: [], completionHandler: nil)
         player.play()
