@@ -475,9 +475,13 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         // updates but nothing is voiced" bug). The gentle pacing rate (≤1.06×)
         // can't drain a multi-second backlog; only dropping can. `admit()`'s
         // hysteresis keeps dropping until the queue drains to the floor, so we
-        // don't flip-flop mid-burst. Skipping the schedule leaves the queue to
-        // drain via the render thread; the seam declick re-applies on resume
-        // because the drained queue makes `resumingFromSilence` true.
+        // don't flip-flop mid-burst. Skipping the schedule also skips AGC
+        // adaptation for this frame — intended: we don't chase gain for audio
+        // the listener never hears. The resume AFTER catch-up is deliberately
+        // NOT a resume-from-silence: the floor keeps ~0.5s queued so the player
+        // never truly hits silence, and the wall-clock model below leaves
+        // `resumingFromSilence == false` → the first admitted frame glides from
+        // the last sample over 2ms (smoothing the stale→live seam), not from 0.
         if let pacing, !pacing.admit() { return }
         // Apply compensating AGC BEFORE building the AVAudioPCMBuffer
         // so the gain ends up baked into the samples we schedule. We

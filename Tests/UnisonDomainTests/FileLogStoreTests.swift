@@ -141,12 +141,29 @@ private func waitForFlush() async {
         for i in 0..<perThread where !contents.contains("[T\(t):info] msg-\(t)-\(i)") { missing += 1 }
     }
     #expect(missing == 0, "\(missing) of \(expected) lines missing under concurrent logging")
-    // Every emitted line carries a well-formed "YYYY-MM-DD HH:MM:SS.mmm "
-    // prefix — a concurrently-corrupted DateFormatter would have torn it.
+    // Every emitted line carries an EXACT "yyyy-MM-dd HH:mm:ss.SSS" prefix — a
+    // concurrently-corrupted DateFormatter would tear the shape. Checked by
+    // position (stdlib only, no regex overlay) so a garbled string that merely
+    // contains a digit/dash/colon can't slip through the old substring check.
+    func isTimestampShaped(_ p: String) -> Bool {
+        let c = Array(p)
+        guard c.count == 23 else { return false }
+        for (i, ch) in c.enumerated() {
+            let ok: Bool
+            switch i {
+            case 4, 7: ok = ch == "-"
+            case 10:   ok = ch == " "
+            case 13, 16: ok = ch == ":"
+            case 19:   ok = ch == "."
+            default:   ok = ch.isNumber
+            }
+            if !ok { return false }
+        }
+        return true
+    }
     var malformed = 0
     for line in contents.split(separator: "\n") where line.contains(":info] msg-") {
-        let p = String(line.prefix(23))
-        if !(p.hasPrefix("20") && p.contains("-") && p.contains(":") && p.contains(".")) { malformed += 1 }
+        if !isTimestampShaped(String(line.prefix(23))) { malformed += 1 }
     }
     #expect(malformed == 0, "\(malformed) lines had a malformed timestamp prefix")
 }

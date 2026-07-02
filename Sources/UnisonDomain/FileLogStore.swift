@@ -141,6 +141,15 @@ public final class FileLogStore: @unchecked Sendable {
         // violation that hitches the render thread and stutters playback.
         // Formatting on the single-consumer queue keeps the formatter
         // effectively single-threaded and the caller non-blocking.
+        //
+        // Trade-off (accepted): the timestamp is captured on the caller but the
+        // line is appended later on the queue, so under heavy concurrency two
+        // near-simultaneous callers can land in the file in the opposite order
+        // to their captured timestamps — i.e. a line's timestamp may be a hair
+        // out of order vs its file position. No consumer sorts by timestamp
+        // (they grep for presence or tail in file order), so this is cosmetic;
+        // the alternative (formatting on the caller to keep order) is exactly
+        // the hot-path stall this fix removes.
         let now = Date()
         queue.async { [weak self] in
             guard let self else { return }

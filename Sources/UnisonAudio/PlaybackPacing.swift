@@ -208,7 +208,8 @@ public final class PlaybackPacing: @unchecked Sendable {
         public let bufferError: Double
         /// Rate correction proportional to buffer error.
         public let correction: Double
-        /// Raw target before clamping: `arrival + correction`.
+        /// Raw target before clamping: `1.0 + correction` (v5 — arrival is not
+        /// in the formula; see `targetRate`).
         public let unboundedTarget: Double
         /// Final target after clamping to `[minRate, maxRate]`. The
         /// slew step pulls `applied_rate` toward this value.
@@ -228,15 +229,17 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// backlog sits above the setpoint. The caller applies the slew-rate
     /// limit via `slewToward(currentRate:target:maxStep:)`.
     ///
-    /// `arrivalRateEMA` is **intentionally not in the formula** — it is kept
-    /// as a parameter only so the diagnostic tick log can report it. v4 used
+    /// `arrivalRateEMA` is **intentionally not in the formula** and is ignored
+    /// here — it's a v4 vestige kept in the signature only to avoid churning
+    /// the callers (`tick()` and the `pacing-eval` replay harness), which still
+    /// track and log the EMA separately for diagnostics. v4 used
     /// `arrivalRateEMA + correction`, predicting the drain from the long-run
     /// arrival rate; on real data that overshot on bursts and drained the
     /// cushion right before the next gap (the micropause). v5 reacts to the
     /// measured backlog alone, so it can only ever ask to speed *up* (the
     /// negative correction below target is clamped off by the 1.0× floor).
     public static func targetRate(arrivalRateEMA: Double, depthSmooth: Double) -> RateState {
-        _ = arrivalRateEMA  // diagnostic-only; see doc comment for why it's out of the formula
+        _ = arrivalRateEMA  // ignored in v5 (v4 vestige); see doc comment
         let bufferError = depthSmooth - targetBufferSec
         let correction = bufferError * correctionGain
         let unbounded = 1.0 + correction

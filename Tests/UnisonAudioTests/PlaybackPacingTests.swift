@@ -9,7 +9,7 @@ import Testing
 //   targetBufferSec  = 0.75   (deadband edge; env UNISON_BUFFER_MS)
 //   maxRate          = 1.06
 //   minRate          = 1.00   (hard floor — never slow below real-time)
-//   correctionGain   = 0.4
+//   correctionGain   = 0.15
 //   depthSmoothAlpha = 0.15
 
 // MARK: - targetRate
