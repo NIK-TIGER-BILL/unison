@@ -129,10 +129,33 @@ public final class FileLogStore: @unchecked Sendable {
     /// banner before any UnisonLog has been instantiated).
     public func write(category: String, level: String, message: String) {
         guard enabled else { return }
-        let timestamp = Self.timestampFormatter.string(from: Date())
-        let line = "\(timestamp) [\(category):\(level)] \(message)\n"
+        // Capture the wall-clock NOW cheaply on the caller (a bare `Date()`
+        // is a lock-free time snapshot), then move EVERYTHING expensive — the
+        // shared `DateFormatter` (an internal ObjC lock + ICU/locale work,
+        // NOT thread-safe) and the line interpolation — onto the serial I/O
+        // queue. This is load-bearing, not cosmetic: `write` is called from
+        // the CoreAudio render thread, both detached audio pumps, the WS
+        // receive loop and the MainActor, often concurrently and at high
+        // volume. Formatting the timestamp here would serialize all those hot
+        // threads on the one `DateFormatter` lock — a real-time-audio
+        // violation that hitches the render thread and stutters playback.
+        // Formatting on the single-consumer queue keeps the formatter
+        // effectively single-threaded and the caller non-blocking.
+        //
+        // Trade-off (accepted): the timestamp is captured on the caller but the
+        // line is appended later on the queue, so under heavy concurrency two
+        // near-simultaneous callers can land in the file in the opposite order
+        // to their captured timestamps — i.e. a line's timestamp may be a hair
+        // out of order vs its file position. No consumer sorts by timestamp
+        // (they grep for presence or tail in file order), so this is cosmetic;
+        // the alternative (formatting on the caller to keep order) is exactly
+        // the hot-path stall this fix removes.
+        let now = Date()
         queue.async { [weak self] in
-            self?.appendLine(line)
+            guard let self else { return }
+            let timestamp = Self.timestampFormatter.string(from: now)
+            let line = "\(timestamp) [\(category):\(level)] \(message)\n"
+            self.appendLine(line)
         }
     }
 

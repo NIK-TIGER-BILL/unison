@@ -98,7 +98,15 @@ enum ReproTeardown {
                 func sched() { player.scheduleBuffer(buf, at: nil, options: [], completionCallbackType: .dataPlayedBack) { _ in Task { @MainActor in sched() } } }
                 sched()
             } else {
-                player.scheduleBuffer(buf, at: nil, options: .loops, completionHandler: nil)
+                // Fire-and-forget looping schedule. The async `scheduleBuffer`
+                // alternative suspends until the buffer finishes — which for
+                // `.loops` never happens — so the completion-handler overload is
+                // the correct one. Call it through a synchronous nested func so
+                // the compiler doesn't flag "consider the async alternative".
+                func scheduleLoop() {
+                    player.scheduleBuffer(buf, at: nil, options: .loops, completionHandler: nil)
+                }
+                scheduleLoop()
             }
             player.play()
             if dual { player2.play() }

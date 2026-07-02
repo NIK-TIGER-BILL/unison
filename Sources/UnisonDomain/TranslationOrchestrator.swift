@@ -17,8 +17,13 @@ public final class TranslationOrchestrator {
     /// and every guard failure writes a line here, which is mirrored
     /// to both unified logging and `~/Library/Logs/Unison/unison.log`
     /// — see `UnisonLog` for the rationale.
+    ///
+    /// `nonisolated` so the detached audio pumps (off the @MainActor) can log
+    /// via `Self.log` without the "main actor-isolated static property accessed
+    /// from outside the actor" warning — safe because `UnisonLog` is `Sendable`
+    /// and this is an immutable `let`.
     @ObservationIgnored
-    static let log = UnisonLog(category: "Orchestrator")
+    nonisolated static let log = UnisonLog(category: "Orchestrator")
 
     public private(set) var state: SessionState = .idle {
         didSet {

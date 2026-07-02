@@ -139,7 +139,7 @@ private func makeOrchestrator(
             "stop() never reached .idle — it is still awaiting a wedged CoreAudio teardown")
 
     mixer.releaseStop()   // let the background teardown finish
-    await stopTask
+    await stopTask.value  // wait for the detached stop() to actually complete
 }
 
 // The session can return to `.idle` while a wedged teardown is still
@@ -206,7 +206,7 @@ private func makeOrchestrator(
     #expect(reached, "start() after a wedged stop did not reach .translating — blocked on the wedged teardown")
 
     mixer.releaseStop()   // unblock so even a regressed unbounded wait can finish
-    await startTask
+    await startTask.value  // wait for the detached start() to actually complete
 }
 
 @Test @MainActor func orchestrator_updateOriginalMixVolume_propagatesToMixer() async throws {

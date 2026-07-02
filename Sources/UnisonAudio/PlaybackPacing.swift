@@ -175,6 +175,28 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// deltas, to keep diagnostic noise bounded.
     public static let logHysteresis: Double = 0.03
 
+    /// Hard latency ceiling (audio-seconds). The rate controller (≤1.06×)
+    /// can only bleed off sub-second jitter; a MULTI-second backlog — e.g.
+    /// the model dumping tens of seconds of buffered audio in one burst the
+    /// instant a slow network recovers — is un-drainable by rate alone
+    /// (1.06× clears ~1 s per 17 s), so playback sits permanently seconds
+    /// behind live ("transcript updates but nothing is voiced" — the field
+    /// bug: depth 0 → 33 s, arrival 5×). When the queue grows past this,
+    /// `admit()` enters catch-up and the scheduler DROPS frames until the
+    /// queue drains to `catchUpFloorSec`, resyncing to live. Set well above
+    /// the normal held cushion (`targetBufferSec` + jitter, <1 s) so ordinary
+    /// clause-bursts never trip it. Env override: UNISON_MAX_LATENCY_MS.
+    public static let catchUpCeilingSec: Double = {
+        if let raw = ProcessInfo.processInfo.environment["UNISON_MAX_LATENCY_MS"],
+           let ms = Double(raw), ms > 0 { return ms / 1000.0 }
+        return 2.5
+    }()
+    /// Low-water mark (audio-seconds): catch-up stops dropping once the queue
+    /// has drained back to here, leaving a small live cushion. The gap to
+    /// `catchUpCeilingSec` is hysteresis — without it a still-arriving burst
+    /// would flip-flop admit/drop every frame.
+    public static let catchUpFloorSec: Double = 0.5
+
     // MARK: - Pure rate computation
 
     /// Decomposed snapshot of one pacing tick. Returned by `targetRate`
@@ -186,7 +208,8 @@ public final class PlaybackPacing: @unchecked Sendable {
         public let bufferError: Double
         /// Rate correction proportional to buffer error.
         public let correction: Double
-        /// Raw target before clamping: `arrival + correction`.
+        /// Raw target before clamping: `1.0 + correction` (v5 — arrival is not
+        /// in the formula; see `targetRate`).
         public let unboundedTarget: Double
         /// Final target after clamping to `[minRate, maxRate]`. The
         /// slew step pulls `applied_rate` toward this value.
@@ -206,15 +229,17 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// backlog sits above the setpoint. The caller applies the slew-rate
     /// limit via `slewToward(currentRate:target:maxStep:)`.
     ///
-    /// `arrivalRateEMA` is **intentionally not in the formula** — it is kept
-    /// as a parameter only so the diagnostic tick log can report it. v4 used
+    /// `arrivalRateEMA` is **intentionally not in the formula** and is ignored
+    /// here — it's a v4 vestige kept in the signature only to avoid churning
+    /// the callers (`tick()` and the `pacing-eval` replay harness), which still
+    /// track and log the EMA separately for diagnostics. v4 used
     /// `arrivalRateEMA + correction`, predicting the drain from the long-run
     /// arrival rate; on real data that overshot on bursts and drained the
     /// cushion right before the next gap (the micropause). v5 reacts to the
     /// measured backlog alone, so it can only ever ask to speed *up* (the
     /// negative correction below target is clamped off by the 1.0× floor).
     public static func targetRate(arrivalRateEMA: Double, depthSmooth: Double) -> RateState {
-        _ = arrivalRateEMA  // diagnostic-only; see doc comment for why it's out of the formula
+        _ = arrivalRateEMA  // ignored in v5 (v4 vestige); see doc comment
         let bufferError = depthSmooth - targetBufferSec
         let correction = bufferError * correctionGain
         let unbounded = 1.0 + correction
@@ -236,6 +261,17 @@ public final class PlaybackPacing: @unchecked Sendable {
         let delta = target - currentRate
         let clampedDelta = max(-maxStep, min(maxStep, delta))
         return currentRate + clampedDelta
+    }
+
+    /// Pure catch-up hysteresis. Given the current backlog (`depthSec`) and
+    /// whether we're already catching up, returns the NEW catching-up state.
+    /// The scheduler drops the frame iff this returns true. Enter only when
+    /// the backlog exceeds `catchUpCeilingSec` (a genuine burst); once in,
+    /// keep dropping until it drains to `catchUpFloorSec`. The gap between
+    /// the two thresholds prevents per-frame flip-flopping while a burst is
+    /// still arriving.
+    public static func catchUpDecision(depthSec: Double, catchingUp: Bool) -> Bool {
+        catchingUp ? (depthSec > catchUpFloorSec) : (depthSec > catchUpCeilingSec)
     }
 
     // MARK: - Stored state
@@ -281,6 +317,10 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// Last value actually written to `timePitch.rate`, so we can skip
     /// redundant re-writes of an unchanged rate (see `tick()`).
     private var lastWrittenRate: Float = 1.0
+    /// Latch: true while we're dropping frames to catch up to live after a
+    /// burst blew the queue past `catchUpCeilingSec`. Hysteresis state for
+    /// `catchUpDecision`; reset in `reset()`.
+    private var catchingUp = false
 
     // MARK: - Init / lifecycle
 
@@ -315,6 +355,28 @@ public final class PlaybackPacing: @unchecked Sendable {
     public func didComplete(samples: AVAudioFramePosition) {
         lock.lock(); defer { lock.unlock() }
         completedSamples += samples
+    }
+
+    /// Hard latency gate. Call BEFORE each `scheduleBuffer`; returns `false`
+    /// when the queue is too far behind live (a burst) and the caller should
+    /// DROP the frame instead of scheduling it, so playback resyncs to live
+    /// rather than playing tens of seconds stale. Cheap — a lock + a compare;
+    /// safe on the schedule hot path. The one transition log fires off-lock.
+    public func admit() -> Bool {
+        lock.lock()
+        let depthSec = Double(max(0, scheduledSamples - completedSamples)) / sampleRate
+        let next = Self.catchUpDecision(depthSec: depthSec, catchingUp: catchingUp)
+        let transitioned = next != catchingUp
+        catchingUp = next
+        lock.unlock()
+        if transitioned {
+            if next {
+                log.info("[\(label)] catch-up START — backlog \(String(format: "%.1f", depthSec))s blew past the \(String(format: "%.1f", Self.catchUpCeilingSec))s ceiling (burst after a stall); dropping stale audio to resync to live")
+            } else {
+                log.info("[\(label)] catch-up DONE — drained to \(String(format: "%.1f", depthSec))s; resumed live playback")
+            }
+        }
+        return !next
     }
 
     /// Begin polling buffer depth and adjusting `timePitch.rate`.
@@ -356,6 +418,7 @@ public final class PlaybackPacing: @unchecked Sendable {
         arrivalRateEMA = 1.0
         consumptionRateEMA = 1.0
         depthSmooth = 0
+        catchingUp = false
         // `timePitch.rate` is an `AVAudioUnit` parameter — its setter is
         // documented thread-safe (atomically published to the render
         // block). Safe to touch outside the lock, but we're already

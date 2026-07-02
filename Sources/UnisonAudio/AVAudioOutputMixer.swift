@@ -97,9 +97,25 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// player ran dry) ramps up from silence. Touched only from the mixer
     /// actor's schedule path — no extra locking needed.
     private var lastTranslatedSample: Float = 0
+    /// Host-clock (`DispatchTime`) seconds at which the currently-queued
+    /// translated audio finishes playing. The seam declick reads this to tell a
+    /// REAL underrun (player on silence → ramp the next buffer from 0) from
+    /// jitter the cushion absorbed (queue still has audio → ramp from the last
+    /// sample). Wall-clock based, so it's immune to the `.dataPlayedBack`
+    /// completion lag that made the old `scheduled<=played` test miss brief
+    /// gaps and click. Read/written under `counterLock`; reset in
+    /// `resetPlaybackCounters`.
+    private var translatedQueueEndsAt: Double = 0
     /// Declick ramp length in samples (~2ms at 48k). Long enough to remove a
     /// boundary click, short enough to be inaudible as a smear.
     private static let declickRampSamples = 96
+    /// Diagnostic A/B gate: when `UNISON_DISABLE_DECLICK=1`, skip the seam
+    /// declick entirely so the full-chain click-verification harness
+    /// (`pacing-eval --full-chain-render`) can measure the click floor WITH vs
+    /// WITHOUT the ramp and prove the ramp is what removes the seam clicks.
+    /// Launch-constant (same-process env is immutable).
+    private static let declickDisabled =
+        ProcessInfo.processInfo.environment["UNISON_DISABLE_DECLICK"] == "1"
 
     public init() {
         self.playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
@@ -113,6 +129,18 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// diagnostic state — used by the device-change repro/tests to detect the
     /// engine stopping itself on an `AVAudioEngineConfigurationChange`.
     public var isEngineRunning: Bool { engine.isRunning }
+
+    /// Harness affordance: mute the engine's FINAL output to the audio device
+    /// (mainMixer → outputNode) while leaving the pre-mixer
+    /// `UNISON_DUMP_PLAYBACK_WAV` capture tap intact — it taps `timePitch`,
+    /// upstream of this mixer, so the captured signal is unchanged. Lets the
+    /// full-chain click-verification harness (`pacing-eval --full-chain-render`)
+    /// drive the real production chain (AGC + declick + timePitch + scheduling)
+    /// without blasting translated audio at whoever runs it. No production
+    /// caller — diagnostics only.
+    public func muteFinalOutputForCapture() {
+        mixer.outputVolume = 0
+    }
 
     public func start(deviceUID: String?) async throws {
         Self.log.info("start(deviceUID=\(deviceUID ?? "<system default>"))")
@@ -397,6 +425,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         playedBackBufferCount = 0
         lastScheduleAt = nil
         lastTranslatedSample = 0
+        translatedQueueEndsAt = 0
     }
 
     public func playOriginal(_ frames: AsyncStream<AudioFrame>) async {
@@ -439,6 +468,21 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// same instance used to connect the node graph, so a buffer built
     /// from it is guaranteed accepted.
     private func scheduleTranslated(frame: AudioFrame) {
+        // Hard latency cap. If the queue has blown past the catch-up ceiling
+        // — a burst, e.g. the model dumping tens of seconds of buffered audio
+        // the instant a slow network recovers — DROP this frame so playback
+        // resyncs to live instead of playing ~30 s stale (the "transcript
+        // updates but nothing is voiced" bug). The gentle pacing rate (≤1.06×)
+        // can't drain a multi-second backlog; only dropping can. `admit()`'s
+        // hysteresis keeps dropping until the queue drains to the floor, so we
+        // don't flip-flop mid-burst. Skipping the schedule also skips AGC
+        // adaptation for this frame — intended: we don't chase gain for audio
+        // the listener never hears. The resume AFTER catch-up is deliberately
+        // NOT a resume-from-silence: the floor keeps ~0.5s queued so the player
+        // never truly hits silence, and the wall-clock model below leaves
+        // `resumingFromSilence == false` → the first admitted frame glides from
+        // the last sample over 2ms (smoothing the stale→live seam), not from 0.
+        if let pacing, !pacing.admit() { return }
         // Apply compensating AGC BEFORE building the AVAudioPCMBuffer
         // so the gain ends up baked into the samples we schedule. We
         // chose this over modulating `player.volume` because volume
@@ -502,27 +546,36 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         //    the first non-zero sample steps from the digital silence the
         //    player emitted and clicks.
         //
-        // Dryness signal: `scheduledBufferCount == playedBackBufferCount` —
-        // every scheduled buffer has FINISHED hardware playout (.dataPlayedBack
-        // fired), so nothing is left to render. The completion lag only makes
-        // this read dry LATE, never falsely early (you cannot play back more
-        // than was scheduled), so there are no false positives on a healthy
-        // seam. We deliberately do NOT also trigger on a large `schedGap`: a
-        // normal 0.3–0.8s inter-chunk gap is absorbed by the ~0.75s cushion
-        // (the player keeps playing through it), so gating on the gap would
-        // ramp healthy clause boundaries from 0 — a 2ms notch on exactly the
-        // seams this is meant to smooth.
+        // Dryness signal: a WALL-CLOCK model of when the queued audio ends.
+        // `scheduledBufferCount <= playedBackBufferCount` was unreliable — it
+        // rode the `.dataPlayedBack` completion, which lags real playout by the
+        // HAL/Bluetooth output latency, so a brief gap read "dry" LATE and this
+        // buffer got ramped from a stale non-zero `prevSample` even though the
+        // player had already emitted digital silence → the 0→prevSample resume
+        // click the user heard. Instead we track `translatedQueueEndsAt` (host
+        // time the queued audio finishes): if `now` has passed it, the player
+        // drained → ramp from 0. Cushion-absorbed jitter keeps
+        // `now < translatedQueueEndsAt` (the queue still holds audio), so this
+        // does NOT false-fire on healthy clause boundaries — which is why
+        // gating on the raw `schedGap` was wrong (a late chunk within the
+        // ~0.75s cushion is not a real underrun).
         //
-        // `lastTranslatedSample` is read+written under `counterLock` (this type
-        // is a class, not an actor — it's only serialized in practice by the
-        // single `playTranslated` consumer; the lock guards the stop→restart
-        // handoff where a late in-flight schedule can race the next session's
-        // `resetPlaybackCounters`).
+        // `lastTranslatedSample` / `translatedQueueEndsAt` are read+written
+        // under `counterLock` (this type is a class, not an actor — it's only
+        // serialized in practice by the single `playTranslated` consumer; the
+        // lock guards the stop→restart handoff where a late in-flight schedule
+        // can race the next session's `resetPlaybackCounters`).
+        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+        let bufDurSec = Double(buf.frameLength) / playerFormat.sampleRate / Double(max(0.5, timePitch.rate))
         counterLock.lock()
-        let resumingFromSilence = scheduledBufferCount <= playedBackBufferCount
+        let (resumingFromSilence, newQueueEnd) = Self.seamResumeDecision(
+            now: now, queueEndsAt: translatedQueueEndsAt, bufferDurationSec: bufDurSec)
+        translatedQueueEndsAt = newQueueEnd
         let prevSample = lastTranslatedSample
         counterLock.unlock()
-        declickSeam(buf, from: resumingFromSilence ? 0 : prevSample)
+        if !Self.declickDisabled {
+            Self.declickSeam(buf, from: resumingFromSilence ? 0 : prevSample)
+        }
         if let ch = buf.floatChannelData, buf.frameLength > 0 {
             let last = ch[0][Int(buf.frameLength) - 1]
             counterLock.lock(); lastTranslatedSample = last; counterLock.unlock()
@@ -554,11 +607,17 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
                 // sustained gap > a few buffers indicates real drops.
                 if played % 50 == 0 {
                     let gap = scheduled - played
-                    // Debug-level: this is per-session periodic
-                    // diagnostic; lifecycle (gap suddenly growing
-                    // beyond a threshold) would warrant an info-level
-                    // alert but we don't have one yet.
-                    Self.log.debug("[speakers] playback counters: scheduled=\(scheduled) played=\(played) gap=\(gap)")
+                    // This closure runs on the CoreAudio render/completion
+                    // thread — a real-time context. Building the message
+                    // string and handing it to os_log/UnisonLog must NOT run
+                    // inline here; hop it to a utility queue so a logging
+                    // hiccup can never stall playback. Counters are value
+                    // types, captured by copy. Debug-level: per-session
+                    // periodic diagnostic (a gap growing past a threshold
+                    // would warrant an info alert, but we don't have one yet).
+                    DispatchQueue.global(qos: .utility).async {
+                        Self.log.debug("[speakers] playback counters: scheduled=\(scheduled) played=\(played) gap=\(gap)")
+                    }
                 }
             }
         }
@@ -601,7 +660,9 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// `g = i/n`). `out[0] == start` so playback continues without a step,
     /// and by sample `n` we're back on the real waveform. Runs on the mixer
     /// actor's schedule path (never the render thread) — plain buffer math.
-    private func declickSeam(_ buf: AVAudioPCMBuffer, from start: Float) {
+    /// `static` + `internal` (not `private`) so `DeclickTests` can prove the
+    /// seam-smoothing property deterministically without a live engine.
+    static func declickSeam(_ buf: AVAudioPCMBuffer, from start: Float) {
         guard let ch = buf.floatChannelData else { return }
         let p = ch[0]
         let n = min(Int(buf.frameLength), Self.declickRampSamples)
@@ -610,6 +671,23 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
             let g = Float(i) / Float(n)
             p[i] = start * (1 - g) + p[i] * g
         }
+    }
+
+    /// Pure: model the translated queue's end in host-clock seconds to decide
+    /// whether the player drained to silence before this buffer. Returns
+    /// `(resumingFromSilence, updatedQueueEndsAt)`. `now >= queueEndsAt` ⟺ the
+    /// queue emptied and the player is on digital silence → the caller ramps
+    /// the seam from 0. Otherwise a chunk landed while audio was still queued
+    /// (the cushion absorbed the jitter) → continuous seam, ramp from the last
+    /// sample. The new end is `max(now, queueEndsAt) + bufferDurationSec`: a
+    /// buffer arriving after a drain restarts the clock at `now`; one that
+    /// appends extends the existing queue. `static` + `internal` so it's
+    /// unit-testable without a live engine (see `DeclickTests`).
+    static func seamResumeDecision(now: Double, queueEndsAt: Double,
+                                   bufferDurationSec: Double) -> (resumingFromSilence: Bool, queueEndsAt: Double) {
+        let resuming = now >= queueEndsAt
+        let start = Swift.max(now, queueEndsAt)
+        return (resuming, start + bufferDurationSec)
     }
 
     /// Root-mean-square of a float32 PCM frame, used for periodic
