@@ -285,8 +285,11 @@ public struct CaptureDeviceInfo: Sendable, Equatable {
 
 extension AVAudioEngineMicrophone {
     /// `kIOAudioDeviceTransportTypeBluetooth` ('blue') — the transport
-    /// `AVCaptureDevice.transportType` reports for Bluetooth mics.
+    /// `AVCaptureDevice.transportType` reports for classic Bluetooth mics.
     static let transportBluetooth: UInt32 = 0x626C_7565
+    /// `kAudioDeviceTransportTypeBluetoothLE` ('blea') — LE-Audio headsets;
+    /// their voice profile degrades the output route the same way.
+    static let transportBluetoothLE: UInt32 = 0x626C_6561
     /// `kIOAudioDeviceTransportTypeBuiltIn` ('bltn').
     static let transportBuiltIn: UInt32 = 0x626C_746E
 
@@ -299,7 +302,8 @@ extension AVAudioEngineMicrophone {
     /// always honored, Bluetooth or not.
     static func preferredMicUID(systemDefault: CaptureDeviceInfo?,
                                 available: [CaptureDeviceInfo]) -> String? {
-        guard let systemDefault, systemDefault.transportType == transportBluetooth else {
+        let bluetoothTransports: Set<UInt32> = [transportBluetooth, transportBluetoothLE]
+        guard let systemDefault, bluetoothTransports.contains(systemDefault.transportType) else {
             return nil
         }
         return available.first(where: { $0.transportType == transportBuiltIn })?.uid

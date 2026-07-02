@@ -51,6 +51,17 @@ private let usbMic = CaptureDeviceInfo(uid: "usb-mic", transportType: 0x7573_622
     #expect(pick == "builtin-mic")
 }
 
+@Test func micPolicy_bluetoothLEDefault_prefersBuiltIn() {
+    // LE-Audio headsets report the 'blea' transport, not classic 'blue' —
+    // same voice-profile degradation, same policy.
+    let bleHeadset = CaptureDeviceInfo(
+        uid: "ble-headset-mic",
+        transportType: AVAudioEngineMicrophone.transportBluetoothLE)
+    let pick = AVAudioEngineMicrophone.preferredMicUID(
+        systemDefault: bleHeadset, available: [bleHeadset, builtIn])
+    #expect(pick == "builtin-mic")
+}
+
 @Test func micPolicy_bluetoothDefault_noBuiltIn_keepsDefault() {
     // Nothing better to offer (Mac mini + BT headset only) — keep the
     // default; the output-side hint still tells the user why it's muffled.

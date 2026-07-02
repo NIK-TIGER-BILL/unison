@@ -72,7 +72,12 @@ public final class TranslationOrchestrator {
     /// session №2 reading a stream session №1 already consumed. Started
     /// at init; mixers that don't report (mocks via the protocol default)
     /// finish the stream immediately and the task just ends.
-    private var routeObserverTask: Task<Void, Never>?
+    /// `nonisolated(unsafe)`: written exactly once in `init` and read only
+    /// in `deinit` (which is nonisolated and runs after the last reference
+    /// is gone — no concurrent access is possible); `Task.cancel()` itself
+    /// is thread-safe.
+    @ObservationIgnored
+    nonisolated(unsafe) private var routeObserverTask: Task<Void, Never>?
 
     /// Per-stream health. UI reads the aggregate via
     /// `connectivityHealth`; the diagnostic dialog reads per-speaker for
@@ -296,6 +301,14 @@ public final class TranslationOrchestrator {
                 self?.outputRouteDegraded = degraded
             }
         }
+    }
+
+    deinit {
+        // Unblock the route observer parked on the mixer's never-finishing
+        // stream — matters mostly for tests, which construct hundreds of
+        // orchestrators (each would otherwise park a MainActor task until
+        // its mock mixer deallocates).
+        routeObserverTask?.cancel()
     }
 
     public func start(mode: SessionMode, languages: LanguagePair, settings: Settings = .default) async {
@@ -1602,7 +1615,12 @@ public final class TranslationOrchestrator {
         // (Review finding #1 — the previous version's "captured into
         // a local under main once (above)" comment was lying.)
         let outboundBuffer = audioBufferBySpeaker[.me]
-        let task1 = Task { [stream, outboundBuffer, weak self] in
+        // DETACHED — a plain `Task {}` here inherits the orchestrator's
+        // @MainActor isolation (verified empirically on this toolchain), so
+        // the per-frame body (RMS + resample + batching) would run as
+        // main-queue jobs behind transcript / Liquid-Glass rendering. Same
+        // reasoning as the output pumps below.
+        let task1 = Task.detached(priority: .userInitiated) { [stream, outboundBuffer, weak self] in
             let wireRate = stream.inputWireSampleRate
             var frameIndex = 0
             var firstMarked = false
@@ -1625,15 +1643,11 @@ public final class TranslationOrchestrator {
                 if frameIndex % 10 == 0 {
                     Self.log.debug("mic level — frame=\(frameIndex) rms=\(String(format: "%.5f", rms))")
                 }
-                // Watchdog/slow-detection bookkeeping: hop to the MainActor
-                // WITHOUT awaiting, coalesced to ≤1 hop / 0.5 s — the same
-                // fix the output pumps got. The old per-frame BLOCKING
-                // `MainActor.run` stalled the send loop behind transcript /
-                // Liquid-Glass rendering for every capture frame (mic frames
-                // are CMSampleBuffer-sized, ~10–100 ms), delaying delivery to
-                // the engine under UI load. Coalescing is safe: the audible
-                // stamp feeds windows of 3–4 s (≫ 0.5 s), and the first
-                // frame always hops so the no-data watchdog latches promptly.
+                // Watchdog/slow-detection bookkeeping: fire-and-forget hop
+                // to the MainActor, coalesced to ≤1 hop / 0.5 s. Coalescing
+                // is safe: the audible stamp feeds windows of 3–4 s
+                // (≫ 0.5 s), and the first frame always hops so the no-data
+                // watchdog latches promptly.
                 let audible = rms >= Self.micAudibleRMSThreshold
                 let now = Date()
                 if !firstMarked || (audible && now.timeIntervalSince(lastHealthHopAt) > 0.5) {
@@ -1763,21 +1777,20 @@ public final class TranslationOrchestrator {
         watchdog.start()
         self.silentFrameWatchdog = watchdog
 
-        let splitter = Task { [weak self] in
+        // DETACHED — Process Tap frames are HAL-IO-cycle sized (~10 ms,
+        // ~100/s); a plain `Task {}` would inherit @MainActor and park this
+        // splitter behind transcript / Liquid-Glass rendering ~100× a second
+        // while the peer speaks, delaying BOTH downstream yields
+        // (translation send + original passthrough).
+        let splitter = Task.detached(priority: .userInitiated) { [watchdog, weak self] in
             var lastHealthHopAt = Date.distantPast
             for await frame in peerFrames {
                 watchdog.observe(frame.pcm)
                 // Stamp peer audibility for slow-detection's per-side gate.
-                // RMS is computed off-actor (Self.rms is a pure static); the
-                // MainActor hop is only for the property write — fire it
-                // WITHOUT awaiting, coalesced to ≤1 hop / 0.5 s. Process Tap
-                // frames are HAL-IO-cycle sized (~10 ms, ~100/s), so the old
-                // per-audible-frame BLOCKING `MainActor.run` parked this
-                // splitter behind transcript / Liquid-Glass rendering ~100×
-                // a second while the peer spoke — delaying BOTH downstream
-                // yields (translation send + original passthrough). The
-                // audibility stamp feeds a 4 s window, so 0.5 s staleness is
-                // harmless.
+                // RMS is a pure static; the MainActor hop is only for the
+                // property write — fire it WITHOUT awaiting, coalesced to
+                // ≤1 hop / 0.5 s. The audibility stamp feeds a 4 s window,
+                // so 0.5 s staleness is harmless.
                 let rms = Self.rms(frame)
                 if rms >= Self.micAudibleRMSThreshold {
                     let now = Date()
@@ -1794,7 +1807,9 @@ public final class TranslationOrchestrator {
             translationContinuation.finish()
             passthroughContinuation.finish()
         }
-        let sender = Task { [stream] in
+        // DETACHED — same isolation-inheritance reasoning as the splitter:
+        // the per-frame resample + batching must not run as main-queue jobs.
+        let sender = Task.detached(priority: .userInitiated) { [stream] in
             let wireRate = stream.inputWireSampleRate
             // Coalesce ~10 ms tap frames into ~100 ms sends — see the mic
             // pump's batcher note.

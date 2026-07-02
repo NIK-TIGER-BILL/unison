@@ -238,6 +238,10 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         }
         Self.log.info("AVAudioEngineConfigurationChange — output device/format changed; rebuilding BlackHole 2ch route and restarting")
         player.reset()
+        // The reset flushed the queue — the seam model must restart from
+        // silence, or the first post-reconfigure buffer ramps from a stale
+        // sample against a queue-end that's ahead of reality.
+        resetSeamState()
         do {
             try configureAndStartLocked()
             pacing?.reset()

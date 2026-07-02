@@ -1,3 +1,11 @@
+// swiftlint:disable file_length
+// One deliberately-cohesive engine wrapper (same rationale as
+// TranslationOrchestrator): the seam-declick, gap-concealment and
+// route-quality machinery all mutate the same counterLock-guarded state and
+// are documented inline with their race analyses from the PR #16 review.
+// Splitting to satisfy the length threshold would scatter that state behind
+// internal accessors without reducing real complexity; a large share of the
+// line count is lock-ordering rationale.
 import Foundation
 import AVFoundation
 import CoreAudio
@@ -126,8 +134,19 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// One-shot watcher armed after every real schedule to fire just before
     /// `translatedQueueEndsAt`. If no newer buffer re-armed it by then, the
     /// player is about to run dry mid-stream → schedule the concealment
-    /// fade. Replaced on every schedule; cancelled on stop.
+    /// fade. Replaced on every schedule; cancelled on stop/reconfigure.
+    /// The REFERENCE is guarded by `counterLock` (written from the
+    /// `playTranslated` consumer, cancelled from `stop()` under `engineLock`
+    /// and from the next session's `resetPlaybackCounters` — three different
+    /// tasks; `Task.cancel()` itself is thread-safe, the property swap is not).
     private var concealWatcher: Task<Void, Never>?
+    /// True between `stop()` and the next session's `resetPlaybackCounters`.
+    /// Guarded by `counterLock`. Closes the stale-fire hole: an in-flight
+    /// `scheduleTranslated` racing `stop()` could otherwise arm a FRESH
+    /// watcher whose fire passes the queue-end guard (counters reset only at
+    /// the NEXT `playTranslated`) and schedules a 200 ms ghost fade onto the
+    /// just-reset player — which would then play at the next session's start.
+    private var concealSessionStopped = false
 
     /// Route-quality event channel the orchestrator subscribes to (see
     /// `AudioOutputMixer.routeDegradedEvents`). One long-lived stream per
@@ -313,6 +332,20 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         // buffers cleanly before we reconnect and restart.
         translatedPlayer.reset()
         originalPlayer.reset()
+        // The reset flushed the real queue, so the seam/conceal model must
+        // restart from silence: a parked watcher would otherwise pass its
+        // queue-end guard (nothing else moves it) and schedule 200 ms of
+        // PRE-reconfigure audio onto the rebuilt graph, and the next real
+        // buffer would ramp from a stale sample instead of 0. HFP↔A2DP
+        // profile flips make reconfigures a first-class mid-session event.
+        counterLock.lock()
+        concealWatcher?.cancel()
+        concealWatcher = nil
+        concealTail = []
+        concealedSinceLastReal = false
+        lastTranslatedSample = 0
+        translatedQueueEndsAt = 0
+        counterLock.unlock()
         do {
             try configureGraphAndStartLocked(deviceUID: currentDeviceUID)
             Self.log.info("reconfigure — engine restarted on the current device (isRunning=\(engine.isRunning))")
@@ -458,8 +491,10 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// from inside an async function, so the counter reset lives here
     /// and is called from `playTranslated`.
     private func resetPlaybackCounters() {
-        concealWatcher?.cancel()
         counterLock.lock(); defer { counterLock.unlock() }
+        concealWatcher?.cancel()
+        concealWatcher = nil
+        concealSessionStopped = false
         scheduledBufferCount = 0
         playedBackBufferCount = 0
         lastScheduleAt = nil
@@ -489,10 +524,20 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         started = false
         configObserver?.stop()
         pacing?.stop()
-        // A parked concealment watcher must not fire into a torn-down
-        // engine; the schedule it might have issued is cleared by the
-        // player reset below anyway — this just silences the no-op.
+        // Kill the concealment machinery for the rest of this session: a
+        // parked watcher must not fire into the torn-down engine, and — the
+        // subtler hole — an in-flight `scheduleTranslated` (the schedule
+        // path deliberately doesn't take `engineLock`) must not ARM a fresh
+        // watcher after this point: its fire would pass the queue-end guard
+        // and park a ghost 200 ms fade on the reset player, to be played at
+        // the START of the next session. `concealSessionStopped` gates both
+        // arming and firing; the next `playTranslated` clears it.
+        counterLock.lock()
+        concealSessionStopped = true
         concealWatcher?.cancel()
+        concealWatcher = nil
+        concealTail = []
+        counterLock.unlock()
         closePlaybackDumpIfNeeded()
         // Reset (not stop) the players. `AVAudioPlayerNode.stop()` flushes the
         // pending `.dataPlayedBack` completion handlers from `scheduleTranslated`,
@@ -528,7 +573,15 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         // never truly hits silence, and the wall-clock model below leaves
         // `resumingFromSilence == false` → the first admitted frame glides from
         // the last sample over 2ms (smoothing the stale→live seam), not from 0.
-        if let pacing, !pacing.admit() { return }
+        if let pacing, !pacing.admit() {
+            // Catch-up drop: clear the cadence clock so the FIRST admitted
+            // frame after the drop spell doesn't log a spurious
+            // `[sched-stall]` for the gap the drops themselves created.
+            counterLock.lock()
+            lastScheduleAt = nil
+            counterLock.unlock()
+            return
+        }
         // Apply compensating AGC BEFORE building the AVAudioPCMBuffer
         // so the gain ends up baked into the samples we schedule. We
         // chose this over modulating `player.volume` because volume
@@ -702,6 +755,10 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// stale `armedQueueEnd` is a no-op.
     private func armConcealmentWatcher(armedQueueEnd: Double) {
         if GapConcealment.disabled { return }
+        counterLock.lock(); defer { counterLock.unlock() }
+        // A schedule racing `stop()` must not resurrect the machinery the
+        // stop just tore down — the ghost fade would play next session.
+        guard !concealSessionStopped else { return }
         concealWatcher?.cancel()
         concealWatcher = Task.detached(priority: .userInitiated) { [weak self] in
             let now = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
@@ -716,10 +773,23 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// Watcher body: if no real buffer arrived since arming (the queue-end
     /// model is unchanged) and we're not deliberately dropping to catch up,
     /// schedule ONE synthetic fade built from the last real tail.
+    ///
+    /// The dry-check and the commit are TWO lock sections with ~1 ms of
+    /// synthesis between them — and that window is adversarially placed: the
+    /// watcher fires at queueEnd−20 ms, exactly when a just-in-time real
+    /// chunk tends to land. The commit therefore RE-validates the sentinels
+    /// (a real buffer always moves `translatedQueueEndsAt` and clears
+    /// `concealedSinceLastReal`) and holds `counterLock` across the
+    /// `scheduleBuffer` call itself, so a racing real chunk can never end up
+    /// ordered BEFORE the concealment in the player queue (which would play
+    /// a 200 ms ghost echo of pre-gap material after fresh audio). Safe to
+    /// hold: `scheduleBuffer` is non-blocking and its `.dataPlayedBack`
+    /// completion is always delivered asynchronously — no lock reentry.
     private func fireConcealmentIfStillDry(armedQueueEnd: Double) {
         if let pacing, pacing.isCatchingUp { return }
         counterLock.lock()
-        guard translatedQueueEndsAt == armedQueueEnd,
+        guard !concealSessionStopped,
+              translatedQueueEndsAt == armedQueueEnd,
               !concealedSinceLastReal,
               !concealTail.isEmpty else {
             counterLock.unlock()
@@ -743,12 +813,20 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         }
         let durSec = Double(samples.count) / 48_000.0
         let now = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+        let frameLength = buf.frameLength
         counterLock.lock()
+        // Re-validate: a real chunk that landed during synthesis wins — it
+        // moved the queue end and re-opened the dry-spell latch; scheduling
+        // the stale fade behind it would be the artifact, not the cure.
+        guard !concealSessionStopped,
+              translatedQueueEndsAt == armedQueueEnd,
+              concealedSinceLastReal else {
+            counterLock.unlock()
+            return
+        }
         translatedQueueEndsAt = Swift.max(now, translatedQueueEndsAt) + durSec
         lastTranslatedSample = samples.last ?? 0
         scheduledBufferCount += 1
-        counterLock.unlock()
-        let frameLength = buf.frameLength
         translatedPlayer.scheduleBuffer(
             buf, at: nil, completionCallbackType: .dataPlayedBack
         ) { [weak self, weak pacing] _ in
@@ -759,6 +837,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
                 self.counterLock.unlock()
             }
         }
+        counterLock.unlock()
         pacing?.didSchedule(samples: AVAudioFramePosition(frameLength))
         Self.log.info("[conceal speakers] queue about to run dry — scheduled"
             + " \(Int(durSec * 1000))ms pitch-continuation fade instead of a hard cut"
