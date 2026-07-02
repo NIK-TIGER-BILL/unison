@@ -27,7 +27,19 @@ public final class MockAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     public var blockStopUntilReleased = false
     private let stopGate = DispatchSemaphore(value: 0)
 
-    public init() {}
+    /// Route-quality event channel (overrides the protocol's inert default)
+    /// — lets tests simulate the mixer negotiating a narrowband (Bluetooth
+    /// HFP) or full-quality output route via `emitRouteDegraded`.
+    public let routeDegradedEvents: AsyncStream<Bool>
+    private let routeContinuation: AsyncStream<Bool>.Continuation
+
+    public init() {
+        (routeDegradedEvents, routeContinuation) = AsyncStream.makeStream(of: Bool.self)
+    }
+
+    public func emitRouteDegraded(_ degraded: Bool) {
+        routeContinuation.yield(degraded)
+    }
     public func start(deviceUID: String?) async throws { startedWithUID = .some(deviceUID) }
     public func playTranslated(_ frames: AsyncStream<AudioFrame>) async {
         translatedTaskActive = true

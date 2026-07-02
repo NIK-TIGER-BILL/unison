@@ -63,6 +63,16 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
     /// applied to the translated me-stream that the peer will hear
     /// through the virtual mic.
     private let agc = CompensatingAGCRunner()
+    /// Seam-declick state — parity with `AVAudioOutputMixer`'s translated
+    /// path (the peer used to hear the boundary clicks the local listener
+    /// didn't). `lastSample` = final sample of the previous buffer;
+    /// `queueEndsAt` = host-clock second the queued audio finishes, the
+    /// wall-clock dryness model `SeamDeclick.resumeDecision` reads. Guarded
+    /// by `seamLock`: `schedule` runs on the `play(_:)` consumer task while
+    /// `play(_:)`'s reset can belong to the next session after a stop-restart.
+    private let seamLock = NSLock()
+    private var lastSample: Float = 0
+    private var queueEndsAt: Double = 0
 
     /// Test-only WAV capture handle. When `UNISON_DUMP_OUTPUT_WAV=path` is
     /// set in the process environment, every scheduled frame's float32 PCM
@@ -97,6 +107,7 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         pacing?.reset()
         pacing?.start()
         agc.reset()
+        resetSeamState()
         for await frame in frames {
             schedule(frame)
         }
@@ -111,9 +122,27 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         started = false
         configObserver?.stop()
         pacing?.stop()
-        player.stop()
+        // Reset (not stop) the player — parity with AVAudioOutputMixer.stop().
+        // `AVAudioPlayerNode.stop()` flushes the pending completion handlers
+        // (our pacing `didComplete` hooks), and that flush wedges inside
+        // coreaudiod whenever a CoreAudio Process Tap was active in the
+        // session (the Stop-hang root cause, VM-verified 3/3 on the mixer).
+        // `.call` mode — the only mode that runs this player — ALWAYS has the
+        // tap active, so this path was still carrying the wedge-prone call.
+        // `reset()` clears the scheduled buffers without the flush.
+        player.reset()
         engine.stop()
         closeDumpFileIfNeeded()
+    }
+
+    /// Sync helper — Swift 6 strict concurrency disallows `NSLock.lock`
+    /// from inside an async function, so the seam-state reset lives here
+    /// and is called from `play(_:)`. Same pattern as
+    /// `AVAudioOutputMixer.resetPlaybackCounters`.
+    private func resetSeamState() {
+        seamLock.lock(); defer { seamLock.unlock() }
+        lastSample = 0
+        queueEndsAt = 0
     }
 
     private func startIfNeeded() throws {
@@ -232,6 +261,13 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
             }
             return
         }
+        // Hard latency cap — parity with the speakers path. After a network
+        // stall recovers, the model dumps a multi-second burst; the gentle
+        // pacing rate (≤1.06×) can't drain it, so without this gate the PEER
+        // keeps hearing tens-of-seconds-stale translation long after the
+        // local listener resynced. Drop until the queue drains to the floor
+        // (`admit()`'s hysteresis), resyncing the virtual mic to live.
+        if let pacing, !pacing.admit() { return }
         // Compensating AGC for `gpt-realtime-translate`'s amplitude
         // fade — same controller the speakers path uses. Applied here
         // so the peer (who hears our translated voice through their
@@ -247,6 +283,27 @@ public final class BlackHole2chPlayer: AudioPlayer, @unchecked Sendable {
         boostedPCM.withUnsafeBytes { raw in
             let p = raw.bindMemory(to: Float.self).baseAddress!
             memcpy(buf.floatChannelData![0], p, boostedPCM.count)
+        }
+
+        // Seam declick — parity with the speakers path: ramp the first ~2 ms
+        // from where the audio actually left off (previous buffer's last
+        // sample, or 0 after the player drained), so resampler/AGC boundary
+        // steps and resume-from-silence onsets don't click in the peer's ear.
+        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+        let bufDurSec = Double(buf.frameLength) / playerFormat.sampleRate
+            / Double(max(0.5, timePitch.rate))
+        seamLock.lock()
+        let (resumingFromSilence, newQueueEnd) = SeamDeclick.resumeDecision(
+            now: now, queueEndsAt: queueEndsAt, bufferDurationSec: bufDurSec)
+        queueEndsAt = newQueueEnd
+        let prevSample = lastSample
+        seamLock.unlock()
+        if !SeamDeclick.disabled {
+            SeamDeclick.ramp(buf, from: resumingFromSilence ? 0 : prevSample)
+        }
+        if let ch = buf.floatChannelData, buf.frameLength > 0 {
+            let last = ch[0][Int(buf.frameLength) - 1]
+            seamLock.lock(); lastSample = last; seamLock.unlock()
         }
         if chunkIndex % 10 == 0 {
             let rmsIn = Self.rms(frame)

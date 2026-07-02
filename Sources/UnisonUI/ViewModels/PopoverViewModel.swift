@@ -53,6 +53,10 @@ public final class PopoverViewModel {
     /// real orchestrator.
     var previewConnectivityHealth: ConnectivityHealth = .healthy
 
+    /// Test-only override for `outputRouteDegraded` — same contract as
+    /// `previewConnectivityHealth`.
+    var previewOutputRouteDegraded: Bool = false
+
     /// Monotonic tick bumped whenever the *environment* changes —
     /// device list, BlackHole install, mic permission grant. The
     /// `startBlockedReason` computation reads it (via `_ = envTick`)
@@ -110,7 +114,8 @@ public final class PopoverViewModel {
         state: SessionState = .idle,
         permissions: any PermissionsService,
         deviceRegistry: any AudioDeviceRegistry,
-        connectivityHealth: ConnectivityHealth = .healthy
+        connectivityHealth: ConnectivityHealth = .healthy,
+        outputRouteDegraded: Bool = false
     ) -> PopoverViewModel {
         let vm = PopoverViewModel(
             permissions: permissions,
@@ -119,6 +124,7 @@ public final class PopoverViewModel {
             previewState: state
         )
         vm.previewConnectivityHealth = connectivityHealth
+        vm.previewOutputRouteDegraded = outputRouteDegraded
         return vm
     }
 
@@ -131,6 +137,13 @@ public final class PopoverViewModel {
     /// fallback so the property is well-defined in every state.
     public var connectivityHealth: ConnectivityHealth {
         orchestrator?.connectivityHealth ?? previewConnectivityHealth
+    }
+
+    /// Whether the output device is on a narrowband Bluetooth voice route
+    /// (HFP) — the "muffled / behind a wall / quieter" sound. Read from the
+    /// orchestrator, preview fallback for snapshots.
+    public var outputRouteDegraded: Bool {
+        orchestrator?.outputRouteDegraded ?? previewOutputRouteDegraded
     }
 
     public var runningTimeSeconds: TimeInterval {
@@ -194,7 +207,12 @@ public final class PopoverViewModel {
             switch connectivityHealth {
             case .slow: return "Медленная сеть"
             case .recovering: return "Связь восстановлена"
-            case .healthy: return ""
+            case .healthy:
+                // Network hints above are transient and more actionable, so
+                // they own the line when present; otherwise explain a muffled
+                // Bluetooth voice route (the user hears it as degraded
+                // translation and has no other clue why).
+                return outputRouteDegraded ? "Bluetooth-гарнитура ухудшает звук" : ""
             }
         }
     }

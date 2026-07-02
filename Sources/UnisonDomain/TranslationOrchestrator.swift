@@ -52,6 +52,28 @@ public final class TranslationOrchestrator {
         }
     }
 
+    /// Latest output-route quality reported by the mixer: `true` while the
+    /// output device is on a narrowband Bluetooth VOICE profile (HFP) —
+    /// the "muffled, behind-a-wall, quieter" route macOS forces on a
+    /// headset whenever something opens its mic. Field-log-confirmed
+    /// (16 000 Hz × 1 ch mid-session). The popover surfaces this as a hint
+    /// so the user knows the audio path, not the translation, degraded.
+    /// Driven by `routeObserverTask`; cleared on stop.
+    public private(set) var outputRouteDegraded = false {
+        didSet {
+            if oldValue != outputRouteDegraded {
+                Self.log.info("outputRouteDegraded \(oldValue) → \(self.outputRouteDegraded)")
+            }
+        }
+    }
+    /// Long-lived subscription to `outputMixer.routeDegradedEvents`. One
+    /// per orchestrator (NOT per session): an `AsyncStream` supports a
+    /// single consumer, so re-subscribing on every `start()` would leave
+    /// session №2 reading a stream session №1 already consumed. Started
+    /// at init; mixers that don't report (mocks via the protocol default)
+    /// finish the stream immediately and the task just ends.
+    private var routeObserverTask: Task<Void, Never>?
+
     /// Per-stream health. UI reads the aggregate via
     /// `connectivityHealth`; the diagnostic dialog reads per-speaker for
     /// asymmetric-failure debugging.
@@ -266,6 +288,14 @@ public final class TranslationOrchestrator {
         self.transformer = transformer
         self.networkMonitor = networkMonitor
         self.meetingStore = meetingStore
+        // Subscribe to the mixer's route-quality events for the life of the
+        // orchestrator (see `routeObserverTask` for why not per-session).
+        let routeEvents = outputMixer.routeDegradedEvents
+        routeObserverTask = Task { @MainActor [weak self] in
+            for await degraded in routeEvents {
+                self?.outputRouteDegraded = degraded
+            }
+        }
     }
 
     public func start(mode: SessionMode, languages: LanguagePair, settings: Settings = .default) async {
@@ -485,17 +515,6 @@ public final class TranslationOrchestrator {
         if rms >= Self.micAudibleRMSThreshold {
             lastAudiblePeerAt = clock.now()
         }
-    }
-
-    /// Periodic mic level snapshot — logged every Nth frame so users
-    /// hitting the "no transcript appears" symptom can see in the
-    /// diagnostic whether the mic gain ramped up when they spoke
-    /// (RMS going from 0.0001 → 0.05 means the mic is hot) or stayed
-    /// dead-flat (RMS pegged at near-zero → mic is muted/wrong-device).
-    func logMicLevel(rms: Float, frameIndex: Int) {
-        // 1 log per second at 100ms frames (= every 10th frame).
-        guard frameIndex % 10 == 0 else { return }
-        Self.log.debug("mic level — frame=\(frameIndex) rms=\(String(format: "%.5f", rms))")
     }
 
     /// Called by the wire-in pipelines on first server delta (audio
@@ -1286,6 +1305,9 @@ public final class TranslationOrchestrator {
         lastAudibleMicAt = nil
         lastAudiblePeerAt = nil
         connectivityHealth = .healthy
+        // The engine is being torn down — whatever route it had negotiated
+        // is gone with it; a stale hint must not outlive the session.
+        outputRouteDegraded = false
         silentFrameWatchdog?.stop()
         silentFrameWatchdog = nil
         for t in globalTasks { t.cancel() }
@@ -1580,6 +1602,8 @@ public final class TranslationOrchestrator {
         let task1 = Task { [stream, outboundBuffer, weak self] in
             let wireRate = stream.inputWireSampleRate
             var frameIndex = 0
+            var firstMarked = false
+            var lastHealthHopAt = Date.distantPast
             for await frame in micFrames {
                 // First mic frame proves the capture engine spun up
                 // and the tap is delivering — watchdog uses this to
@@ -1589,12 +1613,30 @@ public final class TranslationOrchestrator {
                 // (real audio) or pegged at silence (muted / wrong
                 // device / system gain at 0).
                 let rms = Self.rms(frame)
-                let formatLabel = String(describing: frame.format)
-                let sampleRate = frame.sampleRate
-                let idx = frameIndex
-                await MainActor.run { [weak self] in
-                    self?.markMicFrameReceived(format: formatLabel, sampleRate: sampleRate, rms: rms)
-                    self?.logMicLevel(rms: rms, frameIndex: idx)
+                // Periodic mic-level diagnostic, logged straight from the
+                // pump — UnisonLog is thread-safe, no MainActor needed.
+                if frameIndex % 10 == 0 {
+                    Self.log.debug("mic level — frame=\(frameIndex) rms=\(String(format: "%.5f", rms))")
+                }
+                // Watchdog/slow-detection bookkeeping: hop to the MainActor
+                // WITHOUT awaiting, coalesced to ≤1 hop / 0.5 s — the same
+                // fix the output pumps got. The old per-frame BLOCKING
+                // `MainActor.run` stalled the send loop behind transcript /
+                // Liquid-Glass rendering for every capture frame (mic frames
+                // are CMSampleBuffer-sized, ~10–100 ms), delaying delivery to
+                // the engine under UI load. Coalescing is safe: the audible
+                // stamp feeds windows of 3–4 s (≫ 0.5 s), and the first
+                // frame always hops so the no-data watchdog latches promptly.
+                let audible = rms >= Self.micAudibleRMSThreshold
+                let now = Date()
+                if !firstMarked || (audible && now.timeIntervalSince(lastHealthHopAt) > 0.5) {
+                    firstMarked = true
+                    lastHealthHopAt = now
+                    let formatLabel = String(describing: frame.format)
+                    let sampleRate = frame.sampleRate
+                    Task { @MainActor [weak self] in
+                        self?.markMicFrameReceived(format: formatLabel, sampleRate: sampleRate, rms: rms)
+                    }
                 }
                 let wire = transformer.toWire(frame, sampleRate: wireRate)
                 outboundBuffer?.append(wire)
@@ -1708,18 +1750,28 @@ public final class TranslationOrchestrator {
         self.silentFrameWatchdog = watchdog
 
         let splitter = Task { [weak self] in
+            var lastHealthHopAt = Date.distantPast
             for await frame in peerFrames {
                 watchdog.observe(frame.pcm)
-                // Stamp peer audibility for slow-detection's per-side
-                // gate. RMS is computed off-actor (Self.rms is a pure
-                // static); the MainActor hop is only for the property
-                // write. We avoid hopping on every frame by checking
-                // the threshold here first and skipping the hop when
-                // it'd be a no-op.
+                // Stamp peer audibility for slow-detection's per-side gate.
+                // RMS is computed off-actor (Self.rms is a pure static); the
+                // MainActor hop is only for the property write — fire it
+                // WITHOUT awaiting, coalesced to ≤1 hop / 0.5 s. Process Tap
+                // frames are HAL-IO-cycle sized (~10 ms, ~100/s), so the old
+                // per-audible-frame BLOCKING `MainActor.run` parked this
+                // splitter behind transcript / Liquid-Glass rendering ~100×
+                // a second while the peer spoke — delaying BOTH downstream
+                // yields (translation send + original passthrough). The
+                // audibility stamp feeds a 4 s window, so 0.5 s staleness is
+                // harmless.
                 let rms = Self.rms(frame)
                 if rms >= Self.micAudibleRMSThreshold {
-                    await MainActor.run { [weak self] in
-                        self?.markPeerFrameReceived(rms: rms)
+                    let now = Date()
+                    if now.timeIntervalSince(lastHealthHopAt) > 0.5 {
+                        lastHealthHopAt = now
+                        Task { @MainActor [weak self] in
+                            self?.markPeerFrameReceived(rms: rms)
+                        }
                     }
                 }
                 translationContinuation.yield(frame)

@@ -89,6 +89,13 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// completion counters); this only measures how steadily frames reach
     /// the player.
     private var lastScheduleAt: Date?
+    /// Duration (ms) of the previously-scheduled chunk — the expected
+    /// inter-schedule cadence. `isSchedStall` compares each gap against it
+    /// instead of a fixed threshold: the model ships 250–400 ms chunks at
+    /// real-time rate, so a fixed 250 ms fired on nearly every healthy chunk
+    /// (145 false stalls in one field log). Guarded by `counterLock` with
+    /// `lastScheduleAt`.
+    private var lastScheduledChunkDurMs: Double = 0
     /// Last sample value of the previously-scheduled translated buffer, used
     /// to declick chunk seams: the first samples of each new buffer are
     /// ramped from this value so a boundary discontinuity (resampler reset
@@ -106,16 +113,18 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// gaps and click. Read/written under `counterLock`; reset in
     /// `resetPlaybackCounters`.
     private var translatedQueueEndsAt: Double = 0
-    /// Declick ramp length in samples (~2ms at 48k). Long enough to remove a
-    /// boundary click, short enough to be inaudible as a smear.
-    private static let declickRampSamples = 96
-    /// Diagnostic A/B gate: when `UNISON_DISABLE_DECLICK=1`, skip the seam
-    /// declick entirely so the full-chain click-verification harness
-    /// (`pacing-eval --full-chain-render`) can measure the click floor WITH vs
-    /// WITHOUT the ramp and prove the ramp is what removes the seam clicks.
-    /// Launch-constant (same-process env is immutable).
-    private static let declickDisabled =
-        ProcessInfo.processInfo.environment["UNISON_DISABLE_DECLICK"] == "1"
+    // Seam-declick ramp + A/B gate live in `SeamDeclick`, shared with
+    // `BlackHole2chPlayer` so the peer path gets the same treatment.
+
+    /// Route-quality event channel the orchestrator subscribes to (see
+    /// `AudioOutputMixer.routeDegradedEvents`). One long-lived stream per
+    /// mixer instance; `configureGraphAndStartLocked` yields the verdict
+    /// after every (re)configuration — which is exactly when a Bluetooth
+    /// HFP↔A2DP profile flip lands (each flip posts a
+    /// `AVAudioEngineConfigurationChange` and rebuilds the graph).
+    public var routeDegradedEvents: AsyncStream<Bool> { routeEvents }
+    private let routeEvents: AsyncStream<Bool>
+    private let routeContinuation: AsyncStream<Bool>.Continuation
 
     public init() {
         self.playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
@@ -123,6 +132,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
                                           channels: 1,
                                           interleaved: false)!
         self.mixer = engine.mainMixerNode
+        (routeEvents, routeContinuation) = AsyncStream.makeStream(of: Bool.self)
     }
 
     /// Whether the underlying `AVAudioEngine` is currently running. Read-only
@@ -211,6 +221,21 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         originalPlayer.play()
         let outFormat = engine.outputNode.outputFormat(forBus: 0)
         Self.log.info("start — engine running; outputNode format: \(outFormat.sampleRate)Hz × \(outFormat.channelCount)ch; ready to schedule buffers")
+        // Route-quality verdict for THIS configuration. A narrowband route
+        // (< 40 kHz) means the output device is on a Bluetooth VOICE profile
+        // (HFP — field log: 16000 Hz × 1 ch mid-session): everything the user
+        // hears is muffled and quieter until the headset returns to A2DP.
+        // Yield on every configure so a mid-session profile flip updates the
+        // orchestrator's `outputRouteDegraded` (and the popover hint) live.
+        let narrowband = Self.isNarrowbandRoute(sampleRate: outFormat.sampleRate,
+                                                channels: Int(outFormat.channelCount))
+        if narrowband {
+            Self.log.error("[route-degraded] output route is narrowband"
+                + " (\(outFormat.sampleRate)Hz × \(outFormat.channelCount)ch) — Bluetooth voice"
+                + " profile (HFP): audio will sound muffled/quiet until the headset"
+                + " returns to A2DP (usually when its mic is released)")
+        }
+        routeContinuation.yield(narrowband)
 
         // Diagnostic dump: if `UNISON_DUMP_PLAYBACK_WAV=<path>` is set,
         // install a tap on the timePitch output and stream every render
@@ -424,6 +449,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         scheduledBufferCount = 0
         playedBackBufferCount = 0
         lastScheduleAt = nil
+        lastScheduledChunkDurMs = 0
         lastTranslatedSample = 0
         translatedQueueEndsAt = 0
     }
@@ -520,17 +546,21 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         // `[UNDERRUN speakers]`), which uses the real .dataPlayedBack
         // completion counters rather than the version-sensitive
         // playerTime clock.
+        let chunkDurMs = Double(frameLength) / 48.0
         counterLock.lock()
         let nowAt = Date()
         let schedGapMs = lastScheduleAt.map { nowAt.timeIntervalSince($0) * 1000 } ?? 0
         lastScheduleAt = nowAt
+        let prevChunkDurMs = lastScheduledChunkDurMs
+        lastScheduledChunkDurMs = chunkDurMs
         counterLock.unlock()
         Self.log.debug("[sched speakers] schedGap=\(Int(schedGapMs))ms"
-            + " frame=\(String(format: "%.0f", Double(frameLength) / 48.0))ms"
+            + " frame=\(String(format: "%.0f", chunkDurMs))ms"
             + " rate=\(String(format: "%.3f", Double(timePitch.rate)))")
-        if schedGapMs > 250 {
+        if Self.isSchedStall(gapMs: schedGapMs, prevChunkDurMs: prevChunkDurMs) {
             Self.log.info("[sched-stall speakers] \(Int(schedGapMs))ms gap before this frame reached"
-                + " the player — upstream starved (cross-check [audio-rx]/[pump peer])")
+                + " the player (cadence ≈\(Int(prevChunkDurMs))ms) — upstream starved"
+                + " (cross-check [audio-rx]/[pump peer])")
         }
         // --- end instrumentation ---
 
@@ -573,7 +603,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         translatedQueueEndsAt = newQueueEnd
         let prevSample = lastTranslatedSample
         counterLock.unlock()
-        if !Self.declickDisabled {
+        if !SeamDeclick.disabled {
             Self.declickSeam(buf, from: resumingFromSilence ? 0 : prevSample)
         }
         if let ch = buf.floatChannelData, buf.frameLength > 0 {
@@ -655,22 +685,38 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         return buf
     }
 
-    /// Ramp the first `declickRampSamples` of `buf` from `start` into the
-    /// actual signal (linear blend `out[i] = start·(1−g) + signal[i]·g`,
-    /// `g = i/n`). `out[0] == start` so playback continues without a step,
-    /// and by sample `n` we're back on the real waveform. Runs on the mixer
-    /// actor's schedule path (never the render thread) — plain buffer math.
-    /// `static` + `internal` (not `private`) so `DeclickTests` can prove the
-    /// seam-smoothing property deterministically without a live engine.
+    /// Thin wrapper over the shared `SeamDeclick.ramp` — kept as a `static`
+    /// on this type so `DeclickTests` (which prove the seam-smoothing
+    /// property deterministically without a live engine) keep their
+    /// call-site, and so the mixer's schedule path reads uniformly.
     static func declickSeam(_ buf: AVAudioPCMBuffer, from start: Float) {
-        guard let ch = buf.floatChannelData else { return }
-        let p = ch[0]
-        let n = min(Int(buf.frameLength), Self.declickRampSamples)
-        guard n > 1 else { return }
-        for i in 0..<n {
-            let g = Float(i) / Float(n)
-            p[i] = start * (1 - g) + p[i] * g
-        }
+        SeamDeclick.ramp(buf, from: start)
+    }
+
+    /// Pure: is the negotiated output route narrowband — i.e. the device is
+    /// running a Bluetooth VOICE profile (HFP/mSBC 16 kHz, CVSD 8 kHz,
+    /// AirPods wideband 24 kHz, LE-Audio voice 32 kHz) instead of its music
+    /// profile (A2DP 44.1/48 kHz)? macOS forces that flip whenever something
+    /// opens the headset's own mic; everything the user hears collapses to a
+    /// muffled, quieter band — the field-log 16000 Hz × 1 ch route behind the
+    /// "behind a wall" reports. Full-quality routes are ≥44.1 kHz, so the
+    /// <40 kHz cut cleanly separates the voice profiles without flagging
+    /// mono-but-full-rate USB routes. `static` + `internal` for tests.
+    static func isNarrowbandRoute(sampleRate: Double, channels: Int) -> Bool {
+        _ = channels  // mono alone is not evidence — some USB routes are mono
+        return sampleRate > 0 && sampleRate < 40_000
+    }
+
+    /// Pure: is an inter-schedule gap a genuine upstream stall? The expected
+    /// cadence is the PREVIOUS chunk's duration (the model delivers ~real-time,
+    /// so the next chunk lands roughly one chunk-duration later); only a gap
+    /// exceeding that plus a 150 ms jitter margin is a stall. The 400 ms floor
+    /// keeps tiny chunks (a 40 ms tail) from making the detector hair-trigger.
+    /// A fixed 250 ms threshold sat BELOW the natural 250–400 ms cadence and
+    /// produced 145 false stalls in one field session, drowning the real one.
+    /// `static` + `internal` for `SchedStallTests`.
+    static func isSchedStall(gapMs: Double, prevChunkDurMs: Double) -> Bool {
+        gapMs > Swift.max(400, prevChunkDurMs + 150)
     }
 
     /// Pure: model the translated queue's end in host-clock seconds to decide
@@ -685,9 +731,8 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// unit-testable without a live engine (see `DeclickTests`).
     static func seamResumeDecision(now: Double, queueEndsAt: Double,
                                    bufferDurationSec: Double) -> (resumingFromSilence: Bool, queueEndsAt: Double) {
-        let resuming = now >= queueEndsAt
-        let start = Swift.max(now, queueEndsAt)
-        return (resuming, start + bufferDurationSec)
+        SeamDeclick.resumeDecision(now: now, queueEndsAt: queueEndsAt,
+                                   bufferDurationSec: bufferDurationSec)
     }
 
     /// Root-mean-square of a float32 PCM frame, used for periodic
