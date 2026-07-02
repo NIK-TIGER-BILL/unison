@@ -361,6 +361,15 @@ public final class PlaybackPacing: @unchecked Sendable {
         completedSamples += samples
     }
 
+    /// Read-only snapshot of the catch-up latch. The gap-concealment
+    /// watcher checks it so a synthetic fade is never scheduled while the
+    /// scheduler is deliberately DROPPING frames to resync to live (the
+    /// queue is seconds deep then — a "dry player" reading would be wrong).
+    public var isCatchingUp: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return catchingUp
+    }
+
     /// Hard latency gate. Call BEFORE each `scheduleBuffer`; returns `false`
     /// when the queue is too far behind live (a burst) and the caller should
     /// DROP the frame instead of scheduling it, so playback resyncs to live

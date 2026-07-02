@@ -7,7 +7,9 @@ import UnisonDomain
 /// concurrency; wrapping it in a class with a locked accessor keeps the
 /// closure non-mutating while preserving the "feed input once, then EOS"
 /// pattern that AVAudioConverter requires when draining its internal tail.
-private final class ConverterInputState: @unchecked Sendable {
+/// `internal` (not `private`): `StreamingResampler` reuses it for its
+/// "feed input once, then `.noDataNow`" streaming variant.
+final class ConverterInputState: @unchecked Sendable {
     private var buffer: AVAudioPCMBuffer?
     private let lock = NSLock()
 
@@ -102,7 +104,8 @@ public enum Resampler {
     /// `CMSampleBuffer` audio carry interleaved layouts, and the
     /// captures reduce planar (non-interleaved) buffers to their first
     /// plane before frames enter the pipeline. No-op for mono input.
-    private static func mixdownToMono(_ frame: AudioFrame) -> AudioFrame {
+    /// `internal`: shared with `StreamingResampler`.
+    static func mixdownToMono(_ frame: AudioFrame) -> AudioFrame {
         guard frame.channels > 1 else { return frame }
         guard frame.format == .float32, !frame.pcm.isEmpty else {
             // Empty multi-channel frame — re-tag only.
@@ -218,7 +221,8 @@ public enum Resampler {
         return AudioFrame(pcm: accumulated, sampleRate: targetSampleRate, channels: frame.channels, format: .float32)
     }
 
-    private static func convertFloat32ToInt16(_ frame: AudioFrame) -> AudioFrame {
+    /// `internal`: shared with `StreamingResampler`.
+    static func convertFloat32ToInt16(_ frame: AudioFrame) -> AudioFrame {
         guard frame.format == .float32 else { fatalError("expected .float32") }
         // Total sample values across ALL channels — `sampleCount` is
         // per-channel frames, which would convert only 1/N of an
@@ -238,7 +242,8 @@ public enum Resampler {
         return AudioFrame(pcm: out, sampleRate: frame.sampleRate, channels: frame.channels, format: .int16)
     }
 
-    private static func convertInt16ToFloat32(_ frame: AudioFrame) -> AudioFrame {
+    /// `internal`: shared with `StreamingResampler`.
+    static func convertInt16ToFloat32(_ frame: AudioFrame) -> AudioFrame {
         guard frame.format == .int16 else { fatalError("expected .int16") }
         // Total sample values across ALL channels (see note in
         // `convertFloat32ToInt16`).

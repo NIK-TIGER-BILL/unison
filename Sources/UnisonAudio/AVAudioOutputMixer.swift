@@ -116,6 +116,19 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     // Seam-declick ramp + A/B gate live in `SeamDeclick`, shared with
     // `BlackHole2chPlayer` so the peer path gets the same treatment.
 
+    /// Tail of the most recent REAL translated buffer (post-AGC, post-
+    /// declick, ≤ `GapConcealment.tailSamples`) — the raw material for a
+    /// gap-concealment fade. Guarded by `counterLock`.
+    private var concealTail: [Float] = []
+    /// One concealment per dry spell: latched when the watcher fires,
+    /// cleared by the next real buffer. Guarded by `counterLock`.
+    private var concealedSinceLastReal = false
+    /// One-shot watcher armed after every real schedule to fire just before
+    /// `translatedQueueEndsAt`. If no newer buffer re-armed it by then, the
+    /// player is about to run dry mid-stream → schedule the concealment
+    /// fade. Replaced on every schedule; cancelled on stop.
+    private var concealWatcher: Task<Void, Never>?
+
     /// Route-quality event channel the orchestrator subscribes to (see
     /// `AudioOutputMixer.routeDegradedEvents`). One long-lived stream per
     /// mixer instance; `configureGraphAndStartLocked` yields the verdict
@@ -445,6 +458,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// from inside an async function, so the counter reset lives here
     /// and is called from `playTranslated`.
     private func resetPlaybackCounters() {
+        concealWatcher?.cancel()
         counterLock.lock(); defer { counterLock.unlock() }
         scheduledBufferCount = 0
         playedBackBufferCount = 0
@@ -452,6 +466,8 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         lastScheduledChunkDurMs = 0
         lastTranslatedSample = 0
         translatedQueueEndsAt = 0
+        concealTail = []
+        concealedSinceLastReal = false
     }
 
     public func playOriginal(_ frames: AsyncStream<AudioFrame>) async {
@@ -473,6 +489,10 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         started = false
         configObserver?.stop()
         pacing?.stop()
+        // A parked concealment watcher must not fire into a torn-down
+        // engine; the schedule it might have issued is cleared by the
+        // player reset below anyway — this just silences the no-op.
+        concealWatcher?.cancel()
         closePlaybackDumpIfNeeded()
         // Reset (not stop) the players. `AVAudioPlayerNode.stop()` flushes the
         // pending `.dataPlayedBack` completion handlers from `scheduleTranslated`,
@@ -608,7 +628,21 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         }
         if let ch = buf.floatChannelData, buf.frameLength > 0 {
             let last = ch[0][Int(buf.frameLength) - 1]
-            counterLock.lock(); lastTranslatedSample = last; counterLock.unlock()
+            // Keep the buffer's tail (post-AGC, post-declick) as gap-
+            // concealment material, and re-open the one-per-dry-spell latch:
+            // a REAL buffer arrived, so the next dry spell may be masked.
+            let len = Int(buf.frameLength)
+            let take = min(GapConcealment.tailSamples, len)
+            var tail = [Float](repeating: 0, count: take)
+            tail.withUnsafeMutableBufferPointer { dst in
+                _ = memcpy(dst.baseAddress!, ch[0] + (len - take),
+                           take * MemoryLayout<Float>.size)
+            }
+            counterLock.lock()
+            lastTranslatedSample = last
+            concealTail = tail
+            concealedSinceLastReal = false
+            counterLock.unlock()
         }
         // --- end seam declick -----------------------------------------------
 
@@ -655,6 +689,80 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         scheduledBufferCount += 1
         counterLock.unlock()
         pacing?.didSchedule(samples: AVAudioFramePosition(frameLength))
+
+        // Gap concealment: watch for the queue running dry before the next
+        // real buffer lands, and mask the first ~200 ms of the gap with a
+        // pitch-continuation fade instead of a hard cut to digital silence.
+        armConcealmentWatcher(armedQueueEnd: newQueueEnd)
+    }
+
+    /// Re-arm the dry-spell watcher for the just-scheduled buffer. Fires
+    /// 20 ms before the queue's modeled end; a newer real buffer replaces
+    /// the watcher (and moves `translatedQueueEndsAt`), so a fire with a
+    /// stale `armedQueueEnd` is a no-op.
+    private func armConcealmentWatcher(armedQueueEnd: Double) {
+        if GapConcealment.disabled { return }
+        concealWatcher?.cancel()
+        concealWatcher = Task.detached(priority: .userInitiated) { [weak self] in
+            let now = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+            let delay = armedQueueEnd - 0.02 - now
+            guard delay > 0 else { return }
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            if Task.isCancelled { return }
+            self?.fireConcealmentIfStillDry(armedQueueEnd: armedQueueEnd)
+        }
+    }
+
+    /// Watcher body: if no real buffer arrived since arming (the queue-end
+    /// model is unchanged) and we're not deliberately dropping to catch up,
+    /// schedule ONE synthetic fade built from the last real tail.
+    private func fireConcealmentIfStillDry(armedQueueEnd: Double) {
+        if let pacing, pacing.isCatchingUp { return }
+        counterLock.lock()
+        guard translatedQueueEndsAt == armedQueueEnd,
+              !concealedSinceLastReal,
+              !concealTail.isEmpty else {
+            counterLock.unlock()
+            return
+        }
+        concealedSinceLastReal = true
+        let tail = concealTail
+        let prevSample = lastTranslatedSample
+        counterLock.unlock()
+
+        guard let samples = GapConcealment.makeConcealment(tail: tail, sampleRate: 48_000),
+              let buf = makeBuffer(from: AudioFrame(
+                pcm: samples.withUnsafeBufferPointer { Data(buffer: $0) },
+                sampleRate: 48_000, channels: 1, format: .float32)) else { return }
+        // The synthesis continues the waveform one period after the tail's
+        // last sample — near-continuous by construction — but ramp from the
+        // real last sample anyway so any residual period-estimation step is
+        // smoothed exactly like a normal seam.
+        if !SeamDeclick.disabled {
+            SeamDeclick.ramp(buf, from: prevSample)
+        }
+        let durSec = Double(samples.count) / 48_000.0
+        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+        counterLock.lock()
+        translatedQueueEndsAt = Swift.max(now, translatedQueueEndsAt) + durSec
+        lastTranslatedSample = samples.last ?? 0
+        scheduledBufferCount += 1
+        counterLock.unlock()
+        let frameLength = buf.frameLength
+        translatedPlayer.scheduleBuffer(
+            buf, at: nil, completionCallbackType: .dataPlayedBack
+        ) { [weak self, weak pacing] _ in
+            pacing?.didComplete(samples: AVAudioFramePosition(frameLength))
+            if let self {
+                self.counterLock.lock()
+                self.playedBackBufferCount += 1
+                self.counterLock.unlock()
+            }
+        }
+        pacing?.didSchedule(samples: AVAudioFramePosition(frameLength))
+        Self.log.info("[conceal speakers] queue about to run dry — scheduled"
+            + " \(Int(durSec * 1000))ms pitch-continuation fade instead of a hard cut"
+            + " (one per dry spell; next real chunk resumes via the seam declick)")
     }
 
     private func schedule(frame: AudioFrame, on player: AVAudioPlayerNode) {

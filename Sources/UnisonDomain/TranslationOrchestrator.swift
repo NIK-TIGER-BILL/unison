@@ -1586,7 +1586,10 @@ public final class TranslationOrchestrator {
 
     private func wireOutgoingPipeline(stream: any TranslationStream, destination: OutgoingDestination) {
         let micFrames = micCapture.start(deviceUID: currentSettings.inputDeviceUID)
-        let transformer = self.transformer
+        // Per-pipeline transformer: the streaming resampler keeps converter
+        // filter state across chunks (seam-free), so each pipeline gets its
+        // own instance — reconnects re-wire and start a fresh stream anyway.
+        let transformer = self.transformer.makeStreamTransformer()
         // Capture the buffer reference on @MainActor (right here) so
         // the off-actor mic pump doesn't read `audioBufferBySpeaker`
         // — a Dictionary — concurrently with MainActor mutations
@@ -1604,6 +1607,10 @@ public final class TranslationOrchestrator {
             var frameIndex = 0
             var firstMarked = false
             var lastHealthHopAt = Date.distantPast
+            // Coalesce capture-sized wire frames (~10 ms each) into ~100 ms
+            // sends: ~10 WS messages/s instead of ~100, and the reconnect
+            // ring buffer's 30-frame window really holds ~3 s again.
+            var batcher = WireFrameBatcher()
             for await frame in micFrames {
                 // First mic frame proves the capture engine spun up
                 // and the tap is delivering — watchdog uses this to
@@ -1638,10 +1645,16 @@ public final class TranslationOrchestrator {
                         self?.markMicFrameReceived(format: formatLabel, sampleRate: sampleRate, rms: rms)
                     }
                 }
-                let wire = transformer.toWire(frame, sampleRate: wireRate)
-                outboundBuffer?.append(wire)
-                await stream.send(wire)
+                if let batch = batcher.add(transformer.toWire(frame, sampleRate: wireRate)) {
+                    outboundBuffer?.append(batch)
+                    await stream.send(batch)
+                }
                 frameIndex += 1
+            }
+            // Capture ended (stop/reconnect teardown) — push out the tail.
+            if let tail = batcher.flush() {
+                outboundBuffer?.append(tail)
+                await stream.send(tail)
             }
         }
         // The "deliver translated audio downstream" task. The branch
@@ -1716,7 +1729,8 @@ public final class TranslationOrchestrator {
 
     private func wireIncomingPipeline(stream: any TranslationStream) {
         let peerFrames = peerCapture.start()
-        let transformer = self.transformer
+        // Per-pipeline transformer — see wireOutgoingPipeline.
+        let transformer = self.transformer.makeStreamTransformer()
 
         var translationContinuation: AsyncStream<AudioFrame>.Continuation!
         var passthroughContinuation: AsyncStream<AudioFrame>.Continuation!
@@ -1782,14 +1796,23 @@ public final class TranslationOrchestrator {
         }
         let sender = Task { [stream] in
             let wireRate = stream.inputWireSampleRate
+            // Coalesce ~10 ms tap frames into ~100 ms sends — see the mic
+            // pump's batcher note.
+            var batcher = WireFrameBatcher()
             for await frame in translationFrames {
-                let wire = transformer.toWire(frame, sampleRate: wireRate)
+                guard let wire = batcher.add(transformer.toWire(frame, sampleRate: wireRate)) else {
+                    continue
+                }
                 // Dump what we sent to the engine (Int16 mono at wireRate).
                 // Pairs with WireDumper.shared (model output) — if SENT
                 // is amplitude-stable but WIRE fades, the model is the
                 // culprit.
                 WireDumper.sent.write(wire.pcm)
                 await stream.send(wire)
+            }
+            if let tail = batcher.flush() {
+                WireDumper.sent.write(tail.pcm)
+                await stream.send(tail)
             }
         }
         let translatedPlay = Task { [outputMixer, stream, transformer, weak self] in
