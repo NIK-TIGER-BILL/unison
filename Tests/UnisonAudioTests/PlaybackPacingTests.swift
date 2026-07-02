@@ -6,7 +6,7 @@ import Testing
 // speed UP (gently) to drain a buffer grown past the setpoint. The target
 // is `1.0 + correction`, arrival rate is NOT in the formula.
 // Constants (kept in sync with PlaybackPacing.swift):
-//   targetBufferSec  = 0.75   (deadband edge; env UNISON_BUFFER_MS)
+//   targetBufferSec  = 1.0    (deadband edge; env UNISON_BUFFER_MS)
 //   maxRate          = 1.06
 //   minRate          = 1.00   (hard floor — never slow below real-time)
 //   correctionGain   = 0.15
@@ -169,12 +169,16 @@ import Testing
 
 // MARK: - buffer cushion
 
-@Test func pacing_targetBufferSec_defaultsTo750ms() {
-    // The drain-threshold / deadband edge defaults to 0.75 s — the top of the
-    // model's natural queue depth, so the common depths play at exactly 1.0×
-    // (no time-stretch, no on/off). Live-overridable via UNISON_BUFFER_MS.
+@Test func pacing_targetBufferSec_defaultsTo1000ms() {
+    // The drain-threshold / deadband edge defaults to 1.0 s — the knee of the
+    // measured freeze-vs-latency frontier (0.30 → 6.7 % freezes, 0.60 → 5.2 %,
+    // 1.0 → 3.8 %; flat above). Gemini's natural queue depth reaches
+    // ~0.75–1.0 s, so a 0.75 threshold kept the controller draining almost
+    // continuously (rate 1.01–1.04×, TimePitch never at unity) and let a
+    // 719 ms network gap underrun a pre-drained cushion — both seen in the
+    // 2026-07-02 field log. Live-overridable via UNISON_BUFFER_MS.
     if ProcessInfo.processInfo.environment["UNISON_BUFFER_MS"] == nil {
-        #expect(abs(PlaybackPacing.targetBufferSec - 0.75) < 1e-9)
+        #expect(abs(PlaybackPacing.targetBufferSec - 1.0) < 1e-9)
     }
 }
 

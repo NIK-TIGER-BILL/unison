@@ -1,3 +1,11 @@
+// swiftlint:disable file_length
+// One deliberately-cohesive engine wrapper (same rationale as
+// TranslationOrchestrator): the seam-declick, gap-concealment and
+// route-quality machinery all mutate the same counterLock-guarded state and
+// are documented inline with their race analyses from the PR #16 review.
+// Splitting to satisfy the length threshold would scatter that state behind
+// internal accessors without reducing real complexity; a large share of the
+// line count is lock-ordering rationale.
 import Foundation
 import AVFoundation
 import CoreAudio
@@ -89,6 +97,13 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// completion counters); this only measures how steadily frames reach
     /// the player.
     private var lastScheduleAt: Date?
+    /// Duration (ms) of the previously-scheduled chunk — the expected
+    /// inter-schedule cadence. `isSchedStall` compares each gap against it
+    /// instead of a fixed threshold: the model ships 250–400 ms chunks at
+    /// real-time rate, so a fixed 250 ms fired on nearly every healthy chunk
+    /// (145 false stalls in one field log). Guarded by `counterLock` with
+    /// `lastScheduleAt`.
+    private var lastScheduledChunkDurMs: Double = 0
     /// Last sample value of the previously-scheduled translated buffer, used
     /// to declick chunk seams: the first samples of each new buffer are
     /// ramped from this value so a boundary discontinuity (resampler reset
@@ -106,16 +121,42 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// gaps and click. Read/written under `counterLock`; reset in
     /// `resetPlaybackCounters`.
     private var translatedQueueEndsAt: Double = 0
-    /// Declick ramp length in samples (~2ms at 48k). Long enough to remove a
-    /// boundary click, short enough to be inaudible as a smear.
-    private static let declickRampSamples = 96
-    /// Diagnostic A/B gate: when `UNISON_DISABLE_DECLICK=1`, skip the seam
-    /// declick entirely so the full-chain click-verification harness
-    /// (`pacing-eval --full-chain-render`) can measure the click floor WITH vs
-    /// WITHOUT the ramp and prove the ramp is what removes the seam clicks.
-    /// Launch-constant (same-process env is immutable).
-    private static let declickDisabled =
-        ProcessInfo.processInfo.environment["UNISON_DISABLE_DECLICK"] == "1"
+    // Seam-declick ramp + A/B gate live in `SeamDeclick`, shared with
+    // `BlackHole2chPlayer` so the peer path gets the same treatment.
+
+    /// Tail of the most recent REAL translated buffer (post-AGC, post-
+    /// declick, ≤ `GapConcealment.tailSamples`) — the raw material for a
+    /// gap-concealment fade. Guarded by `counterLock`.
+    private var concealTail: [Float] = []
+    /// One concealment per dry spell: latched when the watcher fires,
+    /// cleared by the next real buffer. Guarded by `counterLock`.
+    private var concealedSinceLastReal = false
+    /// One-shot watcher armed after every real schedule to fire just before
+    /// `translatedQueueEndsAt`. If no newer buffer re-armed it by then, the
+    /// player is about to run dry mid-stream → schedule the concealment
+    /// fade. Replaced on every schedule; cancelled on stop/reconfigure.
+    /// The REFERENCE is guarded by `counterLock` (written from the
+    /// `playTranslated` consumer, cancelled from `stop()` under `engineLock`
+    /// and from the next session's `resetPlaybackCounters` — three different
+    /// tasks; `Task.cancel()` itself is thread-safe, the property swap is not).
+    private var concealWatcher: Task<Void, Never>?
+    /// True between `stop()` and the next session's `resetPlaybackCounters`.
+    /// Guarded by `counterLock`. Closes the stale-fire hole: an in-flight
+    /// `scheduleTranslated` racing `stop()` could otherwise arm a FRESH
+    /// watcher whose fire passes the queue-end guard (counters reset only at
+    /// the NEXT `playTranslated`) and schedules a 200 ms ghost fade onto the
+    /// just-reset player — which would then play at the next session's start.
+    private var concealSessionStopped = false
+
+    /// Route-quality event channel the orchestrator subscribes to (see
+    /// `AudioOutputMixer.routeDegradedEvents`). One long-lived stream per
+    /// mixer instance; `configureGraphAndStartLocked` yields the verdict
+    /// after every (re)configuration — which is exactly when a Bluetooth
+    /// HFP↔A2DP profile flip lands (each flip posts a
+    /// `AVAudioEngineConfigurationChange` and rebuilds the graph).
+    public var routeDegradedEvents: AsyncStream<Bool> { routeEvents }
+    private let routeEvents: AsyncStream<Bool>
+    private let routeContinuation: AsyncStream<Bool>.Continuation
 
     public init() {
         self.playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
@@ -123,6 +164,7 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
                                           channels: 1,
                                           interleaved: false)!
         self.mixer = engine.mainMixerNode
+        (routeEvents, routeContinuation) = AsyncStream.makeStream(of: Bool.self)
     }
 
     /// Whether the underlying `AVAudioEngine` is currently running. Read-only
@@ -211,6 +253,21 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         originalPlayer.play()
         let outFormat = engine.outputNode.outputFormat(forBus: 0)
         Self.log.info("start — engine running; outputNode format: \(outFormat.sampleRate)Hz × \(outFormat.channelCount)ch; ready to schedule buffers")
+        // Route-quality verdict for THIS configuration. A narrowband route
+        // (< 40 kHz) means the output device is on a Bluetooth VOICE profile
+        // (HFP — field log: 16000 Hz × 1 ch mid-session): everything the user
+        // hears is muffled and quieter until the headset returns to A2DP.
+        // Yield on every configure so a mid-session profile flip updates the
+        // orchestrator's `outputRouteDegraded` (and the popover hint) live.
+        let narrowband = Self.isNarrowbandRoute(sampleRate: outFormat.sampleRate,
+                                                channels: Int(outFormat.channelCount))
+        if narrowband {
+            Self.log.error("[route-degraded] output route is narrowband"
+                + " (\(outFormat.sampleRate)Hz × \(outFormat.channelCount)ch) — Bluetooth voice"
+                + " profile (HFP): audio will sound muffled/quiet until the headset"
+                + " returns to A2DP (usually when its mic is released)")
+        }
+        routeContinuation.yield(narrowband)
 
         // Diagnostic dump: if `UNISON_DUMP_PLAYBACK_WAV=<path>` is set,
         // install a tap on the timePitch output and stream every render
@@ -275,6 +332,20 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         // buffers cleanly before we reconnect and restart.
         translatedPlayer.reset()
         originalPlayer.reset()
+        // The reset flushed the real queue, so the seam/conceal model must
+        // restart from silence: a parked watcher would otherwise pass its
+        // queue-end guard (nothing else moves it) and schedule 200 ms of
+        // PRE-reconfigure audio onto the rebuilt graph, and the next real
+        // buffer would ramp from a stale sample instead of 0. HFP↔A2DP
+        // profile flips make reconfigures a first-class mid-session event.
+        counterLock.lock()
+        concealWatcher?.cancel()
+        concealWatcher = nil
+        concealTail = []
+        concealedSinceLastReal = false
+        lastTranslatedSample = 0
+        translatedQueueEndsAt = 0
+        counterLock.unlock()
         do {
             try configureGraphAndStartLocked(deviceUID: currentDeviceUID)
             Self.log.info("reconfigure — engine restarted on the current device (isRunning=\(engine.isRunning))")
@@ -421,11 +492,17 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// and is called from `playTranslated`.
     private func resetPlaybackCounters() {
         counterLock.lock(); defer { counterLock.unlock() }
+        concealWatcher?.cancel()
+        concealWatcher = nil
+        concealSessionStopped = false
         scheduledBufferCount = 0
         playedBackBufferCount = 0
         lastScheduleAt = nil
+        lastScheduledChunkDurMs = 0
         lastTranslatedSample = 0
         translatedQueueEndsAt = 0
+        concealTail = []
+        concealedSinceLastReal = false
     }
 
     public func playOriginal(_ frames: AsyncStream<AudioFrame>) async {
@@ -447,6 +524,20 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         started = false
         configObserver?.stop()
         pacing?.stop()
+        // Kill the concealment machinery for the rest of this session: a
+        // parked watcher must not fire into the torn-down engine, and — the
+        // subtler hole — an in-flight `scheduleTranslated` (the schedule
+        // path deliberately doesn't take `engineLock`) must not ARM a fresh
+        // watcher after this point: its fire would pass the queue-end guard
+        // and park a ghost 200 ms fade on the reset player, to be played at
+        // the START of the next session. `concealSessionStopped` gates both
+        // arming and firing; the next `playTranslated` clears it.
+        counterLock.lock()
+        concealSessionStopped = true
+        concealWatcher?.cancel()
+        concealWatcher = nil
+        concealTail = []
+        counterLock.unlock()
         closePlaybackDumpIfNeeded()
         // Reset (not stop) the players. `AVAudioPlayerNode.stop()` flushes the
         // pending `.dataPlayedBack` completion handlers from `scheduleTranslated`,
@@ -482,7 +573,15 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         // never truly hits silence, and the wall-clock model below leaves
         // `resumingFromSilence == false` → the first admitted frame glides from
         // the last sample over 2ms (smoothing the stale→live seam), not from 0.
-        if let pacing, !pacing.admit() { return }
+        if let pacing, !pacing.admit() {
+            // Catch-up drop: clear the cadence clock so the FIRST admitted
+            // frame after the drop spell doesn't log a spurious
+            // `[sched-stall]` for the gap the drops themselves created.
+            counterLock.lock()
+            lastScheduleAt = nil
+            counterLock.unlock()
+            return
+        }
         // Apply compensating AGC BEFORE building the AVAudioPCMBuffer
         // so the gain ends up baked into the samples we schedule. We
         // chose this over modulating `player.volume` because volume
@@ -520,17 +619,21 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         // `[UNDERRUN speakers]`), which uses the real .dataPlayedBack
         // completion counters rather than the version-sensitive
         // playerTime clock.
+        let chunkDurMs = Double(frameLength) / 48.0
         counterLock.lock()
         let nowAt = Date()
         let schedGapMs = lastScheduleAt.map { nowAt.timeIntervalSince($0) * 1000 } ?? 0
         lastScheduleAt = nowAt
+        let prevChunkDurMs = lastScheduledChunkDurMs
+        lastScheduledChunkDurMs = chunkDurMs
         counterLock.unlock()
         Self.log.debug("[sched speakers] schedGap=\(Int(schedGapMs))ms"
-            + " frame=\(String(format: "%.0f", Double(frameLength) / 48.0))ms"
+            + " frame=\(String(format: "%.0f", chunkDurMs))ms"
             + " rate=\(String(format: "%.3f", Double(timePitch.rate)))")
-        if schedGapMs > 250 {
+        if Self.isSchedStall(gapMs: schedGapMs, prevChunkDurMs: prevChunkDurMs) {
             Self.log.info("[sched-stall speakers] \(Int(schedGapMs))ms gap before this frame reached"
-                + " the player — upstream starved (cross-check [audio-rx]/[pump peer])")
+                + " the player (cadence ≈\(Int(prevChunkDurMs))ms) — upstream starved"
+                + " (cross-check [audio-rx]/[pump peer])")
         }
         // --- end instrumentation ---
 
@@ -573,12 +676,26 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         translatedQueueEndsAt = newQueueEnd
         let prevSample = lastTranslatedSample
         counterLock.unlock()
-        if !Self.declickDisabled {
+        if !SeamDeclick.disabled {
             Self.declickSeam(buf, from: resumingFromSilence ? 0 : prevSample)
         }
         if let ch = buf.floatChannelData, buf.frameLength > 0 {
             let last = ch[0][Int(buf.frameLength) - 1]
-            counterLock.lock(); lastTranslatedSample = last; counterLock.unlock()
+            // Keep the buffer's tail (post-AGC, post-declick) as gap-
+            // concealment material, and re-open the one-per-dry-spell latch:
+            // a REAL buffer arrived, so the next dry spell may be masked.
+            let len = Int(buf.frameLength)
+            let take = min(GapConcealment.tailSamples, len)
+            var tail = [Float](repeating: 0, count: take)
+            tail.withUnsafeMutableBufferPointer { dst in
+                _ = memcpy(dst.baseAddress!, ch[0] + (len - take),
+                           take * MemoryLayout<Float>.size)
+            }
+            counterLock.lock()
+            lastTranslatedSample = last
+            concealTail = tail
+            concealedSinceLastReal = false
+            counterLock.unlock()
         }
         // --- end seam declick -----------------------------------------------
 
@@ -625,6 +742,106 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         scheduledBufferCount += 1
         counterLock.unlock()
         pacing?.didSchedule(samples: AVAudioFramePosition(frameLength))
+
+        // Gap concealment: watch for the queue running dry before the next
+        // real buffer lands, and mask the first ~200 ms of the gap with a
+        // pitch-continuation fade instead of a hard cut to digital silence.
+        armConcealmentWatcher(armedQueueEnd: newQueueEnd)
+    }
+
+    /// Re-arm the dry-spell watcher for the just-scheduled buffer. Fires
+    /// 20 ms before the queue's modeled end; a newer real buffer replaces
+    /// the watcher (and moves `translatedQueueEndsAt`), so a fire with a
+    /// stale `armedQueueEnd` is a no-op.
+    private func armConcealmentWatcher(armedQueueEnd: Double) {
+        if GapConcealment.disabled { return }
+        counterLock.lock(); defer { counterLock.unlock() }
+        // A schedule racing `stop()` must not resurrect the machinery the
+        // stop just tore down — the ghost fade would play next session.
+        guard !concealSessionStopped else { return }
+        concealWatcher?.cancel()
+        concealWatcher = Task.detached(priority: .userInitiated) { [weak self] in
+            let now = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+            let delay = armedQueueEnd - 0.02 - now
+            guard delay > 0 else { return }
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            if Task.isCancelled { return }
+            self?.fireConcealmentIfStillDry(armedQueueEnd: armedQueueEnd)
+        }
+    }
+
+    /// Watcher body: if no real buffer arrived since arming (the queue-end
+    /// model is unchanged) and we're not deliberately dropping to catch up,
+    /// schedule ONE synthetic fade built from the last real tail.
+    ///
+    /// The dry-check and the commit are TWO lock sections with ~1 ms of
+    /// synthesis between them — and that window is adversarially placed: the
+    /// watcher fires at queueEnd−20 ms, exactly when a just-in-time real
+    /// chunk tends to land. The commit therefore RE-validates the sentinels
+    /// (a real buffer always moves `translatedQueueEndsAt` and clears
+    /// `concealedSinceLastReal`) and holds `counterLock` across the
+    /// `scheduleBuffer` call itself, so a racing real chunk can never end up
+    /// ordered BEFORE the concealment in the player queue (which would play
+    /// a 200 ms ghost echo of pre-gap material after fresh audio). Safe to
+    /// hold: `scheduleBuffer` is non-blocking and its `.dataPlayedBack`
+    /// completion is always delivered asynchronously — no lock reentry.
+    private func fireConcealmentIfStillDry(armedQueueEnd: Double) {
+        if let pacing, pacing.isCatchingUp { return }
+        counterLock.lock()
+        guard !concealSessionStopped,
+              translatedQueueEndsAt == armedQueueEnd,
+              !concealedSinceLastReal,
+              !concealTail.isEmpty else {
+            counterLock.unlock()
+            return
+        }
+        concealedSinceLastReal = true
+        let tail = concealTail
+        let prevSample = lastTranslatedSample
+        counterLock.unlock()
+
+        guard let samples = GapConcealment.makeConcealment(tail: tail, sampleRate: 48_000),
+              let buf = makeBuffer(from: AudioFrame(
+                pcm: samples.withUnsafeBufferPointer { Data(buffer: $0) },
+                sampleRate: 48_000, channels: 1, format: .float32)) else { return }
+        // The synthesis continues the waveform one period after the tail's
+        // last sample — near-continuous by construction — but ramp from the
+        // real last sample anyway so any residual period-estimation step is
+        // smoothed exactly like a normal seam.
+        if !SeamDeclick.disabled {
+            SeamDeclick.ramp(buf, from: prevSample)
+        }
+        let durSec = Double(samples.count) / 48_000.0
+        let now = Double(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
+        let frameLength = buf.frameLength
+        counterLock.lock()
+        // Re-validate: a real chunk that landed during synthesis wins — it
+        // moved the queue end and re-opened the dry-spell latch; scheduling
+        // the stale fade behind it would be the artifact, not the cure.
+        guard !concealSessionStopped,
+              translatedQueueEndsAt == armedQueueEnd,
+              concealedSinceLastReal else {
+            counterLock.unlock()
+            return
+        }
+        translatedQueueEndsAt = Swift.max(now, translatedQueueEndsAt) + durSec
+        lastTranslatedSample = samples.last ?? 0
+        scheduledBufferCount += 1
+        translatedPlayer.scheduleBuffer(
+            buf, at: nil, completionCallbackType: .dataPlayedBack
+        ) { [weak self, weak pacing] _ in
+            pacing?.didComplete(samples: AVAudioFramePosition(frameLength))
+            if let self {
+                self.counterLock.lock()
+                self.playedBackBufferCount += 1
+                self.counterLock.unlock()
+            }
+        }
+        counterLock.unlock()
+        pacing?.didSchedule(samples: AVAudioFramePosition(frameLength))
+        Self.log.info("[conceal speakers] queue about to run dry — scheduled"
+            + " \(Int(durSec * 1000))ms pitch-continuation fade instead of a hard cut"
+            + " (one per dry spell; next real chunk resumes via the seam declick)")
     }
 
     private func schedule(frame: AudioFrame, on player: AVAudioPlayerNode) {
@@ -655,22 +872,38 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
         return buf
     }
 
-    /// Ramp the first `declickRampSamples` of `buf` from `start` into the
-    /// actual signal (linear blend `out[i] = start·(1−g) + signal[i]·g`,
-    /// `g = i/n`). `out[0] == start` so playback continues without a step,
-    /// and by sample `n` we're back on the real waveform. Runs on the mixer
-    /// actor's schedule path (never the render thread) — plain buffer math.
-    /// `static` + `internal` (not `private`) so `DeclickTests` can prove the
-    /// seam-smoothing property deterministically without a live engine.
+    /// Thin wrapper over the shared `SeamDeclick.ramp` — kept as a `static`
+    /// on this type so `DeclickTests` (which prove the seam-smoothing
+    /// property deterministically without a live engine) keep their
+    /// call-site, and so the mixer's schedule path reads uniformly.
     static func declickSeam(_ buf: AVAudioPCMBuffer, from start: Float) {
-        guard let ch = buf.floatChannelData else { return }
-        let p = ch[0]
-        let n = min(Int(buf.frameLength), Self.declickRampSamples)
-        guard n > 1 else { return }
-        for i in 0..<n {
-            let g = Float(i) / Float(n)
-            p[i] = start * (1 - g) + p[i] * g
-        }
+        SeamDeclick.ramp(buf, from: start)
+    }
+
+    /// Pure: is the negotiated output route narrowband — i.e. the device is
+    /// running a Bluetooth VOICE profile (HFP/mSBC 16 kHz, CVSD 8 kHz,
+    /// AirPods wideband 24 kHz, LE-Audio voice 32 kHz) instead of its music
+    /// profile (A2DP 44.1/48 kHz)? macOS forces that flip whenever something
+    /// opens the headset's own mic; everything the user hears collapses to a
+    /// muffled, quieter band — the field-log 16000 Hz × 1 ch route behind the
+    /// "behind a wall" reports. Full-quality routes are ≥44.1 kHz, so the
+    /// <40 kHz cut cleanly separates the voice profiles without flagging
+    /// mono-but-full-rate USB routes. `static` + `internal` for tests.
+    static func isNarrowbandRoute(sampleRate: Double, channels: Int) -> Bool {
+        _ = channels  // mono alone is not evidence — some USB routes are mono
+        return sampleRate > 0 && sampleRate < 40_000
+    }
+
+    /// Pure: is an inter-schedule gap a genuine upstream stall? The expected
+    /// cadence is the PREVIOUS chunk's duration (the model delivers ~real-time,
+    /// so the next chunk lands roughly one chunk-duration later); only a gap
+    /// exceeding that plus a 150 ms jitter margin is a stall. The 400 ms floor
+    /// keeps tiny chunks (a 40 ms tail) from making the detector hair-trigger.
+    /// A fixed 250 ms threshold sat BELOW the natural 250–400 ms cadence and
+    /// produced 145 false stalls in one field session, drowning the real one.
+    /// `static` + `internal` for `SchedStallTests`.
+    static func isSchedStall(gapMs: Double, prevChunkDurMs: Double) -> Bool {
+        gapMs > Swift.max(400, prevChunkDurMs + 150)
     }
 
     /// Pure: model the translated queue's end in host-clock seconds to decide
@@ -685,9 +918,8 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
     /// unit-testable without a live engine (see `DeclickTests`).
     static func seamResumeDecision(now: Double, queueEndsAt: Double,
                                    bufferDurationSec: Double) -> (resumingFromSilence: Bool, queueEndsAt: Double) {
-        let resuming = now >= queueEndsAt
-        let start = Swift.max(now, queueEndsAt)
-        return (resuming, start + bufferDurationSec)
+        SeamDeclick.resumeDecision(now: now, queueEndsAt: queueEndsAt,
+                                   bufferDurationSec: bufferDurationSec)
     }
 
     /// Root-mean-square of a float32 PCM frame, used for periodic

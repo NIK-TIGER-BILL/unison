@@ -124,6 +124,50 @@ import Testing
     #expect(abs(newState.currentGain - 1.02) < 0.005)
 }
 
+// MARK: - Time-based units (chunk-cadence independence)
+
+@Test func agc_slew_scalesWithFrameDuration() {
+    // The model ships 250–400 ms chunks, not the 100 ms the old per-frame
+    // constants assumed — which silently slowed compensation 2.5–4× (the
+    // "quieter for tens of seconds" symptom). Slew is a per-SECOND rate:
+    // one 400 ms faded frame moves gain by 0.2 × 0.4 = 0.08, not a fixed
+    // per-frame 0.02.
+    var state = AGCState.initial
+    state.longTermRMS = 0.01
+    state.currentGain = 1.0
+    let frame: [Float] = .init(repeating: 0.01, count: 19_200)  // 400 ms @ 48k
+    let (newState, _) = CompensatingAGC.processed(
+        samples: frame, frameDurationSec: 0.4,
+        state: state, config: .default)
+    #expect(abs(newState.currentGain - 1.08) < 0.005,
+            "400 ms frame should slew gain by 0.08 (0.2/s × 0.4 s), got \(newState.currentGain - 1.0)")
+}
+
+@Test func agc_compensation_isInvariantToChunkSize() {
+    // Same wall-clock fade (0.05 → 0.015 over 25 s) fed as 100 ms frames vs
+    // 400 ms frames must end at (nearly) the same gain: compensation speed is
+    // a property of TIME, not of how the engine happens to chunk its output.
+    func run(frameSec: Double) -> Float {
+        var state = AGCState.initial
+        let totalSec = 25.0
+        let frames = Int(totalSec / frameSec)
+        let samplesPerFrame = Int(48_000 * frameSec)
+        for i in 0..<frames {
+            let progress = Double(i) * frameSec / totalSec
+            let inRMS = 0.05 - progress * (0.05 - 0.015)
+            let frame: [Float] = .init(repeating: Float(inRMS), count: samplesPerFrame)
+            let (s, _) = CompensatingAGC.processed(
+                samples: frame, frameDurationSec: frameSec, state: state, config: .default)
+            state = s
+        }
+        return state.currentGain
+    }
+    let gain100 = run(frameSec: 0.1)
+    let gain400 = run(frameSec: 0.4)
+    #expect(abs(Double(gain100 - gain400)) < 0.15,
+            "gain after identical 25 s fade must not depend on chunk size (100 ms → \(gain100), 400 ms → \(gain400))")
+}
+
 // MARK: - Multi-frame integration
 
 @Test func agc_fadingSession_recoversAmplitude() {

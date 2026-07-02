@@ -237,10 +237,76 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
             log.error("resolveDevice — UID '\(uid)' not resolvable via AVCaptureDevice; falling back to system default audio input")
         }
         if let d = AVCaptureDevice.default(for: .audio) {
+            // Bluetooth-aware default policy: opening a BT headset's mic
+            // forces the whole headset into its narrowband voice profile
+            // (HFP) — the OUTPUT the user listens to goes muffled and quiet
+            // ("behind a wall", field-log-confirmed 16 kHz × 1 ch route).
+            // When the system default is a BT mic and a built-in mic exists,
+            // capture from the built-in one instead. Only for the nil-uid
+            // path — an explicit user selection (uid above) is always
+            // honored, Bluetooth or not.
+            let discovery = AVCaptureDevice.DiscoverySession(
+                deviceTypes: [.microphone, .external],
+                mediaType: .audio,
+                position: .unspecified
+            )
+            let available = discovery.devices.map {
+                CaptureDeviceInfo(uid: $0.uniqueID, transportType: UInt32(bitPattern: $0.transportType))
+            }
+            let defaultInfo = CaptureDeviceInfo(uid: d.uniqueID,
+                                                transportType: UInt32(bitPattern: d.transportType))
+            if let betterUID = preferredMicUID(systemDefault: defaultInfo, available: available),
+               let better = discovery.devices.first(where: { $0.uniqueID == betterUID }) {
+                log.info("resolveDevice — system default input '\(d.localizedName)' is Bluetooth;"
+                    + " using built-in mic '\(better.localizedName)' instead so the headset"
+                    + " stays on A2DP (avoids the muffled HFP voice profile)")
+                return better
+            }
             return d
         }
         throw NSError(domain: "AVAudioEngineMicrophone", code: -12,
                       userInfo: [NSLocalizedDescriptionKey: "No audio capture device available (system default returned nil)"])
+    }
+}
+
+// MARK: - Bluetooth-aware default-mic policy
+
+/// Transport signature of one capture device — the minimal slice of
+/// `AVCaptureDevice` the mic-selection policy needs, extracted so the policy
+/// is a pure function testable without audio hardware.
+public struct CaptureDeviceInfo: Sendable, Equatable {
+    public let uid: String
+    public let transportType: UInt32
+    public init(uid: String, transportType: UInt32) {
+        self.uid = uid
+        self.transportType = transportType
+    }
+}
+
+extension AVAudioEngineMicrophone {
+    /// `kIOAudioDeviceTransportTypeBluetooth` ('blue') — the transport
+    /// `AVCaptureDevice.transportType` reports for classic Bluetooth mics.
+    static let transportBluetooth: UInt32 = 0x626C_7565
+    /// `kAudioDeviceTransportTypeBluetoothLE` ('blea') — LE-Audio headsets;
+    /// their voice profile degrades the output route the same way.
+    static let transportBluetoothLE: UInt32 = 0x626C_6561
+    /// `kIOAudioDeviceTransportTypeBuiltIn` ('bltn').
+    static let transportBuiltIn: UInt32 = 0x626C_746E
+
+    /// Pure policy: when the SYSTEM-DEFAULT input is a Bluetooth headset
+    /// mic, prefer the built-in mic instead — opening the headset's mic
+    /// forces the whole headset into its narrowband voice profile (HFP),
+    /// degrading the OUTPUT the user is listening to ("behind a wall").
+    /// Returns the uid to capture from, or `nil` to keep the system default.
+    /// Only consulted for the nil-uid path: an explicit user selection is
+    /// always honored, Bluetooth or not.
+    static func preferredMicUID(systemDefault: CaptureDeviceInfo?,
+                                available: [CaptureDeviceInfo]) -> String? {
+        let bluetoothTransports: Set<UInt32> = [transportBluetooth, transportBluetoothLE]
+        guard let systemDefault, bluetoothTransports.contains(systemDefault.transportType) else {
+            return nil
+        }
+        return available.first(where: { $0.transportType == transportBuiltIn })?.uid
     }
 }
 

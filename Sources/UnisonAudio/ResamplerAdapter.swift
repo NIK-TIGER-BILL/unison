@@ -18,6 +18,15 @@ public final class ResamplerAdapter: AudioFormatTransformer, @unchecked Sendable
 
     public init() {}
 
+    /// Per-pipeline transformer: a fresh `StreamingResampler`, which keeps
+    /// AVAudioConverter filter state across chunks (seam-free live audio)
+    /// instead of the one-shot reset-per-chunk semantics this adapter's own
+    /// methods provide. One instance per pipeline so the me- and
+    /// peer-pipelines never share filter state.
+    public func makeStreamTransformer() -> any AudioFormatTransformer {
+        StreamingResampler()
+    }
+
     public func toWire(_ frame: AudioFrame, sampleRate: Int) -> AudioFrame {
         let out = Resampler.toWire(frame, targetSampleRate: sampleRate)
         lock.lock(); let shouldLog = !loggedToWire; if shouldLog { loggedToWire = true }; lock.unlock()

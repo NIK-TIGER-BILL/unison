@@ -52,6 +52,33 @@ public final class TranslationOrchestrator {
         }
     }
 
+    /// Latest output-route quality reported by the mixer: `true` while the
+    /// output device is on a narrowband Bluetooth VOICE profile (HFP) —
+    /// the "muffled, behind-a-wall, quieter" route macOS forces on a
+    /// headset whenever something opens its mic. Field-log-confirmed
+    /// (16 000 Hz × 1 ch mid-session). The popover surfaces this as a hint
+    /// so the user knows the audio path, not the translation, degraded.
+    /// Driven by `routeObserverTask`; cleared on stop.
+    public private(set) var outputRouteDegraded = false {
+        didSet {
+            if oldValue != outputRouteDegraded {
+                Self.log.info("outputRouteDegraded \(oldValue) → \(self.outputRouteDegraded)")
+            }
+        }
+    }
+    /// Long-lived subscription to `outputMixer.routeDegradedEvents`. One
+    /// per orchestrator (NOT per session): an `AsyncStream` supports a
+    /// single consumer, so re-subscribing on every `start()` would leave
+    /// session №2 reading a stream session №1 already consumed. Started
+    /// at init; mixers that don't report (mocks via the protocol default)
+    /// finish the stream immediately and the task just ends.
+    /// `nonisolated(unsafe)`: written exactly once in `init` and read only
+    /// in `deinit` (which is nonisolated and runs after the last reference
+    /// is gone — no concurrent access is possible); `Task.cancel()` itself
+    /// is thread-safe.
+    @ObservationIgnored
+    nonisolated(unsafe) private var routeObserverTask: Task<Void, Never>?
+
     /// Per-stream health. UI reads the aggregate via
     /// `connectivityHealth`; the diagnostic dialog reads per-speaker for
     /// asymmetric-failure debugging.
@@ -266,6 +293,22 @@ public final class TranslationOrchestrator {
         self.transformer = transformer
         self.networkMonitor = networkMonitor
         self.meetingStore = meetingStore
+        // Subscribe to the mixer's route-quality events for the life of the
+        // orchestrator (see `routeObserverTask` for why not per-session).
+        let routeEvents = outputMixer.routeDegradedEvents
+        routeObserverTask = Task { @MainActor [weak self] in
+            for await degraded in routeEvents {
+                self?.outputRouteDegraded = degraded
+            }
+        }
+    }
+
+    deinit {
+        // Unblock the route observer parked on the mixer's never-finishing
+        // stream — matters mostly for tests, which construct hundreds of
+        // orchestrators (each would otherwise park a MainActor task until
+        // its mock mixer deallocates).
+        routeObserverTask?.cancel()
     }
 
     public func start(mode: SessionMode, languages: LanguagePair, settings: Settings = .default) async {
@@ -485,17 +528,6 @@ public final class TranslationOrchestrator {
         if rms >= Self.micAudibleRMSThreshold {
             lastAudiblePeerAt = clock.now()
         }
-    }
-
-    /// Periodic mic level snapshot — logged every Nth frame so users
-    /// hitting the "no transcript appears" symptom can see in the
-    /// diagnostic whether the mic gain ramped up when they spoke
-    /// (RMS going from 0.0001 → 0.05 means the mic is hot) or stayed
-    /// dead-flat (RMS pegged at near-zero → mic is muted/wrong-device).
-    func logMicLevel(rms: Float, frameIndex: Int) {
-        // 1 log per second at 100ms frames (= every 10th frame).
-        guard frameIndex % 10 == 0 else { return }
-        Self.log.debug("mic level — frame=\(frameIndex) rms=\(String(format: "%.5f", rms))")
     }
 
     /// Called by the wire-in pipelines on first server delta (audio
@@ -1286,6 +1318,9 @@ public final class TranslationOrchestrator {
         lastAudibleMicAt = nil
         lastAudiblePeerAt = nil
         connectivityHealth = .healthy
+        // The engine is being torn down — whatever route it had negotiated
+        // is gone with it; a stale hint must not outlive the session.
+        outputRouteDegraded = false
         silentFrameWatchdog?.stop()
         silentFrameWatchdog = nil
         for t in globalTasks { t.cancel() }
@@ -1564,7 +1599,10 @@ public final class TranslationOrchestrator {
 
     private func wireOutgoingPipeline(stream: any TranslationStream, destination: OutgoingDestination) {
         let micFrames = micCapture.start(deviceUID: currentSettings.inputDeviceUID)
-        let transformer = self.transformer
+        // Per-pipeline transformer: the streaming resampler keeps converter
+        // filter state across chunks (seam-free), so each pipeline gets its
+        // own instance — reconnects re-wire and start a fresh stream anyway.
+        let transformer = self.transformer.makeStreamTransformer()
         // Capture the buffer reference on @MainActor (right here) so
         // the off-actor mic pump doesn't read `audioBufferBySpeaker`
         // — a Dictionary — concurrently with MainActor mutations
@@ -1577,9 +1615,20 @@ public final class TranslationOrchestrator {
         // (Review finding #1 — the previous version's "captured into
         // a local under main once (above)" comment was lying.)
         let outboundBuffer = audioBufferBySpeaker[.me]
-        let task1 = Task { [stream, outboundBuffer, weak self] in
+        // DETACHED — a plain `Task {}` here inherits the orchestrator's
+        // @MainActor isolation (verified empirically on this toolchain), so
+        // the per-frame body (RMS + resample + batching) would run as
+        // main-queue jobs behind transcript / Liquid-Glass rendering. Same
+        // reasoning as the output pumps below.
+        let task1 = Task.detached(priority: .userInitiated) { [stream, outboundBuffer, weak self] in
             let wireRate = stream.inputWireSampleRate
             var frameIndex = 0
+            var firstMarked = false
+            var lastHealthHopAt = Date.distantPast
+            // Coalesce capture-sized wire frames (~10 ms each) into ~100 ms
+            // sends: ~10 WS messages/s instead of ~100, and the reconnect
+            // ring buffer's 30-frame window really holds ~3 s again.
+            var batcher = WireFrameBatcher()
             for await frame in micFrames {
                 // First mic frame proves the capture engine spun up
                 // and the tap is delivering — watchdog uses this to
@@ -1589,17 +1638,37 @@ public final class TranslationOrchestrator {
                 // (real audio) or pegged at silence (muted / wrong
                 // device / system gain at 0).
                 let rms = Self.rms(frame)
-                let formatLabel = String(describing: frame.format)
-                let sampleRate = frame.sampleRate
-                let idx = frameIndex
-                await MainActor.run { [weak self] in
-                    self?.markMicFrameReceived(format: formatLabel, sampleRate: sampleRate, rms: rms)
-                    self?.logMicLevel(rms: rms, frameIndex: idx)
+                // Periodic mic-level diagnostic, logged straight from the
+                // pump — UnisonLog is thread-safe, no MainActor needed.
+                if frameIndex % 10 == 0 {
+                    Self.log.debug("mic level — frame=\(frameIndex) rms=\(String(format: "%.5f", rms))")
                 }
-                let wire = transformer.toWire(frame, sampleRate: wireRate)
-                outboundBuffer?.append(wire)
-                await stream.send(wire)
+                // Watchdog/slow-detection bookkeeping: fire-and-forget hop
+                // to the MainActor, coalesced to ≤1 hop / 0.5 s. Coalescing
+                // is safe: the audible stamp feeds windows of 3–4 s
+                // (≫ 0.5 s), and the first frame always hops so the no-data
+                // watchdog latches promptly.
+                let audible = rms >= Self.micAudibleRMSThreshold
+                let now = Date()
+                if !firstMarked || (audible && now.timeIntervalSince(lastHealthHopAt) > 0.5) {
+                    firstMarked = true
+                    lastHealthHopAt = now
+                    let formatLabel = String(describing: frame.format)
+                    let sampleRate = frame.sampleRate
+                    Task { @MainActor [weak self] in
+                        self?.markMicFrameReceived(format: formatLabel, sampleRate: sampleRate, rms: rms)
+                    }
+                }
+                if let batch = batcher.add(transformer.toWire(frame, sampleRate: wireRate)) {
+                    outboundBuffer?.append(batch)
+                    await stream.send(batch)
+                }
                 frameIndex += 1
+            }
+            // Capture ended (stop/reconnect teardown) — push out the tail.
+            if let tail = batcher.flush() {
+                outboundBuffer?.append(tail)
+                await stream.send(tail)
             }
         }
         // The "deliver translated audio downstream" task. The branch
@@ -1674,7 +1743,8 @@ public final class TranslationOrchestrator {
 
     private func wireIncomingPipeline(stream: any TranslationStream) {
         let peerFrames = peerCapture.start()
-        let transformer = self.transformer
+        // Per-pipeline transformer — see wireOutgoingPipeline.
+        let transformer = self.transformer.makeStreamTransformer()
 
         var translationContinuation: AsyncStream<AudioFrame>.Continuation!
         var passthroughContinuation: AsyncStream<AudioFrame>.Continuation!
@@ -1707,19 +1777,28 @@ public final class TranslationOrchestrator {
         watchdog.start()
         self.silentFrameWatchdog = watchdog
 
-        let splitter = Task { [weak self] in
+        // DETACHED — Process Tap frames are HAL-IO-cycle sized (~10 ms,
+        // ~100/s); a plain `Task {}` would inherit @MainActor and park this
+        // splitter behind transcript / Liquid-Glass rendering ~100× a second
+        // while the peer speaks, delaying BOTH downstream yields
+        // (translation send + original passthrough).
+        let splitter = Task.detached(priority: .userInitiated) { [watchdog, weak self] in
+            var lastHealthHopAt = Date.distantPast
             for await frame in peerFrames {
                 watchdog.observe(frame.pcm)
-                // Stamp peer audibility for slow-detection's per-side
-                // gate. RMS is computed off-actor (Self.rms is a pure
-                // static); the MainActor hop is only for the property
-                // write. We avoid hopping on every frame by checking
-                // the threshold here first and skipping the hop when
-                // it'd be a no-op.
+                // Stamp peer audibility for slow-detection's per-side gate.
+                // RMS is a pure static; the MainActor hop is only for the
+                // property write — fire it WITHOUT awaiting, coalesced to
+                // ≤1 hop / 0.5 s. The audibility stamp feeds a 4 s window,
+                // so 0.5 s staleness is harmless.
                 let rms = Self.rms(frame)
                 if rms >= Self.micAudibleRMSThreshold {
-                    await MainActor.run { [weak self] in
-                        self?.markPeerFrameReceived(rms: rms)
+                    let now = Date()
+                    if now.timeIntervalSince(lastHealthHopAt) > 0.5 {
+                        lastHealthHopAt = now
+                        Task { @MainActor [weak self] in
+                            self?.markPeerFrameReceived(rms: rms)
+                        }
                     }
                 }
                 translationContinuation.yield(frame)
@@ -1728,16 +1807,27 @@ public final class TranslationOrchestrator {
             translationContinuation.finish()
             passthroughContinuation.finish()
         }
-        let sender = Task { [stream] in
+        // DETACHED — same isolation-inheritance reasoning as the splitter:
+        // the per-frame resample + batching must not run as main-queue jobs.
+        let sender = Task.detached(priority: .userInitiated) { [stream] in
             let wireRate = stream.inputWireSampleRate
+            // Coalesce ~10 ms tap frames into ~100 ms sends — see the mic
+            // pump's batcher note.
+            var batcher = WireFrameBatcher()
             for await frame in translationFrames {
-                let wire = transformer.toWire(frame, sampleRate: wireRate)
+                guard let wire = batcher.add(transformer.toWire(frame, sampleRate: wireRate)) else {
+                    continue
+                }
                 // Dump what we sent to the engine (Int16 mono at wireRate).
                 // Pairs with WireDumper.shared (model output) — if SENT
                 // is amplitude-stable but WIRE fades, the model is the
                 // culprit.
                 WireDumper.sent.write(wire.pcm)
                 await stream.send(wire)
+            }
+            if let tail = batcher.flush() {
+                WireDumper.sent.write(tail.pcm)
+                await stream.send(tail)
             }
         }
         let translatedPlay = Task { [outputMixer, stream, transformer, weak self] in

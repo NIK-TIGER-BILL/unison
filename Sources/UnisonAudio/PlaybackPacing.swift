@@ -35,7 +35,7 @@ import UnisonDomain
 /// v5 reacts only to the **actual** measured backlog. Baseline is a
 /// pitch-perfect 1.0×; the rate only ever *increases* (never below 1.0×),
 /// and only gently (ceiling `maxRate` 1.06×), to drain a buffer that has
-/// grown past `targetBufferSec` (now a 0.75 s deadband edge — see the
+/// grown past `targetBufferSec` (a 1.0 s deadband edge — see the
 /// constant; below it the rate is held at exactly 1.0×, no draining). A
 /// faster depth smoother (`depthSmoothAlpha` 0.15, τ≈0.6 s)
 /// tracks sub-second bursts. On the same real timeline this cut underruns
@@ -111,21 +111,25 @@ public final class PlaybackPacing: @unchecked Sendable {
     /// queue's *natural* depth (the model front-loads to ~0.5–0.75 s), NOT this
     /// number — this is just where draining kicks in.
     ///
-    /// **Why 0.75 s (0.5 was too low — it caused the "constant on/off").** Real
-    /// session: the model delivers ~1.015× real-time, so the queue naturally
-    /// sits at 0.5–0.75 s. With the threshold at 0.5 the controller was ALWAYS
-    /// just above it, so it drained nonstop at 1.04–1.15×, out-running arrival
-    /// and pumping the queue to ZERO ~15 % of ticks — a rhythmic drain-to-empty
-    /// the user heard as the sound cutting in and out. Setting the threshold to
-    /// 0.75 (the top of the natural range) puts the common depths INSIDE the
-    /// 1.0× deadband, so playback is untouched; only genuine bursts (>0.75 s)
-    /// get a gentle trim. Override live with `UNISON_BUFFER_MS`.
+    /// **Why 1.0 s (0.5 and 0.75 were both too low — same failure mode).**
+    /// The threshold must sit ABOVE the queue's natural depth, or the
+    /// controller spends its life draining the very cushion it needs. At 0.5
+    /// (OpenAI natural depth 0.5–0.75 s) it drained nonstop at 1.04–1.15×,
+    /// pumping the queue to ZERO ~15 % of ticks — the "cutting in and out".
+    /// Raising to 0.75 fixed that for OpenAI, but the 2026-07-02 field log
+    /// showed Gemini's natural depth reaches ~0.75–1.0 s: the controller sat
+    /// just above the threshold again (rate 1.01–1.04× continuously — the
+    /// TimePitch phase vocoder never at unity), and a 719 ms socket gap
+    /// underran the pre-drained cushion. 1.0 s is also the knee of the
+    /// measured freeze-vs-latency frontier (0.30 → 6.7 % freezes, 0.60 →
+    /// 5.2 %, 1.0 → 3.8 %, flat above — the residue is sustained model
+    /// slowdowns no cushion covers). Override live with `UNISON_BUFFER_MS`.
     public static let targetBufferSec: Double = {
         if let raw = ProcessInfo.processInfo.environment["UNISON_BUFFER_MS"],
            let ms = Double(raw), ms >= 0 {
             return ms / 1000.0
         }
-        return 0.75
+        return 1.0
     }()
     /// Hard ceiling on `timePitch.rate`. Capped at a VERY gentle 1.06×: any
     /// time-stretch is an artefact, and the only job here is to bleed off a
@@ -355,6 +359,15 @@ public final class PlaybackPacing: @unchecked Sendable {
     public func didComplete(samples: AVAudioFramePosition) {
         lock.lock(); defer { lock.unlock() }
         completedSamples += samples
+    }
+
+    /// Read-only snapshot of the catch-up latch. The gap-concealment
+    /// watcher checks it so a synthetic fade is never scheduled while the
+    /// scheduler is deliberately DROPPING frames to resync to live (the
+    /// queue is seconds deep then — a "dry player" reading would be wrong).
+    public var isCatchingUp: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return catchingUp
     }
 
     /// Hard latency gate. Call BEFORE each `scheduleBuffer`; returns `false`

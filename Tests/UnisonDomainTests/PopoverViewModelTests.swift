@@ -471,3 +471,37 @@ func popoverVM_statusText_marksOnlyReconnecting() {
     let vm = PopoverViewModel(orchestrator: orch, permissions: perms, deviceRegistry: registry, settings: settings)
     #expect(vm.startBlockedReason == nil)
 }
+
+@MainActor
+@Test func popoverVM_translatingHealthy_routeDegraded_showsBluetoothHint() {
+    let perms = MockPermissionsService()
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    let preview = PopoverViewModel.previewing(
+        settings: .default,
+        state: .translating(mode: .call, startedAt: nowDate()),
+        permissions: perms,
+        deviceRegistry: registry,
+        connectivityHealth: .healthy,
+        outputRouteDegraded: true
+    )
+    #expect(preview.statusText == "Bluetooth-гарнитура ухудшает звук")
+}
+
+@MainActor
+@Test func popoverVM_networkHint_trumpsRouteHint() {
+    // A network problem is more actionable than the route note — it wins
+    // the single hint line.
+    let perms = MockPermissionsService()
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    let preview = PopoverViewModel.previewing(
+        settings: .default,
+        state: .translating(mode: .call, startedAt: nowDate()),
+        permissions: perms,
+        deviceRegistry: registry,
+        connectivityHealth: .slow,
+        outputRouteDegraded: true
+    )
+    #expect(preview.statusText == "Медленная сеть")
+}

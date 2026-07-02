@@ -41,13 +41,17 @@ public struct AGCConfig: Sendable {
     /// Minimum gain multiplier. 1.0 means we never attenuate
     /// — we only ever boost faded model output.
     public let minGain: Float
-    /// EMA coefficient for the long-term RMS tracker. With ~10 frames
-    /// per second (100 ms each) and target τ ≈ 5 s:
-    /// α = 1 - exp(-0.1/5) ≈ 0.02.
-    public let rmsAlpha: Double
-    /// Max change in gain per frame. At 10 frames/sec with step 0.02,
-    /// gain can move 0.2 per second — smooth transitions, no pumping.
-    public let gainSlewPerFrame: Float
+    /// Time constant (seconds) of the long-term RMS EMA. The per-frame
+    /// coefficient is derived as `α = 1 − exp(−frameDuration/τ)`, so the
+    /// tracker converges at the same wall-clock speed no matter how the
+    /// engine chunks its output. (The old fixed per-frame α assumed 100 ms
+    /// frames; the model actually ships 250–400 ms chunks, which silently
+    /// slowed the tracker 2.5–4×.)
+    public let rmsTauSec: Double
+    /// Max gain change per SECOND, scaled by each frame's duration. 0.2/s
+    /// gives smooth, non-pumping transitions and full fade compensation
+    /// (×2.5–3.3) within ~10 s — independent of chunk size.
+    public let gainSlewPerSec: Float
     /// Below this RMS, a frame is considered silence — don't update
     /// the RMS tracker (would bias it down) and don't apply boost.
     public let silenceFloor: Double
@@ -60,20 +64,20 @@ public struct AGCConfig: Sendable {
         targetRMS: 0.05,
         maxGain: 4.0,
         minGain: 1.0,
-        rmsAlpha: 0.02,
-        gainSlewPerFrame: 0.02,
+        rmsTauSec: 5.0,
+        gainSlewPerSec: 0.2,
         silenceFloor: 0.005,
         resetSilenceSec: 3.0
     )
 
     public init(targetRMS: Double, maxGain: Float, minGain: Float,
-                rmsAlpha: Double, gainSlewPerFrame: Float,
+                rmsTauSec: Double, gainSlewPerSec: Float,
                 silenceFloor: Double, resetSilenceSec: Double) {
         self.targetRMS = targetRMS
         self.maxGain = maxGain
         self.minGain = minGain
-        self.rmsAlpha = rmsAlpha
-        self.gainSlewPerFrame = gainSlewPerFrame
+        self.rmsTauSec = rmsTauSec
+        self.gainSlewPerSec = gainSlewPerSec
         self.silenceFloor = silenceFloor
         self.resetSilenceSec = resetSilenceSec
     }
@@ -151,14 +155,18 @@ public enum CompensatingAGC {
             newState.silenceAccumSec = 0
         }
 
-        // Update long-term RMS using only voiced frames.
+        // Update long-term RMS using only voiced frames. The EMA
+        // coefficient is derived from the frame's actual duration so the
+        // tracker's wall-clock time constant (τ = rmsTauSec) holds for any
+        // chunk size the engine ships (100 ms and 400 ms behave the same).
         if newState.longTermRMS == 0 {
             // First voiced frame: bootstrap directly so we don't have
             // to wait for EMA to converge from 0.
             newState.longTermRMS = frameRMS
         } else {
-            newState.longTermRMS = newState.longTermRMS * (1.0 - config.rmsAlpha)
-                                 + frameRMS * config.rmsAlpha
+            let alpha = 1.0 - exp(-frameDurationSec / config.rmsTauSec)
+            newState.longTermRMS = newState.longTermRMS * (1.0 - alpha)
+                                 + frameRMS * alpha
         }
 
         // Track the session's peak (fresh) level — the loudest the
@@ -180,9 +188,11 @@ public enum CompensatingAGC {
         }
         let clamped = max(config.minGain, min(config.maxGain, desiredGain))
 
-        // Slew toward clamped target.
+        // Slew toward clamped target, scaled by the frame's duration so the
+        // gain moves at `gainSlewPerSec` regardless of chunk size.
+        let maxStep = config.gainSlewPerSec * Float(frameDurationSec)
         let delta = clamped - state.currentGain
-        let limited = max(-config.gainSlewPerFrame, min(config.gainSlewPerFrame, delta))
+        let limited = max(-maxStep, min(maxStep, delta))
         newState.currentGain = state.currentGain + limited
 
         // Apply gain to samples.

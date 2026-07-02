@@ -1209,3 +1209,37 @@ final class GateSwitchFactory: TranslationStreamFactory, @unchecked Sendable {
         Issue.record("State must remain .paused(.networkLost) after aborted resume, got \(o.state)")
     }
 }
+
+// MARK: - Output route quality (Bluetooth HFP hint)
+
+@Test @MainActor func orchestrator_routeDegradedEvents_publishAndClearOnStop() async throws {
+    let mixer = MockAudioOutputMixer()
+    let o = makeOrchestrator(mixer: mixer)
+    await o.start(mode: .test, languages: .default)
+    #expect(o.outputRouteDegraded == false)
+
+    // Mixer negotiated a narrowband route (Bluetooth HFP flip mid-session).
+    mixer.emitRouteDegraded(true)
+    var deadline = Date().addingTimeInterval(1.0)
+    while Date() < deadline, !o.outputRouteDegraded {
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+    #expect(o.outputRouteDegraded == true)
+
+    // A2DP restored (headset left handsfree mode) → hint clears.
+    mixer.emitRouteDegraded(false)
+    deadline = Date().addingTimeInterval(1.0)
+    while Date() < deadline, o.outputRouteDegraded {
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+    #expect(o.outputRouteDegraded == false)
+
+    // Degraded again, then stop — a torn-down session must not keep the hint.
+    mixer.emitRouteDegraded(true)
+    deadline = Date().addingTimeInterval(1.0)
+    while Date() < deadline, !o.outputRouteDegraded {
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+    await o.stop()
+    #expect(o.outputRouteDegraded == false, "stop() must clear the route hint")
+}
