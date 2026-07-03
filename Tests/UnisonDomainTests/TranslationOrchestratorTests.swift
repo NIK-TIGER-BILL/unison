@@ -1367,3 +1367,83 @@ private func spinUntil(_ cond: @MainActor () -> Bool) async {
     }
     await o.stop()
 }
+
+// MARK: - Sleep/wake (D5): сон Mac при активной сессии
+
+// willSleep при активной сессии: стримы закрыты, капчеры остановлены,
+// state = .paused(.systemSleep) — вместо зомби-сессии с мёртвыми сокетами.
+@Test @MainActor func orchestrator_systemSleep_pausesActiveSession() async throws {
+    let mic = MockMicrophoneCapture()
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(mic: mic, factory: factory)
+    await o.start(mode: .call, languages: .default)
+    o.systemWillSleep()
+    await spinUntil {
+        if case .paused(_, _, _, .systemSleep) = o.state { true } else { false }
+    }
+    if case .paused(_, _, _, .systemSleep) = o.state {} else {
+        Issue.record("Expected .paused(.systemSleep), got \(o.state)")
+    }
+    #expect(mic.stopCalls >= 1, "мик не остановлен перед сном")
+    await spinUntil { (factory.streams[.peer]?.closeCalls ?? 0) >= 1 }
+    #expect((factory.streams[.peer]?.closeCalls ?? 0) >= 1, "peer-стрим не закрыт перед сном")
+    await o.stop()
+}
+
+// didWake при живой сети: сессия возобновляется сама, таймер не сбрасывается.
+@Test @MainActor func orchestrator_wakeWithNetwork_resumesSession() async throws {
+    let net = MockNetworkPathMonitor(initial: .satisfied)
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, networkMonitor: net)
+    await o.start(mode: .listen, languages: .default)
+    let startedAt = o.state.sessionStartedAt
+    o.systemWillSleep()
+    await spinUntil {
+        if case .paused = o.state { true } else { false }
+    }
+    o.systemDidWake()
+    await spinUntil {
+        if case .translating = o.state { true } else { false }
+    }
+    if case .translating = o.state {} else {
+        Issue.record("сессия не возобновилась после пробуждения: \(o.state)")
+    }
+    #expect(o.state.sessionStartedAt == startedAt, "таймер сессии сбросился")
+    await o.stop()
+}
+
+// didWake без сети: переходим в сетевую паузу, существующий network-observer
+// возобновляет сессию, когда сеть поднимется.
+@Test @MainActor func orchestrator_wakeWithoutNetwork_waitsForNetworkThenResumes() async throws {
+    let net = MockNetworkPathMonitor(initial: .satisfied)
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, networkMonitor: net)
+    await o.start(mode: .listen, languages: .default)
+    o.systemWillSleep()
+    await spinUntil {
+        if case .paused(_, _, _, .systemSleep) = o.state { true } else { false }
+    }
+    net.simulate(.unsatisfied)
+    o.systemDidWake()
+    await spinUntil {
+        if case .paused(_, _, _, .networkLost) = o.state { true } else { false }
+    }
+    if case .paused(_, _, _, .networkLost) = o.state {} else {
+        Issue.record("Expected .paused(.networkLost) после пробуждения без сети, got \(o.state)")
+    }
+    net.simulate(.satisfied)
+    await spinUntil {
+        if case .translating = o.state { true } else { false }
+    }
+    if case .translating = o.state {} else {
+        Issue.record("сессия не возобновилась после возврата сети: \(o.state)")
+    }
+    await o.stop()
+}
+
+// willSleep вне активной сессии — no-op.
+@Test @MainActor func orchestrator_systemSleepWhileIdle_noop() async {
+    let o = makeOrchestrator()
+    o.systemWillSleep()
+    #expect(o.state == .idle)
+}

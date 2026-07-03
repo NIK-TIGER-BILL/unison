@@ -34,6 +34,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     /// integration test, but malformed for normal players.
     private var signalSources: [DispatchSourceSignal] = []
 
+    /// NSWorkspace sleep/wake observer tokens. Registered at launch,
+    /// removed in `applicationWillTerminate`. Sleep with an active
+    /// session used to leave a zombie: both WS died while the Mac
+    /// slept, but the state still said `.translating` after wake.
+    private var sleepWakeObservers: [any NSObjectProtocol] = []
+
     public func applicationDidFinishLaunching(_ notification: Notification) {
         // Touch the file-log singleton so the boot banner is written
         // before any other component logs. The integration test greps
@@ -79,6 +85,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let pendingCrash = CrashReporter.startSession()
 
         installSignalHandlers()
+        installSleepWakeObservers()
 
         let hotkeys = HotkeyService()
         self.hotkeyService = hotkeys
@@ -337,6 +344,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             message: "applicationWillTerminate — graceful shutdown"
         )
         hotkeyService?.stop()
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        for token in sleepWakeObservers { workspaceCenter.removeObserver(token) }
+        sleepWakeObservers.removeAll()
 
         // Archive an active-at-quit session synchronously — applicationWillTerminate
         // intentionally skips the async orchestrator.stop() (deadlock), so the
@@ -366,6 +376,30 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // launch (the marker is only removed when shutdown is truly
         // complete). See `CrashReporter` for the design rationale.
         CrashReporter.markCleanShutdown()
+    }
+
+    /// Sleep/wake → orchestrator. `willSleep` parks an active session
+    /// (streams closed while the sockets are still alive), `didWake`
+    /// resumes it — see `TranslationOrchestrator.systemWillSleep/
+    /// systemDidWake` for the state machine. Observers fire on the main
+    /// queue; the orchestrator is @MainActor, so `assumeIsolated` is
+    /// sound here.
+    private func installSleepWakeObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+        sleepWakeObservers.append(center.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.composition.orchestrator.systemWillSleep()
+            }
+        })
+        sleepWakeObservers.append(center.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.composition.orchestrator.systemDidWake()
+            }
+        })
     }
 
     /// Routes SIGINT / SIGTERM through `NSApp.terminate(_:)` so the full

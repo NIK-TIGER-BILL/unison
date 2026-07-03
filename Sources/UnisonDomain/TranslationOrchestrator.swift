@@ -173,7 +173,7 @@ public final class TranslationOrchestrator {
     /// delay, silently aborting every reconnect (the session then rides
     /// the reconnect watchdog into terminal `.error(.networkLost)`).
     /// The mock clocks ignore cancellation, which is why tests never saw
-    /// it. Cancelled in `stopAllStreams` and `enterNetworkPause`.
+    /// it. Cancelled in `stopAllStreams` and `enterPause`.
     private var reconnectTasks: [Speaker: Task<Void, Never>] = [:]
     /// Per-speaker short-window ring buffer of wire-format outbound
     /// audio. The mic-frame consumer appends each frame after
@@ -894,29 +894,86 @@ public final class TranslationOrchestrator {
     ) {
         switch status {
         case .unsatisfied:
-            enterNetworkPause(mode: mode)
+            enterPause(mode: mode, reason: .networkLost)
         case .satisfied:
+            // Deliberately `.networkLost`-only: a `.satisfied` blip while
+            // `.paused(.systemSleep)` (network flapping around the sleep
+            // edges) must not resurrect streams on a machine that is
+            // about to be — or still is — asleep. Wake-up recovery is
+            // owned by `systemDidWake`.
             if case .paused(_, _, _, .networkLost) = state {
-                resumeFromNetworkPause(mode: mode, languages: languages)
+                resumeFromPause(mode: mode, languages: languages)
             }
         }
     }
 
-    /// Tear down streams + captures and flip to `.paused(.networkLost)`.
+    // MARK: - System sleep / wake
+
+    /// Called from `NSWorkspace.willSleepNotification`. Parks an active
+    /// session in `.paused(.systemSleep)` BEFORE the OS kills our
+    /// sockets: streams close gracefully, captures stop, and — unlike
+    /// the network pause — no recovery watchdog is armed (sleeping for
+    /// hours is not a failure). Without this, wake-up left a zombie
+    /// session: state said `.translating`, but both WS were half-open
+    /// corpses that never delivered another byte.
+    public func systemWillSleep() {
+        switch state {
+        case .translating(let mode, _):
+            Self.log.info("systemWillSleep — pausing active session (mode=\(mode.rawValue))")
+            enterPause(mode: mode, reason: .systemSleep)
+        case .reconnecting(let mode, _, _):
+            Self.log.info("systemWillSleep — pausing mid-reconnect session (mode=\(mode.rawValue))")
+            enterPause(mode: mode, reason: .systemSleep)
+        case .paused(let mode, _, let startedAt, .networkLost),
+             .paused(let mode, _, let startedAt, .awaitingNetwork):
+            // Already paused for network reasons: re-tag as sleep and drop
+            // the 60 s recovery watchdog — it must not expire mid-nap and
+            // turn a healthy overnight sleep into a terminal error. A
+            // mid-resume (.awaitingNetwork) flip also aborts the in-flight
+            // resumeStreams via its reentrancy guards, same as a network
+            // drop would.
+            Self.log.info("systemWillSleep — re-tagging network pause as sleep")
+            cancelPauseRecoveryWatchdog()
+            state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: .systemSleep)
+        case .idle, .connecting, .error, .paused(_, _, _, .systemSleep):
+            break
+        }
+    }
+
+    /// Called from `NSWorkspace.didWakeNotification`. Resumes a session
+    /// parked by `systemWillSleep`: directly when the network path is
+    /// already up, otherwise via the regular network pause (the network
+    /// observer finishes the job when the path comes back, bounded by
+    /// the recovery watchdog).
+    public func systemDidWake() {
+        guard case .paused(let mode, _, let startedAt, .systemSleep) = state else { return }
+        Self.log.info("systemDidWake — network=\(String(describing: networkMonitor.currentStatus))")
+        if networkMonitor.currentStatus == .satisfied {
+            resumeFromPause(mode: mode, languages: currentLanguages)
+        } else {
+            state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: .networkLost)
+            armPauseRecoveryWatchdog()
+        }
+    }
+
+    /// Tear down streams + captures and flip to `.paused(reason)`.
     ///
-    /// Idempotent vs. `.paused(.networkLost)` — calling again is a
-    /// no-op. But NOT idempotent vs. `.paused(.awaitingNetwork)`: a
-    /// drop arriving while resume is in flight must transition us
-    /// back to `.networkLost` so the resumeStreams reentrancy guard
-    /// observes a state change and aborts the half-resumed pipeline
-    /// (iter-2 review finding: matching all `.paused` would silently
-    /// swallow a mid-resume drop, then NetworkMonitor's de-dup would
-    /// suppress any later `.unsatisfied`, leaving the orchestrator
-    /// in `.translating` against a dead network).
-    private func enterNetworkPause(mode: SessionMode) {
-        if case .paused(_, _, _, .networkLost) = state { return }
+    /// Idempotent vs. the same reason — calling again is a no-op — and
+    /// `.systemSleep` outranks `.networkLost` (network flaps around the
+    /// sleep edges must not re-tag a sleeping session and arm the 60 s
+    /// recovery watchdog against a Mac that is asleep). But NOT
+    /// idempotent vs. `.paused(.awaitingNetwork)`: a drop arriving while
+    /// resume is in flight must transition us back so the resumeStreams
+    /// reentrancy guard observes a state change and aborts the
+    /// half-resumed pipeline (iter-2 review finding: matching all
+    /// `.paused` would silently swallow a mid-resume drop, then
+    /// NetworkMonitor's de-dup would suppress any later `.unsatisfied`,
+    /// leaving the orchestrator in `.translating` against a dead network).
+    private func enterPause(mode: SessionMode, reason: PauseReason) {
+        if case .paused(_, _, _, .systemSleep) = state { return }
+        if case .paused(_, _, _, let current) = state, current == reason { return }
         guard let startedAt = sessionStartedAt else { return }
-        Self.log.info("network unsatisfied — entering .paused(.networkLost)")
+        Self.log.info("entering .paused(\(String(describing: reason)))")
         // Stamp any in-flight entries (an original chunk arrived but the
         // server never delivered its translation) as at-risk so the
         // bubble view can render the "перевод не получен" placeholder
@@ -954,13 +1011,22 @@ public final class TranslationOrchestrator {
             await meSnapshot?.close()
             await peerSnapshot?.close()
         }
-        state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: .networkLost)
-        armPauseRecoveryWatchdog()
+        state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: reason)
+        // The recovery watchdog bounds a network outage; a sleeping Mac
+        // is not an outage — `systemDidWake` owns that recovery.
+        if reason == .networkLost {
+            armPauseRecoveryWatchdog()
+        }
     }
 
-    private func resumeFromNetworkPause(mode: SessionMode, languages: LanguagePair) {
-        guard case .paused(_, _, let startedAt, .networkLost) = state else { return }
-        Self.log.info("network satisfied during pause — resuming")
+    /// Resume from a recoverable pause (`.networkLost` after the path
+    /// returned, `.systemSleep` after wake-up). `.awaitingNetwork` means a
+    /// resume is already in flight — starting a second one would double-
+    /// connect the streams.
+    private func resumeFromPause(mode: SessionMode, languages: LanguagePair) {
+        guard case .paused(_, _, let startedAt, let reason) = state,
+              reason == .networkLost || reason == .systemSleep else { return }
+        Self.log.info("resuming from .paused(\(String(describing: reason)))")
         state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: .awaitingNetwork)
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1074,7 +1140,7 @@ public final class TranslationOrchestrator {
             guard let self else { return }
             if Task.isCancelled { return }
             // Only escalate if we're still stuck on a network outage
-            // (`.networkLost`). Once `resumeFromNetworkPause` flips us
+            // (`.networkLost`). Once `resumeFromPause` flips us
             // to `.paused(.awaitingNetwork)`, resume is in flight —
             // killing it would force-error a recovery that might
             // succeed seconds later on a slow OpenAI handshake. The
