@@ -242,6 +242,28 @@ public final class TranslationOrchestrator {
     /// while still being short enough to feel responsive.
     private static let reconnectWatchdogSeconds: TimeInterval = 15
 
+    /// Watchdog bounding the `.connecting` phase. `start()` suspends at
+    /// several unbounded awaits — the WS handshake (a half-dead network
+    /// can stall it for the full URLSession timeout or beyond) and the
+    /// CoreAudio HAL bring-up (a busy/wedged coreaudiod). Without a
+    /// budget the session sits in `.connecting` forever with a dead
+    /// Start button (`start()` requires `.idle`). Armed on entering
+    /// `.connecting`; cancelled on reaching `.translating` and in
+    /// `stopAllStreams()`.
+    private var connectWatchdogTask: Task<Void, Never>?
+    /// Comfortably above a slow-but-live bring-up (mixer starts took
+    /// 0.3–0.7 s in field logs; WS connects 0.6–6 s) while still bailing
+    /// out of a genuinely hung connect within one attention span.
+    ///
+    /// Deliberately WALL-clock (`Task.sleep`), not the injected `clock`:
+    /// the hazard is real-world time the user spends staring at a stuck
+    /// "connecting" UI. Virtual-time clocks (`InstantClock` fast-forwards
+    /// every sleep) would otherwise fire this mid-start in tests that
+    /// legitimately compress hours into microseconds. `var` (not `let`)
+    /// so the watchdog regression tests can shrink the budget to run in
+    /// real milliseconds.
+    var connectWatchdogBudget: TimeInterval = 30
+
     /// Watchdog that surfaces `.noDataFromServer` if the orchestrator
     /// stays in `.translating` for `noDataWatchdogSeconds` without a
     /// single frame flowing from the mic side AND without any
@@ -322,6 +344,23 @@ public final class TranslationOrchestrator {
         currentSettings = settings
         transcript.clear()
         transcript.currentLanguagePair = languages
+        // Bound the whole .connecting phase. Every await below (permission
+        // dialog aside, that's user-paced) can hang unboundedly — a WS
+        // handshake against a half-dead network, a HAL bring-up against a
+        // busy coreaudiod. Without a budget the session sits in .connecting
+        // forever and Start looks dead (start() requires .idle).
+        armConnectWatchdog()
+        // start() suspends at several awaits below; the user can click Stop
+        // (or the connect watchdog can fire) during any of them. Each await
+        // re-checks that we're still the active .connecting attempt before
+        // proceeding — otherwise the interloper's settled state (.idle after
+        // stop, .error after watchdog) must win, not be overwritten by this
+        // stale continuation (same shape as resumeStreams' reentrancy guards).
+        func abortedByStateChange() -> Bool {
+            if case .connecting = state { return false }
+            Self.log.info("start() — state changed mid-start (\(String(describing: self.state))); aborting this attempt")
+            return true
+        }
 
         // Permission gates. Mic permission is required by both `.call`
         // and `.test` (anything that captures from the mic). `.listen`
@@ -331,6 +370,7 @@ public final class TranslationOrchestrator {
             Self.log.info("start() — microphone permission currentStatus=\(String(describing: status))")
             let resolved = status == .notDetermined ? await permissions.request(.microphone) : status
             Self.log.info("start() — microphone permission resolved=\(String(describing: resolved))")
+            if abortedByStateChange() { return }
             guard resolved == .granted else {
                 Self.log.error("start() guard failed: microphone permission denied → .error(.permissionDenied)")
                 state = .error(.permissionDenied(.microphone))
@@ -360,14 +400,22 @@ public final class TranslationOrchestrator {
            await teardownFinished(pending, within: Self.coreAudioTeardownBudgetSeconds) == false {
             Self.log.error("start() — previous CoreAudio teardown still draining after \(Self.coreAudioTeardownBudgetSeconds)s; starting the shared engine anyway (audio may stutter until the old HAL stop unwedges)")
         }
+        if abortedByStateChange() { return }
 
         Self.log.info("start() — starting output mixer (outputDeviceUID=\(settings.outputDeviceUID ?? "default"))")
         do {
             try await outputMixer.start(deviceUID: settings.outputDeviceUID)
             outputMixer.setOriginalGain(settings.originalMixVolume)
         } catch {
+            if abortedByStateChange() { return }
             Self.log.error("start() output mixer failed: \(String(describing: error)) → .error(.outputDeviceUnavailable)")
             state = .error(.outputDeviceUnavailable)
+            return
+        }
+        if abortedByStateChange() {
+            // The mixer may have finished starting after the interloper's
+            // teardown ran — leave nothing running behind a settled state.
+            await stopAllStreams()
             return
         }
 
@@ -382,6 +430,15 @@ public final class TranslationOrchestrator {
                 try await peer.connect(target: languages.mine)
             } catch {
                 let mapped = mapConnectError(error)
+                // A late connect failure after the user already stopped (or
+                // the watchdog fired) must not overwrite the settled state.
+                // `peerStream` was nil-ed by the interloper's teardown, so
+                // close the local half-open stream explicitly.
+                if abortedByStateChange() {
+                    await peer.close()
+                    await stopAllStreams()
+                    return
+                }
                 Self.log.error("start() peer.connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
                 // Partial-start teardown: the output mixer is already
                 // running and `peerStream` holds a half-open stream.
@@ -390,6 +447,11 @@ public final class TranslationOrchestrator {
                 // because the state never returns to `.idle`).
                 await stopAllStreams()
                 state = .error(mapped)
+                return
+            }
+            if abortedByStateChange() {
+                await peer.close()
+                await stopAllStreams()
                 return
             }
             Self.log.info("start() — peer stream connected; wiring incoming pipeline")
@@ -412,6 +474,12 @@ public final class TranslationOrchestrator {
                 try await me.connect(target: languages.peer)
             } catch {
                 let mapped = mapConnectError(error)
+                // Same late-failure reentrancy rule as the peer stream above.
+                if abortedByStateChange() {
+                    await me.close()
+                    await stopAllStreams()
+                    return
+                }
                 Self.log.error("start() me.connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
                 // Partial-start teardown: in `.call` mode the peer
                 // pipeline is already wired and translating at this
@@ -422,6 +490,11 @@ public final class TranslationOrchestrator {
                 state = .error(mapped)
                 return
             }
+            if abortedByStateChange() {
+                await me.close()
+                await stopAllStreams()
+                return
+            }
             Self.log.info("start() — me stream connected; wiring outgoing pipeline (destination=\(mode == .test ? "speakers" : "BlackHole 2ch"))")
             wireOutgoingPipeline(stream: me, destination: mode == .test ? .speakers : .virtualMic)
             observeConnectionState(stream: me, speaker: .me, target: languages.peer, mode: mode)
@@ -429,6 +502,7 @@ public final class TranslationOrchestrator {
 
         // Capture session start time once and reuse across reconnects so
         // the popover timer never resets mid-session. `stop()` clears it.
+        cancelConnectWatchdog()
         let startedAt = clock.now()
         sessionStartedAt = startedAt
         // Fresh session — reset empty-close counters; a previous run's
@@ -711,6 +785,33 @@ public final class TranslationOrchestrator {
     private func mapConnectError(_ error: Error) -> TranslationError {
         if let te = error as? TranslationError { return te }
         return .networkLost
+    }
+
+    /// Arm the connect-phase watchdog — see `connectWatchdogTask` for why.
+    /// Fires only if the state is still `.connecting` past the budget;
+    /// tears the half-started session down and surfaces `.networkLost`
+    /// (the dominant real cause: a connect hanging against a dead path).
+    /// The `stopAllStreams()` it runs also makes the parked `connect()`
+    /// throw, which the `start()` reentrancy guards then swallow without
+    /// overwriting the `.error` set here.
+    private func armConnectWatchdog() {
+        connectWatchdogTask?.cancel()
+        let budget = connectWatchdogBudget
+        connectWatchdogTask = Task { @MainActor [weak self] in
+            // Wall-clock on purpose — see `connectWatchdogBudget`.
+            try? await Task.sleep(nanoseconds: UInt64(budget * 1_000_000_000))
+            guard let self, !Task.isCancelled else { return }
+            if case .connecting = self.state {
+                Self.log.error("connect watchdog fired after \(budget)s — session stuck in .connecting; forcing terminal .error(.networkLost)")
+                await self.stopAllStreams()
+                self.state = .error(.networkLost)
+            }
+        }
+    }
+
+    private func cancelConnectWatchdog() {
+        connectWatchdogTask?.cancel()
+        connectWatchdogTask = nil
     }
 
     /// Arm the reconnect watchdog. After `Self.reconnectWatchdogSeconds`
@@ -1307,6 +1408,7 @@ public final class TranslationOrchestrator {
         // Stop. stopAllStreams() is NOT on the reconnect / network-pause paths,
         // so the token correctly survives those. Idempotent.
         endAudioActivity()
+        cancelConnectWatchdog()
         cancelReconnectWatchdog()
         cancelNoDataWatchdog()
         stopNetworkObserver()

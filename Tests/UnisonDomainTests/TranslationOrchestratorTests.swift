@@ -1243,3 +1243,87 @@ final class GateSwitchFactory: TranslationStreamFactory, @unchecked Sendable {
     await o.stop()
     #expect(o.outputRouteDegraded == false, "stop() must clear the route hint")
 }
+
+// MARK: - start() reentrancy vs stop() (D1) + connect watchdog (D2)
+
+/// Poll with yields until `cond` holds or the budget of yields runs out.
+/// House-style wrapper over the `for _ in 0..<N where … { await Task.yield() }`
+/// loops used elsewhere in this file, with a real-time fallback sleep so
+/// gated awaits (not just actor hops) get a chance to park.
+@MainActor
+private func spinUntil(_ cond: @MainActor () -> Bool) async {
+    for _ in 0..<1000 where !cond() {
+        await Task.yield()
+        try? await Task.sleep(nanoseconds: 2_000_000)
+    }
+}
+
+// Регрессия D1: stop() во время подвешенного connect() должен победить —
+// продолжение start() не имеет права перезаписать .idle (ни в
+// .translating-зомби, ни в .error).
+@Test @MainActor func orchestrator_stopDuringConnect_staysIdle() async throws {
+    let factory = MockTranslationStreamFactory()
+    factory.gateNextConnect = true
+    let o = makeOrchestrator(factory: factory)
+    let startTask = Task { await o.start(mode: .listen, languages: .default) }
+    await spinUntil { factory.streams[.peer]?.connectWaiting == true }
+    #expect(factory.streams[.peer]?.connectWaiting == true, "start() не дошёл до connect")
+    await o.stop()
+    #expect(o.state == .idle)
+    factory.streams[.peer]?.releaseConnect()
+    await startTask.value
+    #expect(o.state == .idle, "start() продолжился после stop() и перезаписал state: \(o.state)")
+}
+
+// Регрессия D1: если после юзерского stop() подвешенный connect() ещё и
+// падает, catch-ветка start() не должна перетереть .idle на .error.
+@Test @MainActor func orchestrator_stopDuringConnect_thenConnectFails_staysIdle() async throws {
+    let factory = MockTranslationStreamFactory()
+    factory.gateNextConnect = true
+    let o = makeOrchestrator(factory: factory)
+    let startTask = Task { await o.start(mode: .listen, languages: .default) }
+    await spinUntil { factory.streams[.peer]?.connectWaiting == true }
+    await o.stop()
+    factory.streams[.peer]?.connectError = TranslationError.networkLost
+    factory.streams[.peer]?.releaseConnect()
+    await startTask.value
+    #expect(o.state == .idle, "поздний фейл connect() перетёр .idle на \(o.state)")
+}
+
+// Регрессия D2: сессия не должна висеть в .connecting вечно, если connect
+// подвис (мёртвая сеть, зависший HAL). Вотчдог обязан добить её в .error.
+// Вотчдог намеренно wall-clock (см. connectWatchdogBudget) — виртуальные
+// часы (InstantClock) проматывают sleep'ы мгновенно и стреляли бы посреди
+// легитимного старта; поэтому тест сжимает бюджет до миллисекунд.
+@Test @MainActor func orchestrator_connectWatchdog_failsSessionAfterBudget() async throws {
+    let factory = MockTranslationStreamFactory()
+    factory.gateNextConnect = true
+    let o = makeOrchestrator(factory: factory)
+    o.connectWatchdogBudget = 0.05
+    let startTask = Task { await o.start(mode: .listen, languages: .default) }
+    await spinUntil { factory.streams[.peer]?.connectWaiting == true }
+    if case .connecting = o.state {} else {
+        Issue.record("Expected .connecting, got \(o.state)")
+    }
+    await spinUntil { o.state.errorValue == .networkLost }
+    #expect(o.state.errorValue == .networkLost, "вотчдог не сработал: \(o.state)")
+    factory.streams[.peer]?.releaseConnect()
+    await startTask.value
+    #expect(o.state.errorValue == .networkLost)
+}
+
+// Обратная сторона D2: успешный старт обязан снять вотчдог — он не должен
+// выстрелить позже и убить здоровую сессию.
+@Test @MainActor func orchestrator_connectWatchdog_cancelledOnSuccessfulStart() async throws {
+    let o = makeOrchestrator()
+    o.connectWatchdogBudget = 0.05
+    await o.start(mode: .listen, languages: .default)
+    if case .translating = o.state {} else {
+        Issue.record("Expected .translating, got \(o.state)")
+    }
+    // Дать снятому вотчдогу время «выстрелить», если бы он не был снят.
+    try await Task.sleep(nanoseconds: 200_000_000)
+    if case .translating = o.state {} else {
+        Issue.record("вотчдог убил здоровую сессию: \(o.state)")
+    }
+}

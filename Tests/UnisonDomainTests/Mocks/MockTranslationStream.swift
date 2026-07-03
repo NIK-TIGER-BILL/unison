@@ -10,6 +10,15 @@ public final class MockTranslationStream: TranslationStream, @unchecked Sendable
     /// Used by tests that need to keep the orchestrator in
     /// `.reconnecting` across the retry loop (e.g. watchdog tests).
     public var connectError: Error?
+    /// When true, `connect(...)` parks on a continuation until the test
+    /// calls `releaseConnect()`. Models a slow/hung WS handshake so tests
+    /// can interleave `stop()` / clock advances mid-connect (start()
+    /// reentrancy + connect-watchdog regressions).
+    public var gateConnect = false
+    /// True while a `connect(...)` call is parked on the gate — the
+    /// test's "start() reached the connect await" signal.
+    public private(set) var connectWaiting = false
+    private var connectGate: CheckedContinuation<Void, Never>?
 
     private var transcriptContinuation: AsyncStream<TranscriptDelta>.Continuation?
     private var outputContinuation: AsyncStream<AudioFrame>.Continuation?
@@ -33,9 +42,23 @@ public final class MockTranslationStream: TranslationStream, @unchecked Sendable
     }
 
     public func connect(target: Language) async throws {
+        if gateConnect {
+            connectWaiting = true
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                connectGate = c
+            }
+            connectWaiting = false
+        }
         if let err = connectError { throw err }
         connectedTo = target
         connectionContinuation?.yield(.connected)
+    }
+
+    /// Release a `connect(...)` parked on the gate. Safe to call when
+    /// nothing is parked (no-op).
+    public func releaseConnect() {
+        connectGate?.resume()
+        connectGate = nil
     }
     public func send(_ frame: AudioFrame) async { sentFrames.append(frame) }
     public func close() async {
@@ -58,10 +81,14 @@ public final class MockTranslationStreamFactory: TranslationStreamFactory, @unch
     /// the reconnect path to keep the orchestrator stuck in the retry
     /// loop (useful for watchdog tests).
     public var nextConnectError: Error?
+    /// When true, streams produced by `make(...)` park their `connect()`
+    /// on a gate until the test calls `releaseConnect()` on them.
+    public var gateNextConnect = false
     public init() {}
     public func make(speaker: Speaker) -> any TranslationStream {
         let s = MockTranslationStream(speaker: speaker)
         s.connectError = nextConnectError
+        s.gateConnect = gateNextConnect
         streams[speaker] = s
         return s
     }
