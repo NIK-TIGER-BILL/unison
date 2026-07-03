@@ -15,6 +15,14 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
     private static let log = UnisonLog(category: "URLSessionWSClient")
 
     private var task: URLSessionWebSocketTask?
+    /// Periodic ping/pong — the only reliable detector of a half-open
+    /// socket (Mac slept, NAT dropped the mapping, server died silently):
+    /// in that state `receive()` never errors and `send()` buffers into
+    /// the void, so without this the session becomes a silent zombie.
+    /// Started on `connect`, stopped on `close`; a missed-pong verdict
+    /// funnels into the same one-shot close-reason channel as every other
+    /// disconnect, so the standard reconnect path takes over.
+    private var keepalive: WSKeepalive?
     /// Lazily-built `URLSession` so we can install `self` as the delegate.
     /// Stored once and reused; the constructor never receives a session.
     private var session: URLSession!
@@ -88,6 +96,45 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
         self.task = task
         task.resume()
         startReceiveLoop()
+        startKeepalive(task: task)
+    }
+
+    /// Arm the ping/pong liveness probe for this connection — see the
+    /// `keepalive` property for why. Pings ride the same task; a task
+    /// that's no longer `.running` fails the ping immediately (counts
+    /// as a miss — the close path is already doing its job then).
+    private func startKeepalive(task: URLSessionWebSocketTask) {
+        keepalive?.stop()
+        keepalive = WSKeepalive(
+            sleeper: { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
+            sendPing: { [weak task] done in
+                guard let task, task.state == .running else {
+                    done(URLError(.networkConnectionLost))
+                    return
+                }
+                task.sendPing { done($0) }
+            },
+            onDead: { [weak self] in self?.handleKeepaliveDeath() }
+        )
+        keepalive?.start()
+    }
+
+    /// Missed-pong verdict: surface it through the standard one-shot
+    /// close channel (`.error`), matching how a receive-loop transport
+    /// error is reported, then finish the receive stream and cancel the
+    /// task. The consumer stream maps `.error` → `.failed(.networkLost)`
+    /// and the orchestrator's reconnect machinery takes it from there.
+    private func handleKeepaliveDeath() {
+        Self.log.error("keepalive — pongs stopped coming back; declaring the socket dead (half-open TCP after sleep / NAT idle-timeout / silent server death)")
+        if tryMarkCloseEmitted() {
+            closeContinuation?.yield(.error(NSError(
+                domain: "com.unison.app.ws",
+                code: -2,
+                userInfo: [NSLocalizedDescriptionKey: "keepalive timeout — no pong from server"]
+            )))
+        }
+        receiveContinuation?.finish()
+        task?.cancel(with: .goingAway, reason: nil)
     }
 
     public func send(_ message: WSMessage) async throws {
@@ -104,6 +151,8 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
     public func closeStream() -> AsyncStream<WSCloseReason> { closeReasonStreamRef }
 
     public func close() async {
+        keepalive?.stop()
+        keepalive = nil
         task?.cancel(with: .normalClosure, reason: nil)
         receiveContinuation?.finish()
         if tryMarkCloseEmitted() {
