@@ -97,6 +97,13 @@ public final class FileLogStore: @unchecked Sendable {
     /// the integration test seeing a deterministic first line at every
     /// app launch.
     private var bannerEmitted = false
+    /// Cached write handle for the live file. The previous per-line
+    /// open→seek→write→close cost four syscalls per log line — with the
+    /// always-on audio diagnostics (~tens of lines/sec during a session)
+    /// that's hundreds of thousands of wasted syscalls over a long
+    /// meeting, all serialized on this queue. Only touched on `queue`;
+    /// invalidated by rotation and on write errors (next line reopens).
+    private var writeHandle: FileHandle?
     /// When `false`, `write` is a no-op (unified logging still happens
     /// via `UnisonLog`'s `os.Logger`). The shared singleton sets this
     /// off under `swift test` so incidental logging doesn't pollute the
@@ -199,21 +206,30 @@ public final class FileLogStore: @unchecked Sendable {
     }
 
     /// Append without bootstrap/banner/rotation logic. Used by the
-    /// banner emitter to avoid recursion.
+    /// banner emitter to avoid recursion. Reuses `writeHandle` across
+    /// lines; any I/O failure drops the handle so the next line starts
+    /// from a fresh open (same failure tolerance as before — a broken
+    /// log path never crashes the app).
     private func appendLineRaw(_ line: String) {
         guard let data = line.data(using: .utf8) else { return }
-        let url = currentFileURL
-        if let handle = try? FileHandle(forWritingTo: url) {
-            defer { try? handle.close() }
+        if writeHandle == nil {
+            let url = currentFileURL
+            if !FileManager.default.fileExists(atPath: url.path) {
+                FileManager.default.createFile(atPath: url.path, contents: nil)
+            }
+            guard let handle = try? FileHandle(forWritingTo: url) else { return }
             // `seekToEnd()` returns the new offset; we don't need it.
-            // The explicit `_ =` silences the "result of 'try?' is
-            // unused" warning while keeping the failure tolerance
-            // (broken seeks don't crash the log path).
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
-        } else {
-            // First write to a non-existent file. Create it.
-            try? data.write(to: url, options: .atomic)
+            guard (try? handle.seekToEnd()) != nil else {
+                try? handle.close()
+                return
+            }
+            writeHandle = handle
+        }
+        do {
+            try writeHandle?.write(contentsOf: data)
+        } catch {
+            try? writeHandle?.close()
+            writeHandle = nil
         }
     }
 
@@ -241,6 +257,10 @@ public final class FileLogStore: @unchecked Sendable {
     }
 
     private func rotateLocked() {
+        // The live file is about to be moved out from under the cached
+        // handle — close it first; the next write reopens the fresh file.
+        try? writeHandle?.close()
+        writeHandle = nil
         let fm = FileManager.default
         // Shift unison.{maxFiles-1}.log out of the way (delete the oldest),
         // then walk back to 0 renaming each into N+1. Numbered copies use
