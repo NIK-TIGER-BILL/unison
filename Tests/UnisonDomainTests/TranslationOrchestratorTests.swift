@@ -1327,3 +1327,43 @@ private func spinUntil(_ cond: @MainActor () -> Bool) async {
         Issue.record("вотчдог убил здоровую сессию: \(o.state)")
     }
 }
+
+// MARK: - Gemini goAway → проактивный мгновенный реконнект (D3)
+
+// serverGoingAway реконнектится БЕЗ backoff-сна: ManualClock подвешивает
+// любой sleep — если реконнект просит сон, тест не дойдёт до .translating.
+@Test @MainActor func orchestrator_serverGoingAway_reconnectsWithoutBackoff() async throws {
+    let clock = ManualClock()
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: clock)
+    await o.start(mode: .listen, languages: .default)
+    let first = try #require(factory.streams[.peer])
+    first.emitConnectionState(.failed(.serverGoingAway, receivedAnyData: true))
+    await spinUntil {
+        if case .translating = o.state { factory.streams[.peer] !== first } else { false }
+    }
+    if case .translating = o.state {} else {
+        Issue.record("реконнект не завершился без сна: \(o.state)")
+    }
+    #expect(factory.streams[.peer] !== first, "новый стрим не создан")
+    await o.stop()
+}
+
+// goAway ДО первых данных — это ротация сервера, а не невалидный ключ:
+// empty-close-эскалация не должна давать терминальный .apiKeyInvalid.
+@Test @MainActor func orchestrator_serverGoingAwayWithoutData_notApiKeyInvalid() async throws {
+    let clock = ManualClock()
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: clock)
+    await o.start(mode: .listen, languages: .default)
+    let first = try #require(factory.streams[.peer])
+    first.emitConnectionState(.failed(.serverGoingAway, receivedAnyData: false))
+    await spinUntil {
+        if case .translating = o.state { factory.streams[.peer] !== first } else { false }
+    }
+    #expect(o.state.errorValue == nil, "goAway без данных эскалировался в \(String(describing: o.state.errorValue))")
+    if case .translating = o.state {} else {
+        Issue.record("сессия не пережила goAway: \(o.state)")
+    }
+    await o.stop()
+}

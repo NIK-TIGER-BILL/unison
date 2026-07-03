@@ -26,6 +26,13 @@ public enum TranslationError: Error, Equatable, Sendable {
     /// state for Process Tap, so runtime amplitude monitoring is the
     /// only reliable detection mechanism.
     case audioCaptureDenied
+    /// The provider announced it will close the session soon (Gemini
+    /// Live `goAway` — session time limit / server maintenance). Not a
+    /// failure of anything on our side: the orchestrator treats it as a
+    /// non-terminal signal and swaps in a fresh stream immediately
+    /// (zero reconnect backoff) instead of waiting for the socket to
+    /// actually die mid-utterance.
+    case serverGoingAway
 
     public var shortMessage: String {
         switch self {
@@ -39,6 +46,7 @@ public enum TranslationError: Error, Equatable, Sendable {
         case .outputDeviceUnavailable: "Выход аудио недоступен"
         case .noDataFromServer: "Микрофон не подаёт сигнал"
         case .audioCaptureDenied: "Нет доступа к захвату системного звука"
+        case .serverGoingAway: "Сервер закрыл сессию"
         }
     }
 }

@@ -220,3 +220,32 @@ private final class SteppingClock: UnisonDomain.Clock, @unchecked Sendable {
         #expect(frame?.format == .int16)
     }
 }
+
+// Регрессия D3: goAway — сервер предупреждает о скором закрытии сессии
+// (лимит Live API). Стрим обязан немедленно сдать себя оркестратору под
+// проактивный реконнект, а не молча дожидаться обрыва сокета.
+extension GeminiLiveTranslateStreamTests {
+    @Test func goAway_yieldsServerGoingAwayFailure() async throws {
+        let ws = FakeWSClient()
+        let stream = GeminiLiveTranslateStream(
+            apiKey: "AQ.k", client: ws, clock: SystemClock(), speaker: .peer)
+        try await stream.connect(target: .en)
+        // Данные уже шли — receivedAnyData должен уехать в событие как true.
+        ws.push(.text(#"{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"data":"QUJD","mimeType":"audio/pcm;rate=24000"}}]}}}"#))
+        ws.push(.text(#"{"goAway":{"timeLeft":"10s"}}"#))
+
+        var it = stream.connectionState.makeAsyncIterator()
+        var failed: ConnectionState?
+        // connecting → connected → failed(.serverGoingAway)
+        for _ in 0..<5 {
+            guard let s = await it.next() else { break }
+            if case .failed = s { failed = s; break }
+        }
+        guard case .failed(let err, let receivedAnyData) = failed else {
+            Issue.record("не дождались .failed, got \(String(describing: failed))")
+            return
+        }
+        #expect(err == .serverGoingAway)
+        #expect(receivedAnyData == true)
+    }
+}

@@ -1221,7 +1221,11 @@ public final class TranslationOrchestrator {
         // `.apiKeyInvalid` (see `emptyCloseTerminalThreshold` for why a
         // lone occurrence is already conclusive); the counter machinery
         // stays so the threshold can be raised without rework.
-        if !receivedAnyData {
+        // `serverGoingAway` is the provider's own "session over, please
+        // rotate" — it says nothing about credentials even when it lands
+        // before the first delta, so it must not feed the empty-close
+        // apiKeyInvalid escalation.
+        if !receivedAnyData && error != .serverGoingAway {
             let next = (consecutiveEmptyCloses[speaker] ?? 0) + 1
             consecutiveEmptyCloses[speaker] = next
             if next >= Self.emptyCloseTerminalThreshold {
@@ -1298,14 +1302,22 @@ public final class TranslationOrchestrator {
             let delay: TimeInterval
             if firstAttempt, case .rateLimited(let retryAfter) = error {
                 delay = retryAfter
+            } else if firstAttempt, error == .serverGoingAway {
+                // The server told us it's rotating the session BEFORE the
+                // socket died — every millisecond of backoff here is lost
+                // audio for no reason. Swap immediately; later attempts
+                // (if the swap itself fails) back off normally.
+                delay = 0
             } else {
                 delay = backoff.nextDelay()
             }
             firstAttempt = false
-            do {
-                try await clock.sleep(for: delay)
-            } catch {
-                return // cancelled
+            if delay > 0 {
+                do {
+                    try await clock.sleep(for: delay)
+                } catch {
+                    return // cancelled
+                }
             }
             // The user may have called stop() while we were sleeping. If state
             // is no longer .reconnecting, abandon the retry loop quietly so we

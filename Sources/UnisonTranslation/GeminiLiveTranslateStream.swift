@@ -231,7 +231,12 @@ public actor GeminiLiveTranslateStream: TranslationStream {
                 }
             }
         case .goAway:
-            Self.log.info("\(String(describing: speaker)) goAway — server will close soon")
+            // Session time limit / server rotation: the socket WILL die
+            // shortly. Surface it now so the orchestrator swaps in a fresh
+            // stream immediately (zero-backoff reconnect) instead of losing
+            // audio when the connection actually drops mid-utterance.
+            Self.log.info("\(String(describing: speaker)) goAway — server will close soon; requesting proactive stream swap")
+            connectionContinuation.yield(.failed(.serverGoingAway, receivedAnyData: receivedAnyData))
         case .unknown:
             break
         }
