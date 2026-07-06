@@ -195,16 +195,14 @@ import Testing
     #expect(store.entries[0].translatedText == "Привет")
 }
 
-/// A fork must report the NEW entry's id to `onDeltaApplied`, not the
-/// stream's reused id — otherwise the live typing-dots (wired through this
-/// callback) attach to the wrong/stale bubble.
-@Test @MainActor func transcriptStore_fork_reportsForkedEntryIdToOnDeltaApplied() {
+/// A cross-speaker handoff after a reused stream id forks a BRAND-NEW entry
+/// rather than appending into the reused id, so the resumed speech renders
+/// in its own bubble after the interjection instead of the buried one.
+@Test @MainActor func transcriptStore_fork_createsNewEntryForResumedUtterance() {
     let clock = FakeClock(now: epochDate(1000))
     let store = TranscriptStore(clock: clock)
     let peerId = freshUUID()
     let meId = freshUUID()
-    var lastReported = freshUUID() // placeholder; overwritten by the callback
-    store.onDeltaApplied = { lastReported = $0 }
 
     store.apply(TranscriptDelta(entryId: peerId, speaker: .peer, kind: .original, text: "Hello", isFinal: false))
     clock.advance(by: 2)
@@ -213,9 +211,8 @@ import Testing
     store.apply(TranscriptDelta(entryId: peerId, speaker: .peer, kind: .original, text: "I am fine", isFinal: false))
 
     #expect(store.entries.count == 3)
-    let forkId = store.entries[2].id
-    #expect(forkId != peerId)            // a brand-new entry, not the reused id
-    #expect(lastReported == forkId)      // live-dots target the fork
+    #expect(store.entries[2].id != peerId)              // a brand-new entry, not the reused id
+    #expect(store.entries[2].originalText == "I am fine")
 }
 
 /// The handoff "quiet" check must key off the speaker's own INPUT activity,

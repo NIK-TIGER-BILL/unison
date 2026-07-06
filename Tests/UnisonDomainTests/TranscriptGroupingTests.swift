@@ -1,363 +1,163 @@
+import Foundation
 import Testing
 @testable import UnisonDomain
 @testable import UnisonUI
 
-// MARK: - Helpers
+// MARK: - Timestamped entry builder (for liveBubbles tests)
 
-private func makeEntry(
+private func makeEntryAt(
     _ speaker: Speaker,
     original: String?,
-    translated: String
+    translated: String,
+    at seconds: TimeInterval,
+    id: UUID = freshUUID()
 ) -> TranscriptEntry {
     TranscriptEntry(
-        id: freshUUID(),
+        id: id,
         speaker: speaker,
         originalText: original,
         translatedText: translated,
         sourceLanguage: speaker == .me ? .ru : .en,
         targetLanguage: speaker == .me ? .en : .ru,
-        timestamp: epochDate(0)
+        timestamp: epochDate(seconds),
+        lastActivityAt: epochDate(seconds)
     )
 }
 
-// MARK: - Basic shape
+// MARK: - liveBubbles (commit-and-freeze derivation)
 
-@Test func grouping_emptyInput_returnsEmpty() {
-    let groups = TranscriptGrouping.group(entries: [])
-    #expect(groups.isEmpty)
+@Test func liveBubbles_completedSentence_freezesNoLive() {
+    let e = makeEntryAt(.peer, original: "Hi there.", translated: "Привет.", at: 0)
+    let b = TranscriptGrouping.liveBubbles(entries: [e], now: epochDate(0))
+    #expect(b.count == 1)
+    #expect(b[0].isLive == false)
+    #expect(b[0].primaryText == "Привет.")     // peer: primary = translation
+    #expect(b[0].secondaryText == "Hi there.")
 }
 
-@Test func grouping_singleMeEntry_yieldsOneGroupOneBubble() {
-    let e = makeEntry(.me, original: "Привет", translated: "Hi")
-    let groups = TranscriptGrouping.group(entries: [e])
-    #expect(groups.count == 1)
-    #expect(groups[0].speaker == .me)
-    #expect(groups[0].bubbles.count == 1)
-    let b = groups[0].bubbles[0]
-    #expect(b.primaryText == "Привет")
-    #expect(b.secondaryText == "Hi")
-    #expect(b.isFirstInGroup == true)
-    #expect(b.isLastInGroup == true)
+@Test func liveBubbles_incompleteTranslation_staysLive() {
+    let e = makeEntryAt(.peer, original: "Hi there.", translated: "Прив", at: 0)
+    let b = TranscriptGrouping.liveBubbles(entries: [e], now: epochDate(0))
+    #expect(b.count == 1)
+    #expect(b[0].isLive == true)
+    #expect(b[0].primaryText == "Прив")
+    #expect(b[0].secondaryText == "Hi there.")
 }
 
-@Test func grouping_singlePeerEntry_swapsPrimaryAndSecondary() {
-    let e = makeEntry(.peer, original: "Hello", translated: "Привет")
-    let groups = TranscriptGrouping.group(entries: [e])
-    #expect(groups.count == 1)
-    let b = groups[0].bubbles[0]
-    #expect(b.primaryText == "Привет")
-    #expect(b.secondaryText == "Hello")
+// Two finished utterances (separate entries) → two bubbles, each with its
+// own matched pair.
+@Test func liveBubbles_twoUtterances_twoBubbles() {
+    let e1 = makeEntryAt(.peer, original: "One.", translated: "Раз.", at: 0)
+    let e2 = makeEntryAt(.peer, original: "Two.", translated: "Два.", at: 0)
+    let b = TranscriptGrouping.liveBubbles(entries: [e1, e2], now: epochDate(0))
+    #expect(b.count == 2)
+    #expect(b[0].primaryText == "Раз.")
+    #expect(b[0].secondaryText == "One.")
+    #expect(b[1].primaryText == "Два.")
+    #expect(b[1].secondaryText == "Two.")
 }
 
-// Regression: a single peer entry whose ORIGINAL has already streamed two
-// sentences (splits into 2 chunks) while the TRANSLATION is still one
-// short chunk must NOT render the translation duplicated across both
-// bubbles. The old `?? primaryParts.last` fallback repeated the last
-// translation chunk for every extra original chunk, producing the
-// reported "same translation in two consecutive bubbles" artifact that
-// resolved itself once the rest of the translation arrived.
-@Test func grouping_peerMismatchedSplit_doesNotDuplicateTranslation() {
-    let s1 = String(repeating: "x", count: 200) + "."
-    let s2 = String(repeating: "y", count: 200) + "."
-    let translated = "Перевод реплики."
-    let e = makeEntry(.peer, original: s1 + " " + s2, translated: translated)
-
-    let groups = TranscriptGrouping.group(entries: [e], splitThreshold: 240)
-    #expect(groups.count == 1)
-    let bubbles = groups[0].bubbles
-    // Original split into two chunks → two bubbles.
-    #expect(bubbles.count == 2)
-    // The translation must appear in EXACTLY ONE bubble's primary slot,
-    // never repeated into the second.
-    let withTranslation = bubbles.filter { $0.primaryText == translated }.count
-    #expect(withTranslation == 1, "translation duplicated across \(withTranslation) bubbles")
-    // First bubble carries the translation; the extra bubble's primary is
-    // empty (it only shows its own slice of the original).
-    #expect(bubbles[0].primaryText == translated)
-    #expect(bubbles[1].primaryText.isEmpty)
-    // Both original slices are still present and distinct.
-    #expect(bubbles[0].secondaryText != bubbles[1].secondaryText)
+// The crux: a bubble keeps the SAME id from live → frozen, so it locks in
+// place instead of re-inserting (no "pop", no re-init).
+@Test func liveBubbles_liveThenFrozen_keepsStableId() {
+    let id = freshUUID()
+    let incomplete = makeEntryAt(.peer, original: "Hi there.", translated: "Прив", at: 0, id: id)
+    let liveId = TranscriptGrouping.liveBubbles(entries: [incomplete], now: epochDate(0))[0].id
+    let complete = makeEntryAt(.peer, original: "Hi there.", translated: "Привет.", at: 0, id: id)
+    let frozen = TranscriptGrouping.liveBubbles(entries: [complete], now: epochDate(0))[0]
+    #expect(frozen.isLive == false)
+    #expect(frozen.id == liveId)
 }
 
-// Inverse: translation longer than original must not duplicate the
-// original across bubbles either.
-@Test func grouping_peerMismatchedSplit_doesNotDuplicateOriginal() {
-    let t1 = String(repeating: "ы", count: 200) + "."
-    let t2 = String(repeating: "э", count: 200) + "."
-    let original = "Short original."
-    let e = makeEntry(.peer, original: original, translated: t1 + " " + t2)
-
-    let groups = TranscriptGrouping.group(entries: [e], splitThreshold: 240)
-    let bubbles = groups[0].bubbles
-    #expect(bubbles.count == 2)
-    let withOriginal = bubbles.filter { $0.secondaryText == original }.count
-    #expect(withOriginal == 1, "original duplicated across \(withOriginal) bubbles")
-    #expect(bubbles[1].secondaryText.isEmpty)
+// Translation lags: the original is finished but its translation is still
+// streaming (no terminator) → the bubble stays LIVE so it fills in, rather
+// than freezing half-translated.
+@Test func liveBubbles_translationLag_utteranceStaysLive() {
+    let e = makeEntryAt(.peer, original: "One sentence.", translated: "Одно", at: 0)
+    let b = TranscriptGrouping.liveBubbles(entries: [e], now: epochDate(0))
+    #expect(b.count == 1)
+    #expect(b[0].isLive == true)
+    #expect(b[0].secondaryText == "One sentence.")
+    #expect(b[0].primaryText == "Одно")
 }
 
-// MARK: - Same-speaker grouping
-
-@Test func grouping_consecutiveSameSpeaker_collapseIntoOneGroup() {
-    let a = makeEntry(.me, original: "Первая фраза.", translated: "First.")
-    let b = makeEntry(.me, original: "Вторая фраза.", translated: "Second.")
-    let groups = TranscriptGrouping.group(entries: [a, b])
-    #expect(groups.count == 1)
-    #expect(groups[0].bubbles.count == 2)
-    #expect(groups[0].bubbles.first?.isFirstInGroup == true)
-    #expect(groups[0].bubbles.last?.isLastInGroup == true)
+// A speaker change closes the previous run: its trailing fragment freezes
+// even without a terminator (the utterance is definitively over).
+@Test func liveBubbles_speakerChange_closesPrevRun() {
+    let p = makeEntryAt(.peer, original: "Hi", translated: "Прив", at: 0)
+    let m = makeEntryAt(.me, original: "Yes", translated: "", at: 1)
+    let b = TranscriptGrouping.liveBubbles(entries: [p, m], now: epochDate(1))
+    #expect(b.count == 2)
+    #expect(b[0].isLive == false)
+    #expect(b[0].primaryText == "Прив")
+    #expect(b[1].isLive == true)
+    #expect(b[1].primaryText == "Yes")          // me: primary = original
 }
 
-@Test func grouping_speakerSwitch_startsNewGroup() {
-    let a = makeEntry(.me, original: "Я.", translated: "I.")
-    let b = makeEntry(.peer, original: "You.", translated: "Ты.")
-    let groups = TranscriptGrouping.group(entries: [a, b])
-    #expect(groups.count == 2)
-    #expect(groups[0].speaker == .me)
-    #expect(groups[1].speaker == .peer)
-    #expect(groups[0].bubbles.first?.isLastInGroup == true)
-    #expect(groups[1].bubbles.first?.isLastInGroup == true)
+// A run that goes quiet for `finalizeAfter` freezes wholesale.
+@Test func liveBubbles_inactivity_freezesLastRun() {
+    let e = makeEntryAt(.peer, original: "Hi", translated: "Прив", at: 0)
+    let active = TranscriptGrouping.liveBubbles(entries: [e], now: epochDate(1))
+    #expect(active[0].isLive == true)
+    let stale = TranscriptGrouping.liveBubbles(entries: [e], now: epochDate(5))
+    #expect(stale[0].isLive == false)
 }
 
-// MARK: - Long text splitting
-
-@Test func grouping_shortTextDoesNotSplit() {
-    let e = makeEntry(.me, original: "Короткий текст.", translated: "Short text.")
-    let groups = TranscriptGrouping.group(entries: [e], splitThreshold: 240)
-    #expect(groups[0].bubbles.count == 1)
+// Clause-fragments across separate entries reconstruct into one sentence.
+@Test func liveBubbles_concatenatesRunAcrossEntries() {
+    let e1 = makeEntryAt(.peer, original: "Sometimes I'm", translated: "", at: 0)
+    let e2 = makeEntryAt(.peer, original: "halfway through it.", translated: "Иногда я на середине.", at: 0)
+    let b = TranscriptGrouping.liveBubbles(entries: [e1, e2], now: epochDate(0))
+    #expect(b.count == 1)
+    #expect(b[0].isLive == false)
+    #expect(b[0].secondaryText == "Sometimes I'm halfway through it.")
+    #expect(b[0].primaryText == "Иногда я на середине.")
 }
 
-@Test func grouping_singleSentenceLongerThanThresholdHardSplits() {
-    // A single sentence (no `.!?` boundary inside) used to flow through
-    // as one oversized bubble. The splitter now falls back to a length
-    // split at whitespace, so every bubble respects the threshold.
-    let long = String(repeating: "слово ", count: 100) // ~600 chars, no terminator
-    let e = makeEntry(.me, original: long, translated: long)
-    let groups = TranscriptGrouping.group(entries: [e], splitThreshold: 240)
-    #expect(groups[0].bubbles.count >= 2)
-    for b in groups[0].bubbles {
-        #expect(b.primaryText.count <= 240)
-    }
+// Regression: reconstructing the run and re-splitting by sentence mispaired
+// original↔translation whenever the two languages' sentence boundaries
+// differ (RU showed a sentence ahead of the EN in the same bubble). Each
+// entry's own (original, translation) pair — which the store matches per
+// turn — must stay together.
+@Test func liveBubbles_preservesPerEntryPairing() {
+    let e1 = makeEntryAt(.peer, original: "And there is also the gateway.", translated: "И есть также шлюз", at: 0)
+    let e2 = makeEntryAt(.peer, original: "The gateway is always running.", translated: "Шлюз всегда работает.", at: 0)
+    let b = TranscriptGrouping.liveBubbles(entries: [e1, e2], now: epochDate(0))
+    #expect(b.count == 2)
+    #expect(b[0].secondaryText == "And there is also the gateway.")
+    #expect(b[0].primaryText == "И есть также шлюз")
+    #expect(b[1].secondaryText == "The gateway is always running.")
+    #expect(b[1].primaryText == "Шлюз всегда работает.")
 }
 
-@Test func grouping_multipleSentencesAtThresholdGetSplit() {
-    // Six 60-char sentences = ~360 chars total; with threshold 240 we
-    // expect at least 2 bubbles.
-    let sentence = String(repeating: "слов ", count: 11) + "."
-    let primary = String(repeating: sentence, count: 6)
-    let e = makeEntry(.me, original: primary, translated: primary)
-    let groups = TranscriptGrouping.group(entries: [e], splitThreshold: 240)
-    #expect(groups[0].bubbles.count >= 2)
-    #expect(groups[0].bubbles.first?.isFirstInGroup == true)
-    #expect(groups[0].bubbles.last?.isLastInGroup == true)
-    // Middle bubble (if any) is neither first nor last in group.
-    if groups[0].bubbles.count >= 3 {
-        let middle = groups[0].bubbles[1]
-        #expect(middle.isFirstInGroup == false)
-        #expect(middle.isLastInGroup == false)
-    }
+// Regression: an abbreviation like "и т.д." (etc.) must NOT be split into a
+// second bubble — the bubble shows the utterance whole, unsplit.
+@Test func liveBubbles_abbreviationDoesNotSplitBubble() {
+    let e = makeEntryAt(.peer, original: "We support Telegram, email, and more.",
+                        translated: "Мы поддерживаем Telegram, почту, Slack и т.д.", at: 0)
+    let b = TranscriptGrouping.liveBubbles(entries: [e], now: epochDate(0))
+    #expect(b.count == 1)
+    #expect(b[0].primaryText.contains("и т.д."))
 }
 
-// MARK: - Live entry marking
+// MARK: - groupDisplayBubbles
 
-@Test func grouping_liveEntryId_marksLastBubbleOfLastGroup() {
-    let a = makeEntry(.me, original: "Привет.", translated: "Hello.")
-    let b = TranscriptEntry(
-        id: freshUUID(),
-        speaker: .peer,
-        originalText: "Hi.",
-        translatedText: "Привет.",
-        sourceLanguage: .en,
-        targetLanguage: .ru,
-        timestamp: epochDate(0)
-    )
-    let groups = TranscriptGrouping.group(entries: [a, b], liveEntryId: b.id)
-    #expect(groups.count == 2)
-    #expect(groups[0].bubbles.first?.isLive == false)
-    #expect(groups[1].bubbles.last?.isLive == true)
+@Test func groupDisplay_bucketsBySpeaker_flagsAndLive() {
+    let bubbles = [
+        DisplayBubble(id: freshUUID(), speaker: .peer, primaryText: "A", secondaryText: "", isLive: false, translationLost: false),
+        DisplayBubble(id: freshUUID(), speaker: .peer, primaryText: "B", secondaryText: "", isLive: false, translationLost: false),
+        DisplayBubble(id: freshUUID(), speaker: .me, primaryText: "C", secondaryText: "", isLive: true, translationLost: false)
+    ]
+    let g = TranscriptGrouping.groupDisplayBubbles(bubbles)
+    #expect(g.count == 2)
+    #expect(g[0].speaker == .peer)
+    #expect(g[0].bubbles.count == 2)
+    #expect(g[0].bubbles.first?.isFirstInGroup == true)
+    #expect(g[0].bubbles.last?.isLastInGroup == true)
+    #expect(g[1].speaker == .me)
+    #expect(g[1].bubbles[0].isLive == true)
 }
 
-@Test func grouping_liveEntryId_doesNotMatch_noLive() {
-    let a = makeEntry(.me, original: "Привет.", translated: "Hello.")
-    let unrelated = freshUUID()
-    let groups = TranscriptGrouping.group(entries: [a], liveEntryId: unrelated)
-    #expect(groups[0].bubbles.first?.isLive == false)
-}
-
-// MARK: - Sentence splitter helper (white-box)
-
-@Test func splitOnSentence_shortText_passesThrough() {
-    let parts = TranscriptGrouping.splitOnSentence("Hello.", threshold: 100)
-    #expect(parts == ["Hello."])
-}
-
-@Test func splitOnSentence_emptyText_returnsEmpty() {
-    let parts = TranscriptGrouping.splitOnSentence("", threshold: 100)
-    #expect(parts.isEmpty)
-}
-
-@Test func splitOnSentence_threeSentencesAboveThreshold_splits() {
-    // 3 sentences of 90 chars each → ~270 chars total. Threshold = 100
-    // forces a flush after each sentence.
-    let s = String(repeating: "x", count: 89) + "."
-    let text = s + s + s
-    let parts = TranscriptGrouping.splitOnSentence(text, threshold: 100)
-    #expect(parts.count == 3)
-}
-
-// MARK: - Hard length split (terminator-less fallback)
-
-@Test func splitOnSentence_terminatorless600Chars_allChunksWithinThreshold() {
-    let text = String(repeating: "слово ", count: 100) // 600 chars, no `.!?`
-    let parts = TranscriptGrouping.splitOnSentence(text, threshold: 240)
-    #expect(parts.count >= 2)
-    for p in parts {
-        #expect(!p.isEmpty)
-        #expect(p.count <= 240)
-    }
-    // No words lost or reordered by the split.
-    let originalWords = text.split(separator: " ").map(String.init)
-    let rejoinedWords = parts.joined(separator: " ").split(separator: " ").map(String.init)
-    #expect(rejoinedWords == originalWords)
-}
-
-@Test func splitOnSentence_unbrokenRun_hardCutsAtThreshold() {
-    // 500 identical characters with no whitespace anywhere — nothing to
-    // break on, so the splitter hard-cuts at the threshold boundary.
-    let text = String(repeating: "ы", count: 500)
-    let parts = TranscriptGrouping.splitOnSentence(text, threshold: 240)
-    #expect(parts.count == 3) // 240 + 240 + 20
-    for p in parts {
-        #expect(p.count <= 240)
-    }
-    #expect(parts.joined() == text)
-}
-
-@Test func splitOnSentence_oversizedSentenceAmongNormalOnes_isLengthSplit() {
-    // A normal short sentence followed by one oversized unterminated
-    // fragment: the short one keeps sentence-boundary behaviour, the
-    // oversized tail is captured (not dropped) and length-split so no
-    // chunk exceeds the threshold.
-    let short = "Коротко. "
-    let oversized = String(repeating: "слово ", count: 50) // 300 chars, no terminator
-    let parts = TranscriptGrouping.splitOnSentence(short + oversized, threshold: 240)
-    #expect(parts.count >= 2)
-    for p in parts {
-        #expect(p.count <= 240)
-    }
-    // No words lost: 1 ("Коротко.") + 50 ("слово").
-    let words = parts.joined(separator: " ").split(separator: " ")
-    #expect(words.count == 51)
-}
-
-// MARK: - Recency window (recentEntries)
-
-@Test func recentEntries_keepsWithinWindow_dropsOlder() {
-    var fresh = makeEntry(.me, original: "new", translated: "новое")
-    fresh.lastActivityAt = epochDate(100)
-    var stale = makeEntry(.peer, original: "old", translated: "старое")
-    stale.lastActivityAt = epochDate(50)
-    let kept = TranscriptGrouping.recentEntries([stale, fresh], now: epochDate(120), within: 30)
-    #expect(kept.count == 1)
-    #expect(kept[0].id == fresh.id)
-}
-
-@Test func recentEntries_boundaryInclusive_atExactlyWithin() {
-    var e = makeEntry(.me, original: "edge", translated: "край")
-    e.lastActivityAt = epochDate(100)
-    // now - lastActivityAt == exactly 30 → kept (<=)
-    let kept = TranscriptGrouping.recentEntries([e], now: epochDate(130), within: 30)
-    #expect(kept.count == 1)
-}
-
-@Test func recentEntries_empty_returnsEmpty() {
-    let kept = TranscriptGrouping.recentEntries([], now: epochDate(0), within: 30)
-    #expect(kept.isEmpty)
-}
-
-// MARK: - Count cap (capTail)
-
-@Test func capTail_trimsSameSpeakerRunToLastN() {
-    let entries = (0..<5).map { i in makeEntry(.me, original: "m\(i)", translated: "t\(i)") }
-    let groups = TranscriptGrouping.group(entries: entries)
-    #expect(groups.count == 1)          // same speaker → one group
-    #expect(groups[0].bubbles.count == 5)
-
-    let capped = TranscriptGrouping.capTail(groups, max: 4)
-    #expect(capped.count == 1)
-    #expect(capped[0].bubbles.count == 4)
-    #expect(capped[0].bubbles.first?.primaryText == "m1")   // m0 dropped
-    #expect(capped[0].bubbles.first?.isFirstInGroup == true)
-    #expect(capped[0].bubbles.last?.primaryText == "m4")
-    #expect(capped[0].bubbles.last?.isLastInGroup == true)
-}
-
-@Test func capTail_noOpWhenWithinLimit() {
-    let entries = [makeEntry(.me, original: "a", translated: "x"),
-                   makeEntry(.peer, original: "b", translated: "y")]
-    let groups = TranscriptGrouping.group(entries: entries)
-    let capped = TranscriptGrouping.capTail(groups, max: 4)
-    #expect(capped.count == groups.count)
-    #expect(capped.flatMap { $0.bubbles }.count == 2)
-}
-
-@Test func capTail_reflagsFirstWhenCutLandsMidGroup() {
-    let me = makeEntry(.me, original: "hi", translated: "привет")
-    let longText = String(repeating: "Предложение раз. ", count: 30) // > 240 chars → splits
-    let peer = makeEntry(.peer, original: "x", translated: longText)
-    let groups = TranscriptGrouping.group(entries: [me, peer], splitThreshold: 240)
-    #expect(groups.flatMap { $0.bubbles }.count >= 3) // me + ≥2 peer chunks
-
-    let capped = TranscriptGrouping.capTail(groups, max: 1)
-    #expect(capped.count == 1)
-    #expect(capped[0].speaker == .peer)
-    #expect(capped[0].bubbles.count == 1)
-    #expect(capped[0].bubbles[0].isFirstInGroup == true)  // was a continuation, now first
-    #expect(capped[0].bubbles[0].isLastInGroup == true)
-}
-
-@Test func capTail_preservesLiveFlagOnLastBubble() {
-    let me = makeEntry(.me, original: "a", translated: "x")
-    let peerLive = makeEntry(.peer, original: "b", translated: "y")
-    let groups = TranscriptGrouping.group(entries: [me, peerLive], liveEntryId: peerLive.id)
-    #expect(groups.last?.bubbles.last?.isLive == true)
-    let capped = TranscriptGrouping.capTail(groups, max: 1)
-    #expect(capped.last?.bubbles.last?.isLive == true)
-}
-
-// Clock skew / NTP step-back: a `lastActivityAt` in the future yields a
-// negative interval, which is <= within → kept. Desired: a just-updated
-// entry should show, never vanish.
-@Test func recentEntries_futureTimestamp_isKept() {
-    var e = makeEntry(.me, original: "soon", translated: "скоро")
-    e.lastActivityAt = epochDate(200) // ahead of `now`
-    let kept = TranscriptGrouping.recentEntries([e], now: epochDate(150), within: 30)
-    #expect(kept.count == 1)
-}
-
-@Test func capTail_zeroMax_returnsEmpty() {
-    let groups = TranscriptGrouping.group(entries: [
-        makeEntry(.me, original: "a", translated: "x"),
-        makeEntry(.peer, original: "b", translated: "y")
-    ])
-    #expect(TranscriptGrouping.capTail(groups, max: 0).isEmpty)
-}
-
-// Accepted edge (design §Edge cases): when the time filter drops a middle
-// entry of a DIFFERENT speaker, the two same-speaker entries on either
-// side become adjacent and `group` merges them into one group. This
-// happens in the recentEntries→group path — NOT in capTail, which only
-// trims a contiguous tail. Pinned so any future change is deliberate.
-@Test func recentEntries_thenGroup_mergesSameSpeakerAcrossDroppedMiddle() {
-    var a = makeEntry(.me, original: "a", translated: "А")
-    a.lastActivityAt = epochDate(100)            // re-activated late → kept
-    var b = makeEntry(.peer, original: "b", translated: "Б")
-    b.lastActivityAt = epochDate(5)              // old → dropped by window
-    var c = makeEntry(.me, original: "c", translated: "В")
-    c.lastActivityAt = epochDate(105)            // recent → kept
-    let recent = TranscriptGrouping.recentEntries([a, b, c], now: epochDate(110), within: 30)
-    #expect(recent.map(\.id) == [a.id, c.id])    // middle peer dropped
-    let groups = TranscriptGrouping.group(entries: recent)
-    #expect(groups.count == 1)                   // two me-entries merged into one group
-    #expect(groups[0].speaker == .me)
-    #expect(groups[0].bubbles.count == 2)
+@Test func groupDisplay_empty_returnsEmpty() {
+    #expect(TranscriptGrouping.groupDisplayBubbles([]).isEmpty)
 }
