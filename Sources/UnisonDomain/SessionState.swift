@@ -63,4 +63,12 @@ public enum PauseReason: Sendable, Equatable {
     /// the middle of re-establishing streams. Brief transitional
     /// state; UI shows "Возобновляем…".
     case awaitingNetwork
+    /// The Mac is going to sleep (`NSWorkspace.willSleepNotification`).
+    /// WS streams are closed and captures stopped BEFORE the sockets
+    /// die under us — otherwise wake-up leaves a zombie session that
+    /// looks alive but never hears the server again. `systemDidWake`
+    /// resumes (directly when the network is already up, or via the
+    /// regular network pause when it isn't). No recovery watchdog runs
+    /// while asleep — a night-long nap is not a failure.
+    case systemSleep
 }

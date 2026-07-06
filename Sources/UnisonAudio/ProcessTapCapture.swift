@@ -17,6 +17,26 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     private var nativeSampleRate: Double = 48000
     private var started = false
     private let log: UnisonLog
+    /// Serial lifecycle queue. Tap + aggregate-device creation is
+    /// synchronous IPC to coreaudiod; `start()` used to run it inline on
+    /// the caller (the @MainActor orchestrator), freezing the whole UI
+    /// whenever coreaudiod was busy or wedged. Bring-up now runs as an
+    /// async block on this queue, teardown as a sync one — the serial
+    /// queue preserves the FIFO start/stop ordering the old synchronous
+    /// code had (a `Task.detached` would not), and all mutable state
+    /// above is only touched from this queue (the realtime IOProc reads
+    /// `continuation`/`nativeSampleRate` set strictly before
+    /// `AudioDeviceStart` and cleared strictly after `AudioDeviceStop`).
+    private let workQueue = DispatchQueue(
+        label: "com.unison.app.ProcessTapCapture.lifecycle", qos: .userInitiated)
+    /// Marks `workQueue` so `deinit` can detect it is ALREADY running on
+    /// it — the bring-up block briefly holds the only strong reference
+    /// (weak→strong upgrade); if the owner dropped theirs mid-bring-up,
+    /// the block's release triggers deinit ON the queue, where a
+    /// `workQueue.sync` would self-deadlock. Unreachable with today's
+    /// owners (Composition holds the capture for the process lifetime),
+    /// but two lines close it for good.
+    private static let workQueueKey = DispatchSpecificKey<Bool>()
 
     /// Static-scope init (tests, benchmark, permission probe). Defaults to a
     /// blocklist with no user exclusions = tap everything except self.
@@ -25,6 +45,7 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
         self.scopeProvider = { scope }
         self.muteBehavior = muteBehavior
         self.log = UnisonLog(category: "ProcessTapCapture")
+        workQueue.setSpecific(key: Self.workQueueKey, value: true)
     }
 
     /// Closure-based init (production — re-reads on every start).
@@ -33,47 +54,67 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
         self.scopeProvider = scopeProvider
         self.muteBehavior = muteBehavior
         self.log = UnisonLog(category: "ProcessTapCapture")
+        workQueue.setSpecific(key: Self.workQueueKey, value: true)
     }
 
     public func start() -> AsyncStream<AudioFrame> {
-        if started { stop() }
-        return AsyncStream { [weak self] c in
+        AsyncStream { [weak self] c in
             guard let self else { c.finish(); return }
-            self.continuation = c
-            do {
-                let (scope, ids) = self.resolveScope()
-                self.log.info("[tap.start] scope=\(scope) processObjectIDs=\(ids)")
-                // An allowlist that resolves to no audio objects (the chosen
-                // apps aren't producing audio yet) must NOT build a
-                // `monoMixdownOfProcesses:[]` tap of nothing — that device
-                // wedges CoreAudio on teardown and the Stop button hangs. Keep
-                // the stream open but idle: it captures nothing and tears down
-                // cleanly. The user restarts once an allowed app is playing.
-                if case .onlySelected = scope, ids.isEmpty {
-                    self.log.info("[tap.start] allowlist apps produce no audio yet — idle capture (stoppable)")
+            // Async on the lifecycle queue — the caller (MainActor) returns
+            // immediately with the stream; frames start flowing once the
+            // HAL bring-up completes. Failures finish the stream, which the
+            // orchestrator's no-data watchdog surfaces within its budget.
+            self.workQueue.async { [weak self] in
+                guard let self else { c.finish(); return }
+                if self.started { self.stopOnQueue(reason: "restart") }
+                self.continuation = c
+                do {
+                    let (scope, ids) = self.resolveScope()
+                    self.log.info("[tap.start] scope=\(scope) processObjectIDs=\(ids)")
+                    // An allowlist that resolves to no audio objects (the chosen
+                    // apps aren't producing audio yet) must NOT build a
+                    // `monoMixdownOfProcesses:[]` tap of nothing — that device
+                    // wedges CoreAudio on teardown and the Stop button hangs. Keep
+                    // the stream open but idle: it captures nothing and tears down
+                    // cleanly. The user restarts once an allowed app is playing.
+                    if case .onlySelected = scope, ids.isEmpty {
+                        self.log.info("[tap.start] allowlist apps produce no audio yet — idle capture (stoppable)")
+                        self.started = true
+                        return
+                    }
+                    self.log.info("[tap.tcc] kTCCServiceAudioCapture status=notQueryable (silent-frame watchdog will verify at runtime)")
+                    try self.createTap(scope: scope, ids: ids)
+                    try self.createAggregateDevice()
+                    try self.queryNativeSampleRate()
+                    try self.installIOProc()
+                    try self.startDevice()
                     self.started = true
-                    return
+                } catch {
+                    self.log.error("[tap.stop] reason=error: \(String(describing: error))")
+                    c.finish()
+                    self.teardown()
                 }
-                self.log.info("[tap.tcc] kTCCServiceAudioCapture status=notQueryable (silent-frame watchdog will verify at runtime)")
-                try self.createTap(scope: scope, ids: ids)
-                try self.createAggregateDevice()
-                try self.queryNativeSampleRate()
-                try self.installIOProc()
-                try self.startDevice()
-                self.started = true
-            } catch {
-                self.log.error("[tap.stop] reason=error: \(String(describing: error))")
-                c.finish()
-                self.teardown()
             }
         }
     }
 
     public func stop() {
-        // teardown() invokes AudioDeviceStop, which is synchronous — it returns
-        // only after the last IOProc callback completes. So no further IOProc
-        // can race with the continuation mutation below.
-        self.log.info("[tap.stop] reason=user")
+        // Sync so callers keep the completion semantics the old inline
+        // teardown had: the orchestrator's HAL-teardown chain relies on
+        // each component's stop() having fully finished before the next
+        // one starts (sequential HAL destroys — concurrent ones can crash
+        // coreaudiod). Callers are the detached teardown task / deinit /
+        // applicationWillTerminate — never this workQueue itself.
+        workQueue.sync { [weak self] in
+            self?.stopOnQueue(reason: "user")
+        }
+    }
+
+    /// Teardown body — must run on `workQueue`. `AudioDeviceStop` is
+    /// synchronous (returns only after the last IOProc callback), so no
+    /// IOProc races the continuation mutation below.
+    private func stopOnQueue(reason: String) {
+        self.log.info("[tap.stop] reason=\(reason)")
         teardown()
         continuation?.finish()
         continuation = nil
@@ -82,12 +123,22 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
 
     deinit {
         // Must finish the continuation so any pending AsyncStream consumer
-        // doesn't hang forever when the owner is dropped without calling stop().
-        // teardown() is synchronous on AudioDeviceStop, so no IOProc will fire
-        // after this returns.
+        // doesn't hang forever when the owner is dropped without calling
+        // stop(). Sync on the lifecycle queue: any queued bring-up holds
+        // only weak self, so it cannot delay deinit indefinitely, and FIFO
+        // ordering runs it (as a no-op) before this block. If deinit fires
+        // ON the queue itself (a bring-up block's strong ref was the last
+        // one — see `workQueueKey`), run inline: we're already serialized.
         self.log.info("[tap.stop] reason=deinit")
-        teardown()
-        continuation?.finish()
+        if DispatchQueue.getSpecific(key: Self.workQueueKey) == true {
+            teardown()
+            continuation?.finish()
+        } else {
+            workQueue.sync {
+                teardown()
+                continuation?.finish()
+            }
+        }
     }
 
     // MARK: - Setup steps

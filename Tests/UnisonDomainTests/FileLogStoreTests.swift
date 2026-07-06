@@ -167,3 +167,30 @@ private func waitForFlush() async {
     }
     #expect(malformed == 0, "\(malformed) lines had a malformed timestamp prefix")
 }
+
+// Ревью PR #17, находка №4: кэшированный writeHandle переживал внешнее
+// удаление лог-файла — write(2) в unlinked inode «успешен», ротация по
+// несуществующему пути видит size=0 и хендл не сбрасывает: лог молча
+// умирает до перезапуска. Теперь пропавший файл сбрасывает хендл, и
+// следующая строка пересоздаёт файл.
+@Test func fileLogStore_recreatesFileAfterExternalDeletion() async throws {
+    let store = makeTempStore()
+    store.write(category: "t", level: "info", message: "до удаления")
+    for _ in 0..<100 where !store.readAll().contains("до удаления") {
+        try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+    #expect(store.readAll().contains("до удаления"))
+
+    try deleteCurrentLogFile(of: store)
+
+    // Первая строка после удаления попадает в unlinked inode (хендл ещё
+    // жив), но её же пост-write stat обязан сбросить хендл; вторая строка
+    // уже обязана лечь в пересозданный файл.
+    store.write(category: "t", level: "info", message: "провалится в unlinked inode")
+    store.write(category: "t", level: "info", message: "после удаления")
+    for _ in 0..<100 where !store.readAll().contains("после удаления") {
+        try? await Task.sleep(nanoseconds: 20_000_000)
+    }
+    #expect(store.readAll().contains("после удаления"),
+            "лог не восстановился после внешнего удаления файла")
+}

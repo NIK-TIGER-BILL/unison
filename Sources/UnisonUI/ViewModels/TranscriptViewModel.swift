@@ -220,7 +220,7 @@ public final class TranscriptViewModel {
         switch effectiveState {
         case .reconnecting:
             return "Переподключение…"
-        case .paused(_, _, _, .networkLost):
+        case .paused(_, _, _, .networkLost), .paused(_, _, _, .systemSleep):
             return "Пауза"
         case .paused(_, _, _, .awaitingNetwork):
             return "Возобновляем…"

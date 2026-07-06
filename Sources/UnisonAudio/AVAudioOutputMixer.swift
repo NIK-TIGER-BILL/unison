@@ -186,10 +186,20 @@ public final class AVAudioOutputMixer: AudioOutputMixer, @unchecked Sendable {
 
     public func start(deviceUID: String?) async throws {
         Self.log.info("start(deviceUID=\(deviceUID ?? "<system default>"))")
-        // Synchronous body: holding `engineLock` across an `async` boundary is
-        // disallowed under Swift 6 strict concurrency, and there is no await to
-        // make here anyway.
-        try startLocked(deviceUID: deviceUID)
+        // Detached: the body does synchronous CoreAudio HAL IPC (device-UID
+        // resolution scans every device, `AudioUnitSetProperty` binds the
+        // output, `engine.start()` spins the graph up) — 0.3–0.7 s on
+        // Bluetooth in field logs, unbounded on a wedged coreaudiod. The
+        // orchestrator awaits this from the @MainActor, so running it
+        // inline froze the whole UI for that long at every session start
+        // (teardown got the same treatment in stopAllStreams long ago;
+        // bring-up was the remaining main-thread HAL surface). `engineLock`
+        // inside `startLocked` serializes against the config-change
+        // self-heal (observer queue) and `stop()` (teardown task), so the
+        // executor hop adds no new interleavings.
+        try await Task.detached(priority: .userInitiated) { [self] in
+            try startLocked(deviceUID: deviceUID)
+        }.value
     }
 
     private func startLocked(deviceUID: String?) throws {

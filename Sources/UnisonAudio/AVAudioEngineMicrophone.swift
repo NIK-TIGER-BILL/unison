@@ -66,6 +66,16 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
     /// AVCaptureSession requires a serial queue here; we make a
     /// dedicated one so capture work doesn't get queued behind main.
     private let captureQueue = DispatchQueue(label: "com.unison.app.AVAudioEngineMicrophone.capture", qos: .userInitiated)
+    /// Serial lifecycle queue for session bring-up/teardown.
+    /// `AVCaptureSession.startRunning()` is a documented blocking call
+    /// (Apple explicitly recommends keeping it off the main thread);
+    /// `start()` used to run it inline on the caller — the @MainActor
+    /// orchestrator — stalling the UI for however long the capture stack
+    /// took. Bring-up runs async here, teardown sync; the serial queue
+    /// preserves the FIFO start/stop ordering of the old inline code, and
+    /// `lifecycleLock` still guards against the runtime-error self-heal
+    /// (which runs on the observer's queue).
+    private let workQueue = DispatchQueue(label: "com.unison.app.AVAudioEngineMicrophone.lifecycle", qos: .userInitiated)
     /// First-buffer log latch. Per capture session — reset in `start()`
     /// so every session's delivered format lands in the diagnostic, not
     /// just the first one after app launch.
@@ -77,10 +87,6 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
     }
 
     public func start(deviceUID: String?) -> AsyncStream<AudioFrame> {
-        if running {
-            Self.log.info("start() — restarting (previous session left running=true)")
-            stop()
-        }
         Self.log.info("start(deviceUID=\(deviceUID ?? "<default>"))")
         currentDeviceUID = deviceUID
         firstBufferLogLock.lock()
@@ -88,35 +94,57 @@ public final class AVAudioEngineMicrophone: NSObject, MicrophoneCapture, @unchec
         firstBufferLogLock.unlock()
         return AsyncStream { [weak self] c in
             guard let self else { c.finish(); return }
-            self.lifecycleLock.lock()
-            defer { self.lifecycleLock.unlock() }
-            self.continuation = c
-            self.consecutiveRestarts = 0
-            do {
-                try self.configure(deviceUID: deviceUID)
-                self.session.startRunning()
-                self.running = self.session.isRunning
-                // Self-heal on a capture runtime error (e.g. the mic device
-                // disconnects when Bluetooth headphones drop) — restart on the
-                // current default input rather than dying until app relaunch.
-                if self.configObserver == nil {
-                    self.configObserver = DebouncedNotificationObserver(
-                        name: AVCaptureSession.runtimeErrorNotification, object: self.session
-                    ) { [weak self] in
-                        self?.handleRuntimeError()
-                    }
+            // Async on the lifecycle queue — the caller (MainActor) gets the
+            // stream immediately; frames flow once the capture stack is up.
+            // A bring-up failure finishes the stream, which the
+            // orchestrator's no-data watchdog surfaces within its budget.
+            self.workQueue.async { [weak self] in
+                guard let self else { c.finish(); return }
+                if self.running {
+                    Self.log.info("start() — restarting (previous session left running=true)")
+                    self.stopOnQueue()
                 }
-                self.configObserver?.start()
-                Self.log.info("start() — session.isRunning=\(self.session.isRunning); awaiting sample buffer delegate callbacks")
-            } catch {
-                let ns = error as NSError
-                Self.log.error("start() — FAILED: domain=\(ns.domain) code=\(ns.code) desc=\(ns.localizedDescription); no mic frames will flow")
-                c.finish()
+                self.lifecycleLock.lock()
+                defer { self.lifecycleLock.unlock() }
+                self.continuation = c
+                self.consecutiveRestarts = 0
+                do {
+                    try self.configure(deviceUID: deviceUID)
+                    self.session.startRunning()
+                    self.running = self.session.isRunning
+                    // Self-heal on a capture runtime error (e.g. the mic device
+                    // disconnects when Bluetooth headphones drop) — restart on the
+                    // current default input rather than dying until app relaunch.
+                    if self.configObserver == nil {
+                        self.configObserver = DebouncedNotificationObserver(
+                            name: AVCaptureSession.runtimeErrorNotification, object: self.session
+                        ) { [weak self] in
+                            self?.handleRuntimeError()
+                        }
+                    }
+                    self.configObserver?.start()
+                    Self.log.info("start() — session.isRunning=\(self.session.isRunning); awaiting sample buffer delegate callbacks")
+                } catch {
+                    let ns = error as NSError
+                    Self.log.error("start() — FAILED: domain=\(ns.domain) code=\(ns.code) desc=\(ns.localizedDescription); no mic frames will flow")
+                    c.finish()
+                }
             }
         }
     }
 
     public func stop() {
+        // Sync so callers keep completion semantics (the orchestrator's
+        // teardown chain runs component stops strictly sequentially).
+        // Never called from `workQueue` itself, so no deadlock. FIFO with
+        // any queued bring-up mirrors the old inline ordering.
+        workQueue.sync { [weak self] in
+            self?.stopOnQueue()
+        }
+    }
+
+    /// Teardown body — must run on `workQueue`.
+    private func stopOnQueue() {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
         configObserver?.stop()

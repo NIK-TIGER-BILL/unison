@@ -173,7 +173,7 @@ public final class TranslationOrchestrator {
     /// delay, silently aborting every reconnect (the session then rides
     /// the reconnect watchdog into terminal `.error(.networkLost)`).
     /// The mock clocks ignore cancellation, which is why tests never saw
-    /// it. Cancelled in `stopAllStreams` and `enterNetworkPause`.
+    /// it. Cancelled in `stopAllStreams` and `enterPause`.
     private var reconnectTasks: [Speaker: Task<Void, Never>] = [:]
     /// Per-speaker short-window ring buffer of wire-format outbound
     /// audio. The mic-frame consumer appends each frame after
@@ -228,6 +228,20 @@ public final class TranslationOrchestrator {
     /// behaviour is exclusively a server-side rejection. Hitting the
     /// threshold once → immediate terminal `.error(.apiKeyInvalid)`.
     private static let emptyCloseTerminalThreshold = 1
+    /// Per-speaker count of consecutive `serverGoingAway` swap episodes
+    /// with NO translation data delivered in between. The zero-backoff
+    /// goAway swap is meant for the once-in-minutes session-limit
+    /// rotation; a server in maintenance that accepts the socket and
+    /// immediately goAways again would otherwise churn reconnects at
+    /// handshake frequency forever (each successful connect resets the
+    /// reconnect watchdog and spawns a fresh retry loop with
+    /// firstAttempt=true — no damper accumulates across episodes; review
+    /// finding). Past the threshold the swap falls back to normal
+    /// backoff. Reset on any delta arrival and on session teardown.
+    private var consecutiveGoAwaySwaps: [Speaker: Int] = [:]
+    /// How many back-to-back data-less goAway swaps keep the zero-backoff
+    /// fast path before we start pacing them like ordinary failures.
+    private static let maxImmediateGoAwaySwaps = 3
     /// Watchdog that fires if the orchestrator stays in `.reconnecting`
     /// without ever receiving translation data for longer than
     /// `reconnectWatchdogSeconds`. Defense in depth: even if the
@@ -241,6 +255,40 @@ public final class TranslationOrchestrator {
     /// than the regular reconnect retry budget (~10s across 5 attempts)
     /// while still being short enough to feel responsive.
     private static let reconnectWatchdogSeconds: TimeInterval = 15
+
+    /// Watchdog bounding the `.connecting` phase. `start()` suspends at
+    /// several unbounded awaits — the WS handshake (a half-dead network
+    /// can stall it for the full URLSession timeout or beyond) and the
+    /// CoreAudio HAL bring-up (a busy/wedged coreaudiod). Without a
+    /// budget the session sits in `.connecting` forever with a dead
+    /// Start button (`start()` requires `.idle`). Armed on entering
+    /// `.connecting`; cancelled on reaching `.translating` and in
+    /// `stopAllStreams()`.
+    private var connectWatchdogTask: Task<Void, Never>?
+    /// Identity of the CURRENT start attempt. `startAborted` compares the
+    /// attempt's captured value against this — a state-shape check alone
+    /// (`.connecting`) is not enough: while `stop()` is suspended inside
+    /// `stopAllStreams()` the state is still `.connecting`, so a parked
+    /// `connect()` resuming in that window would pass the shape check and
+    /// wire pipelines onto a session being torn down; and after a fast
+    /// stop→start the stale tail of attempt №1 would pass against attempt
+    /// №2's `.connecting` (review finding: zombie captures + a leaked
+    /// App-Nap token in the first case, a phantom terminal error killing
+    /// the healthy second attempt in the second). Bumped on every
+    /// `start()` entry and `stop()` entry.
+    private var startEpoch = 0
+    /// Comfortably above a slow-but-live bring-up (mixer starts took
+    /// 0.3–0.7 s in field logs; WS connects 0.6–6 s) while still bailing
+    /// out of a genuinely hung connect within one attention span.
+    ///
+    /// Deliberately WALL-clock (`Task.sleep`), not the injected `clock`:
+    /// the hazard is real-world time the user spends staring at a stuck
+    /// "connecting" UI. Virtual-time clocks (`InstantClock` fast-forwards
+    /// every sleep) would otherwise fire this mid-start in tests that
+    /// legitimately compress hours into microseconds. `var` (not `let`)
+    /// so the watchdog regression tests can shrink the budget to run in
+    /// real milliseconds.
+    var connectWatchdogBudget: TimeInterval = 30
 
     /// Watchdog that surfaces `.noDataFromServer` if the orchestrator
     /// stays in `.translating` for `noDataWatchdogSeconds` without a
@@ -318,6 +366,8 @@ public final class TranslationOrchestrator {
             return
         }
         state = .connecting(mode: mode)
+        startEpoch &+= 1
+        let epoch = startEpoch
         currentLanguages = languages
         currentSettings = settings
         transcript.clear()
@@ -331,12 +381,22 @@ public final class TranslationOrchestrator {
             Self.log.info("start() — microphone permission currentStatus=\(String(describing: status))")
             let resolved = status == .notDetermined ? await permissions.request(.microphone) : status
             Self.log.info("start() — microphone permission resolved=\(String(describing: resolved))")
+            if startAborted(epoch: epoch) { return }
             guard resolved == .granted else {
                 Self.log.error("start() guard failed: microphone permission denied → .error(.permissionDenied)")
                 state = .error(.permissionDenied(.microphone))
                 return
             }
         }
+        // Bound the rest of the .connecting phase. Every await below can
+        // hang unboundedly — a WS handshake against a half-dead network, a
+        // HAL bring-up against a busy coreaudiod. Without a budget the
+        // session sits in .connecting forever and Start looks dead
+        // (start() requires .idle). Armed AFTER the permission gate: the
+        // system mic dialog is user-paced, and a user thinking about it
+        // for >30 s must not come back to a phantom "network lost"
+        // (review finding).
+        armConnectWatchdog()
         // BlackHole 2ch gate. Only `.call` writes to BH 2ch (virtual mic).
         // `.listen` uses Process Tap only — no BH 2ch needed.
         // `.test` doesn't touch BlackHole at all — that's the whole
@@ -360,14 +420,27 @@ public final class TranslationOrchestrator {
            await teardownFinished(pending, within: Self.coreAudioTeardownBudgetSeconds) == false {
             Self.log.error("start() — previous CoreAudio teardown still draining after \(Self.coreAudioTeardownBudgetSeconds)s; starting the shared engine anyway (audio may stutter until the old HAL stop unwedges)")
         }
+        if startAborted(epoch: epoch) { return }
 
         Self.log.info("start() — starting output mixer (outputDeviceUID=\(settings.outputDeviceUID ?? "default"))")
         do {
             try await outputMixer.start(deviceUID: settings.outputDeviceUID)
             outputMixer.setOriginalGain(settings.originalMixVolume)
         } catch {
+            if startAborted(epoch: epoch) { return }
             Self.log.error("start() output mixer failed: \(String(describing: error)) → .error(.outputDeviceUnavailable)")
             state = .error(.outputDeviceUnavailable)
+            return
+        }
+        if startAborted(epoch: epoch) {
+            // Superseded mid-bring-up. Deliberately NO global teardown from
+            // this stale tail: a newer attempt may already own the shared
+            // engine, and a stopAllStreams() here would tear IT down
+            // (review finding: the stale tail of start №1 must never touch
+            // start №2's session). Worst residual when the interloper was a
+            // plain stop(): the mixer we just finished starting idles on
+            // silence — no taps, no captures, invisible to the user — until
+            // the next start()/stop() reinitializes it.
             return
         }
 
@@ -375,26 +448,7 @@ public final class TranslationOrchestrator {
         // Not in `.test` — test mode only verifies the user's own
         // mic→translate→speakers loop.
         if mode == .call || mode == .listen {
-            Self.log.info("start() — connecting peer stream (target=\(languages.mine.rawValue))")
-            let peer = translationFactory.make(speaker: .peer)
-            peerStream = peer
-            do {
-                try await peer.connect(target: languages.mine)
-            } catch {
-                let mapped = mapConnectError(error)
-                Self.log.error("start() peer.connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
-                // Partial-start teardown: the output mixer is already
-                // running and `peerStream` holds a half-open stream.
-                // Without this, they keep running behind a terminal
-                // `.error` state (and `start()` refuses to run again
-                // because the state never returns to `.idle`).
-                await stopAllStreams()
-                state = .error(mapped)
-                return
-            }
-            Self.log.info("start() — peer stream connected; wiring incoming pipeline")
-            wireIncomingPipeline(stream: peer)
-            observeConnectionState(stream: peer, speaker: .peer, target: languages.mine, mode: mode)
+            guard await connectStreamForStart(speaker: .peer, target: languages.mine, mode: mode, epoch: epoch) else { return }
         }
 
         // Me (outgoing) stream — used in `.call` and `.test`.
@@ -402,38 +456,18 @@ public final class TranslationOrchestrator {
         //   .call: me-stream output → BlackHole 2ch (peer hears in their Zoom)
         //   .test: me-stream output → speakers (user hears their own translation)
         if mode == .call || mode == .test {
-            // Allocate the outbound audio ring buffer alongside the
-            // me-stream — see `audioBufferBySpeaker` for rationale.
-            audioBufferBySpeaker[.me] = AudioRingBuffer(maxFrames: Self.audioBufferFrames)
-            Self.log.info("start() — connecting me stream (target=\(languages.peer.rawValue))")
-            let me = translationFactory.make(speaker: .me)
-            meStream = me
-            do {
-                try await me.connect(target: languages.peer)
-            } catch {
-                let mapped = mapConnectError(error)
-                Self.log.error("start() me.connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
-                // Partial-start teardown: in `.call` mode the peer
-                // pipeline is already wired and translating at this
-                // point — leaving it running behind `.error` keeps
-                // streaming audio to OpenAI with no way to stop it
-                // from the UI (`start()` requires `.idle`).
-                await stopAllStreams()
-                state = .error(mapped)
-                return
-            }
-            Self.log.info("start() — me stream connected; wiring outgoing pipeline (destination=\(mode == .test ? "speakers" : "BlackHole 2ch"))")
-            wireOutgoingPipeline(stream: me, destination: mode == .test ? .speakers : .virtualMic)
-            observeConnectionState(stream: me, speaker: .me, target: languages.peer, mode: mode)
+            guard await connectStreamForStart(speaker: .me, target: languages.peer, mode: mode, epoch: epoch) else { return }
         }
 
         // Capture session start time once and reuse across reconnects so
         // the popover timer never resets mid-session. `stop()` clears it.
+        cancelConnectWatchdog()
         let startedAt = clock.now()
         sessionStartedAt = startedAt
-        // Fresh session — reset empty-close counters; a previous run's
-        // counter must not leak into the new one.
+        // Fresh session — reset empty-close and goAway-streak counters; a
+        // previous run's counters must not leak into the new one.
         consecutiveEmptyCloses = [.me: 0, .peer: 0]
+        consecutiveGoAwaySwaps = [:]
         anyMicFrameThisSession = false
         anyServerDeltaThisSession = false
         state = .translating(mode: mode, startedAt: startedAt)
@@ -549,6 +583,12 @@ public final class TranslationOrchestrator {
     /// expectation that a delta produces `.healthy` immediately.
     private func recordDeltaArrival(speaker: Speaker) {
         lastDeltaAtBySpeaker[speaker] = clock.now()
+        // Real translation data arrived — the goAway-swap damper resets:
+        // the next goAway is a fresh session-limit rotation, not a churn
+        // loop (see `consecutiveGoAwaySwaps`).
+        if consecutiveGoAwaySwaps[speaker, default: 0] != 0 {
+            consecutiveGoAwaySwaps[speaker] = 0
+        }
         if healthBySpeaker[speaker] != .healthy {
             healthBySpeaker[speaker] = .healthy
             recomputeAggregateHealth()
@@ -713,6 +753,119 @@ public final class TranslationOrchestrator {
         return .networkLost
     }
 
+    /// `start()` suspends at several awaits; the user can click Stop (or
+    /// the connect watchdog can fire) during any of them. Every await
+    /// re-checks that this is still the ACTIVE attempt before proceeding —
+    /// otherwise the interloper's settled state (`.idle` after stop,
+    /// `.error` after the watchdog) must win, not be overwritten by the
+    /// stale continuation (same shape as `resumeStreams`' reentrancy
+    /// guards). The check is epoch-based, not state-shape-based: while
+    /// `stop()` is suspended inside `stopAllStreams()` the state is STILL
+    /// `.connecting`, and after a fast stop→start the state is attempt
+    /// №2's `.connecting` — both would fool a shape check (see
+    /// `startEpoch`).
+    private func startAborted(epoch: Int) -> Bool {
+        if epoch == startEpoch, case .connecting = state { return false }
+        Self.log.info("start() — attempt superseded mid-start (epoch \(epoch) vs \(self.startEpoch), state \(String(describing: self.state))); aborting this attempt")
+        return true
+    }
+
+    /// Make + connect + wire one speaker's stream on behalf of `start()`.
+    /// Returns `false` when `start()` must bail: either a terminal error
+    /// was surfaced here, or the attempt was superseded mid-connect and
+    /// the settled state must stand. On abort the cleanup is strictly
+    /// LOCAL (`stream.close()` of the stream this attempt created): the
+    /// property (`peerStream`/`meStream`) was already nil-ed by the
+    /// interloper's teardown, and a global `stopAllStreams()` from this
+    /// stale tail could tear down a NEWER attempt's session (review
+    /// finding: start→stop→start races).
+    private func connectStreamForStart(
+        speaker: Speaker,
+        target: Language,
+        mode: SessionMode,
+        epoch: Int
+    ) async -> Bool {
+        Self.log.info("start() — connecting \(String(describing: speaker)) stream (target=\(target.rawValue))")
+        let stream = translationFactory.make(speaker: speaker)
+        switch speaker {
+        case .peer:
+            peerStream = stream
+        case .me:
+            // Allocate the outbound audio ring buffer alongside the
+            // me-stream — see `audioBufferBySpeaker` for rationale.
+            audioBufferBySpeaker[.me] = AudioRingBuffer(maxFrames: Self.audioBufferFrames)
+            meStream = stream
+        }
+        do {
+            try await stream.connect(target: target)
+        } catch {
+            let mapped = mapConnectError(error)
+            // A late connect failure after the user already stopped (or
+            // the watchdog fired, or a newer attempt started) must not
+            // overwrite the settled state — close our own stream and go.
+            if startAborted(epoch: epoch) {
+                await stream.close()
+                return false
+            }
+            Self.log.error("start() \(String(describing: speaker)).connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
+            // Partial-start teardown: the output mixer is already running
+            // (and for the me-stream in `.call` mode, the peer pipeline is
+            // already translating). Leaving them running behind a terminal
+            // `.error` keeps streaming audio with no way to stop it from
+            // the UI (`start()` requires `.idle`). Safe to run globally
+            // here — the epoch check above proved this is still the
+            // active attempt, so the state is ours to settle.
+            await stopAllStreams()
+            state = .error(mapped)
+            return false
+        }
+        if startAborted(epoch: epoch) {
+            await stream.close()
+            return false
+        }
+        switch speaker {
+        case .peer:
+            Self.log.info("start() — peer stream connected; wiring incoming pipeline")
+            wireIncomingPipeline(stream: stream)
+        case .me:
+            Self.log.info("start() — me stream connected; wiring outgoing pipeline (destination=\(mode == .test ? "speakers" : "BlackHole 2ch"))")
+            wireOutgoingPipeline(stream: stream, destination: mode == .test ? .speakers : .virtualMic)
+        }
+        observeConnectionState(stream: stream, speaker: speaker, target: target, mode: mode)
+        return true
+    }
+
+    /// Arm the connect-phase watchdog — see `connectWatchdogTask` for why.
+    /// Fires only if the state is still `.connecting` past the budget;
+    /// tears the half-started session down and surfaces `.networkLost`
+    /// (the dominant real cause: a connect hanging against a dead path).
+    /// The `stopAllStreams()` it runs also makes the parked `connect()`
+    /// throw, which the `start()` reentrancy guards then swallow without
+    /// overwriting the `.error` set here.
+    private func armConnectWatchdog() {
+        connectWatchdogTask?.cancel()
+        let budget = connectWatchdogBudget
+        connectWatchdogTask = Task { @MainActor [weak self] in
+            // Wall-clock on purpose — see `connectWatchdogBudget`. Clamp
+            // before the UInt64 cast: a non-finite/negative budget traps at
+            // runtime (same guard as SystemClock.sleep).
+            let ns = budget * 1_000_000_000
+            guard ns.isFinite, ns > 0 else { return }
+            try? await Task.sleep(nanoseconds: UInt64(ns))
+            guard let self, !Task.isCancelled else { return }
+            if case .connecting = self.state {
+                Self.log.error("connect watchdog fired after \(budget)s — session stuck in .connecting; forcing terminal .error(.networkLost)")
+                await self.stopAllStreams()
+                self.state = .error(.networkLost)
+            }
+        }
+    }
+
+    private func cancelConnectWatchdog() {
+        connectWatchdogTask?.cancel()
+        connectWatchdogTask = nil
+    }
+
     /// Arm the reconnect watchdog. After `Self.reconnectWatchdogSeconds`
     /// the orchestrator forces a terminal error if it is still in
     /// `.reconnecting` — safety net that guarantees a user-visible
@@ -793,29 +946,86 @@ public final class TranslationOrchestrator {
     ) {
         switch status {
         case .unsatisfied:
-            enterNetworkPause(mode: mode)
+            enterPause(mode: mode, reason: .networkLost)
         case .satisfied:
+            // Deliberately `.networkLost`-only: a `.satisfied` blip while
+            // `.paused(.systemSleep)` (network flapping around the sleep
+            // edges) must not resurrect streams on a machine that is
+            // about to be — or still is — asleep. Wake-up recovery is
+            // owned by `systemDidWake`.
             if case .paused(_, _, _, .networkLost) = state {
-                resumeFromNetworkPause(mode: mode, languages: languages)
+                resumeFromPause(mode: mode, languages: languages)
             }
         }
     }
 
-    /// Tear down streams + captures and flip to `.paused(.networkLost)`.
+    // MARK: - System sleep / wake
+
+    /// Called from `NSWorkspace.willSleepNotification`. Parks an active
+    /// session in `.paused(.systemSleep)` BEFORE the OS kills our
+    /// sockets: streams close gracefully, captures stop, and — unlike
+    /// the network pause — no recovery watchdog is armed (sleeping for
+    /// hours is not a failure). Without this, wake-up left a zombie
+    /// session: state said `.translating`, but both WS were half-open
+    /// corpses that never delivered another byte.
+    public func systemWillSleep() {
+        switch state {
+        case .translating(let mode, _):
+            Self.log.info("systemWillSleep — pausing active session (mode=\(mode.rawValue))")
+            enterPause(mode: mode, reason: .systemSleep)
+        case .reconnecting(let mode, _, _):
+            Self.log.info("systemWillSleep — pausing mid-reconnect session (mode=\(mode.rawValue))")
+            enterPause(mode: mode, reason: .systemSleep)
+        case .paused(let mode, _, let startedAt, .networkLost),
+             .paused(let mode, _, let startedAt, .awaitingNetwork):
+            // Already paused for network reasons: re-tag as sleep and drop
+            // the 60 s recovery watchdog — it must not expire mid-nap and
+            // turn a healthy overnight sleep into a terminal error. A
+            // mid-resume (.awaitingNetwork) flip also aborts the in-flight
+            // resumeStreams via its reentrancy guards, same as a network
+            // drop would.
+            Self.log.info("systemWillSleep — re-tagging network pause as sleep")
+            cancelPauseRecoveryWatchdog()
+            state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: .systemSleep)
+        case .idle, .connecting, .error, .paused(_, _, _, .systemSleep):
+            break
+        }
+    }
+
+    /// Called from `NSWorkspace.didWakeNotification`. Resumes a session
+    /// parked by `systemWillSleep`: directly when the network path is
+    /// already up, otherwise via the regular network pause (the network
+    /// observer finishes the job when the path comes back, bounded by
+    /// the recovery watchdog).
+    public func systemDidWake() {
+        guard case .paused(let mode, _, let startedAt, .systemSleep) = state else { return }
+        Self.log.info("systemDidWake — network=\(String(describing: networkMonitor.currentStatus))")
+        if networkMonitor.currentStatus == .satisfied {
+            resumeFromPause(mode: mode, languages: currentLanguages)
+        } else {
+            state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: .networkLost)
+            armPauseRecoveryWatchdog()
+        }
+    }
+
+    /// Tear down streams + captures and flip to `.paused(reason)`.
     ///
-    /// Idempotent vs. `.paused(.networkLost)` — calling again is a
-    /// no-op. But NOT idempotent vs. `.paused(.awaitingNetwork)`: a
-    /// drop arriving while resume is in flight must transition us
-    /// back to `.networkLost` so the resumeStreams reentrancy guard
-    /// observes a state change and aborts the half-resumed pipeline
-    /// (iter-2 review finding: matching all `.paused` would silently
-    /// swallow a mid-resume drop, then NetworkMonitor's de-dup would
-    /// suppress any later `.unsatisfied`, leaving the orchestrator
-    /// in `.translating` against a dead network).
-    private func enterNetworkPause(mode: SessionMode) {
-        if case .paused(_, _, _, .networkLost) = state { return }
+    /// Idempotent vs. the same reason — calling again is a no-op — and
+    /// `.systemSleep` outranks `.networkLost` (network flaps around the
+    /// sleep edges must not re-tag a sleeping session and arm the 60 s
+    /// recovery watchdog against a Mac that is asleep). But NOT
+    /// idempotent vs. `.paused(.awaitingNetwork)`: a drop arriving while
+    /// resume is in flight must transition us back so the resumeStreams
+    /// reentrancy guard observes a state change and aborts the
+    /// half-resumed pipeline (iter-2 review finding: matching all
+    /// `.paused` would silently swallow a mid-resume drop, then
+    /// NetworkMonitor's de-dup would suppress any later `.unsatisfied`,
+    /// leaving the orchestrator in `.translating` against a dead network).
+    private func enterPause(mode: SessionMode, reason: PauseReason) {
+        if case .paused(_, _, _, .systemSleep) = state { return }
+        if case .paused(_, _, _, let current) = state, current == reason { return }
         guard let startedAt = sessionStartedAt else { return }
-        Self.log.info("network unsatisfied — entering .paused(.networkLost)")
+        Self.log.info("entering .paused(\(String(describing: reason)))")
         // Stamp any in-flight entries (an original chunk arrived but the
         // server never delivered its translation) as at-risk so the
         // bubble view can render the "перевод не получен" placeholder
@@ -853,24 +1063,35 @@ public final class TranslationOrchestrator {
             await meSnapshot?.close()
             await peerSnapshot?.close()
         }
-        state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: .networkLost)
-        armPauseRecoveryWatchdog()
+        state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: reason)
+        // The recovery watchdog bounds a network outage; a sleeping Mac
+        // is not an outage — `systemDidWake` owns that recovery.
+        if reason == .networkLost {
+            armPauseRecoveryWatchdog()
+        }
     }
 
-    private func resumeFromNetworkPause(mode: SessionMode, languages: LanguagePair) {
-        guard case .paused(_, _, let startedAt, .networkLost) = state else { return }
-        Self.log.info("network satisfied during pause — resuming")
+    /// Resume from a recoverable pause (`.networkLost` after the path
+    /// returned, `.systemSleep` after wake-up). `.awaitingNetwork` means a
+    /// resume is already in flight — starting a second one would double-
+    /// connect the streams.
+    private func resumeFromPause(mode: SessionMode, languages: LanguagePair) {
+        guard case .paused(_, _, let startedAt, let reason) = state,
+              reason == .networkLost || reason == .systemSleep else { return }
+        Self.log.info("resuming from .paused(\(String(describing: reason)))")
         state = .paused(mode: mode, since: clock.now(), startedAt: startedAt, reason: .awaitingNetwork)
         Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.resumeStreams(mode: mode, languages: languages, startedAt: startedAt)
+            await self.resumeStreams(mode: mode, languages: languages, startedAt: startedAt,
+                                     resumedFrom: reason)
         }
     }
 
     private func resumeStreams(
         mode: SessionMode,
         languages: LanguagePair,
-        startedAt: Date
+        startedAt: Date,
+        resumedFrom: PauseReason
     ) async {
         // Reentrancy guard at each await boundary: if the network
         // dropped again mid-resume, NWPathMonitor's `.unsatisfied`
@@ -892,7 +1113,7 @@ public final class TranslationOrchestrator {
                 wireIncomingPipeline(stream: peer)
                 observeConnectionState(stream: peer, speaker: .peer, target: languages.mine, mode: mode)
             } catch {
-                await failResume(error: error)
+                await failResume(error: error, mode: mode, resumedFrom: resumedFrom)
                 return
             }
         }
@@ -923,7 +1144,7 @@ public final class TranslationOrchestrator {
                 wireOutgoingPipeline(stream: me, destination: mode == .test ? .speakers : .virtualMic)
                 observeConnectionState(stream: me, speaker: .me, target: languages.peer, mode: mode)
             } catch {
-                await failResume(error: error)
+                await failResume(error: error, mode: mode, resumedFrom: resumedFrom)
                 return
             }
         }
@@ -955,7 +1176,25 @@ public final class TranslationOrchestrator {
         armRecoveringFlash()
     }
 
-    private func failResume(error: Error) async {
+    private func failResume(error: Error, mode: SessionMode, resumedFrom: PauseReason) async {
+        // A WAKE-initiated resume was triggered off the network monitor's
+        // CACHED status — the monitor slept too, so its last observation
+        // predates the nap, and Wi-Fi typically reassociates seconds AFTER
+        // didWake. A failed first connect here means "network not ready
+        // yet", not "session dead": fall back into the network pause
+        // (partial-resume teardown + recovery watchdog + live path
+        // observer, all via enterPause) and let a FRESH `.satisfied`
+        // observation resume us — bounded by the 60 s recovery watchdog
+        // (review finding: the terminal error killed the flagship
+        // "closed the lid mid-call" scenario on a single racy connect).
+        //
+        // Network-initiated resumes keep the terminal error: they are
+        // triggered by fresh observations, so a failure there is real.
+        if resumedFrom == .systemSleep {
+            Self.log.error("wake resume failed: \(String(describing: error)); network likely still reassociating — falling back to .paused(.networkLost) to await a fresh path observation")
+            enterPause(mode: mode, reason: .networkLost)
+            return
+        }
         Self.log.error("resume failed: \(String(describing: error)); falling back to terminal .error")
         await stopAllStreams()
         state = .error(.networkLost)
@@ -973,7 +1212,7 @@ public final class TranslationOrchestrator {
             guard let self else { return }
             if Task.isCancelled { return }
             // Only escalate if we're still stuck on a network outage
-            // (`.networkLost`). Once `resumeFromNetworkPause` flips us
+            // (`.networkLost`). Once `resumeFromPause` flips us
             // to `.paused(.awaitingNetwork)`, resume is in flight —
             // killing it would force-error a recovery that might
             // succeed seconds later on a slow OpenAI handshake. The
@@ -1120,7 +1359,17 @@ public final class TranslationOrchestrator {
         // `.apiKeyInvalid` (see `emptyCloseTerminalThreshold` for why a
         // lone occurrence is already conclusive); the counter machinery
         // stays so the threshold can be raised without rework.
-        if !receivedAnyData {
+        // `serverGoingAway` is the provider's own "session over, please
+        // rotate" — it says nothing about credentials even when it lands
+        // before the first delta, so it must not feed the empty-close
+        // apiKeyInvalid escalation. It has its own damper instead: count
+        // back-to-back swap episodes so a maintenance-mode server that
+        // goAways every fresh socket stops enjoying the zero-backoff
+        // fast path (`recordDeltaArrival` resets the streak).
+        if error == .serverGoingAway {
+            consecutiveGoAwaySwaps[speaker, default: 0] += 1
+        }
+        if !receivedAnyData && error != .serverGoingAway {
             let next = (consecutiveEmptyCloses[speaker] ?? 0) + 1
             consecutiveEmptyCloses[speaker] = next
             if next >= Self.emptyCloseTerminalThreshold {
@@ -1197,14 +1446,25 @@ public final class TranslationOrchestrator {
             let delay: TimeInterval
             if firstAttempt, case .rateLimited(let retryAfter) = error {
                 delay = retryAfter
+            } else if firstAttempt, error == .serverGoingAway,
+                      consecutiveGoAwaySwaps[speaker, default: 0] <= Self.maxImmediateGoAwaySwaps {
+                // The server told us it's rotating the session BEFORE the
+                // socket died — every millisecond of backoff here is lost
+                // audio for no reason. Swap immediately; later attempts
+                // (if the swap itself fails) back off normally, and a
+                // streak of data-less goAway episodes past the damper
+                // threshold is paced like an ordinary failure.
+                delay = 0
             } else {
                 delay = backoff.nextDelay()
             }
             firstAttempt = false
-            do {
-                try await clock.sleep(for: delay)
-            } catch {
-                return // cancelled
+            if delay > 0 {
+                do {
+                    try await clock.sleep(for: delay)
+                } catch {
+                    return // cancelled
+                }
             }
             // The user may have called stop() while we were sleeping. If state
             // is no longer .reconnecting, abandon the retry loop quietly so we
@@ -1307,6 +1567,7 @@ public final class TranslationOrchestrator {
         // Stop. stopAllStreams() is NOT on the reconnect / network-pause paths,
         // so the token correctly survives those. Idempotent.
         endAudioActivity()
+        cancelConnectWatchdog()
         cancelReconnectWatchdog()
         cancelNoDataWatchdog()
         stopNetworkObserver()
@@ -1395,8 +1656,14 @@ public final class TranslationOrchestrator {
 
     public func stop() async {
         Self.log.info("stop() — tearing down session from state=\(String(describing: self.state))")
+        // Invalidate any in-flight start() attempt FIRST: its parked
+        // connect() may resume while stopAllStreams() below is suspended
+        // (state still `.connecting` in that window), and the epoch bump
+        // is what makes its guards fail (see `startEpoch`).
+        startEpoch &+= 1
         await stopAllStreams()   // also releases the App Nap activity token
         consecutiveEmptyCloses = [.me: 0, .peer: 0]
+        consecutiveGoAwaySwaps = [:]
         state = .idle
         // Finalise any diagnostic dumps so the WAV `data` chunk size
         // gets patched from `0xFFFF_FFFF` to the actual byte count.

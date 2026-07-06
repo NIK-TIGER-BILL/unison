@@ -37,3 +37,11 @@ func repeated(_ char: String, _ count: Int) -> String {
 func makeSentinel() -> String {
     "FileLogStoreTests-sentinel-\(UUID().uuidString)"
 }
+
+/// Delete the live log file out from under the store — models a user (or
+/// a cleaner) removing `unison.log` while the app runs. Lives here (not in
+/// the test file) because the test file avoids `import Foundation` — see
+/// the header note about the `_Testing_Foundation` overlay.
+func deleteCurrentLogFile(of store: FileLogStore) throws {
+    try FileManager.default.removeItem(at: store.currentFileURL)
+}

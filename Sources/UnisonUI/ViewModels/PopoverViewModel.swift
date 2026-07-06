@@ -201,6 +201,10 @@ public final class PopoverViewModel {
             return "Переподключение…"
         case .paused(_, _, _, .networkLost):
             return "Нет интернета. Ждём…"
+        case .paused(_, _, _, .systemSleep):
+            // Виден мгновение на границах сна; после пробуждения сразу
+            // сменяется на "Возобновляем…" или сетевую паузу.
+            return "Пауза: Mac спит"
         case .paused(_, _, _, .awaitingNetwork):
             return "Возобновляем…"
         case .translating:
@@ -250,7 +254,7 @@ public final class PopoverViewModel {
             return .active
         case .reconnecting:
             return .warn
-        case .paused(_, _, _, .networkLost):
+        case .paused(_, _, _, .networkLost), .paused(_, _, _, .systemSleep):
             return .paused
         case .paused(_, _, _, .awaitingNetwork):
             return .active
@@ -422,6 +426,10 @@ public final class PopoverViewModel {
             return "Микрофон не подаёт сигнал. Проверьте, что выбрано правильное устройство в Настройках, и попробуйте снова."
         case .audioCaptureDenied:
             return "Нет доступа к захвату системного звука. Откройте Настройки → Конфиденциальность и безопасность → Запись экрана и системного звука → Только запись системного звука."
+        case .serverGoingAway:
+            // Терминально почти не всплывает: goAway уходит в мгновенный
+            // реконнект, а исчерпание ретраев даёт .networkLost.
+            return "Сервер \(model.providerName) закрыл сессию. Начните перевод заново."
         }
     }
 }

@@ -907,8 +907,18 @@ final class ScaledRealClock: Clock, @unchecked Sendable {
     }
 
     // Advance virtual time past 60 s without the network returning.
-    clock.advance(by: 65)
-    try? await Task.sleep(nanoseconds: 200_000_000)
+    // Retry the advance: the watchdog task parks on ManualClock.sleep
+    // asynchronously, and under parallel-suite load it may not have
+    // parked yet when the first advance() lands (its deadline then
+    // bases past the advanced now). A later advance crosses any
+    // late-parked deadline, making the test deterministic instead of
+    // racing real-time sleeps against task scheduling (was a rare
+    // flake under full-suite parallelism).
+    for _ in 0..<5 {
+        clock.advance(by: 65)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        if case .error = o.state { break }
+    }
 
     if case .error(.networkLost) = o.state {
         // ok
@@ -1242,4 +1252,361 @@ final class GateSwitchFactory: TranslationStreamFactory, @unchecked Sendable {
     }
     await o.stop()
     #expect(o.outputRouteDegraded == false, "stop() must clear the route hint")
+}
+
+// MARK: - start() reentrancy vs stop() (D1) + connect watchdog (D2)
+
+/// Poll with yields until `cond` holds or the budget of yields runs out.
+/// House-style wrapper over the `for _ in 0..<N where … { await Task.yield() }`
+/// loops used elsewhere in this file, with a real-time fallback sleep so
+/// gated awaits (not just actor hops) get a chance to park.
+@MainActor
+private func spinUntil(_ cond: @MainActor () -> Bool) async {
+    for _ in 0..<1000 where !cond() {
+        await Task.yield()
+        try? await Task.sleep(nanoseconds: 2_000_000)
+    }
+}
+
+// Регрессия D1: stop() во время подвешенного connect() должен победить —
+// продолжение start() не имеет права перезаписать .idle (ни в
+// .translating-зомби, ни в .error).
+@Test @MainActor func orchestrator_stopDuringConnect_staysIdle() async throws {
+    let factory = MockTranslationStreamFactory()
+    factory.gateNextConnect = true
+    let o = makeOrchestrator(factory: factory)
+    let startTask = Task { await o.start(mode: .listen, languages: .default) }
+    await spinUntil { factory.streams[.peer]?.connectWaiting == true }
+    #expect(factory.streams[.peer]?.connectWaiting == true, "start() не дошёл до connect")
+    await o.stop()
+    #expect(o.state == .idle)
+    factory.streams[.peer]?.releaseConnect()
+    await startTask.value
+    #expect(o.state == .idle, "start() продолжился после stop() и перезаписал state: \(o.state)")
+}
+
+// Регрессия D1: если после юзерского stop() подвешенный connect() ещё и
+// падает, catch-ветка start() не должна перетереть .idle на .error.
+@Test @MainActor func orchestrator_stopDuringConnect_thenConnectFails_staysIdle() async throws {
+    let factory = MockTranslationStreamFactory()
+    factory.gateNextConnect = true
+    let o = makeOrchestrator(factory: factory)
+    let startTask = Task { await o.start(mode: .listen, languages: .default) }
+    await spinUntil { factory.streams[.peer]?.connectWaiting == true }
+    await o.stop()
+    factory.streams[.peer]?.connectError = TranslationError.networkLost
+    factory.streams[.peer]?.releaseConnect()
+    await startTask.value
+    #expect(o.state == .idle, "поздний фейл connect() перетёр .idle на \(o.state)")
+}
+
+// Регрессия D2: сессия не должна висеть в .connecting вечно, если connect
+// подвис (мёртвая сеть, зависший HAL). Вотчдог обязан добить её в .error.
+// Вотчдог намеренно wall-clock (см. connectWatchdogBudget) — виртуальные
+// часы (InstantClock) проматывают sleep'ы мгновенно и стреляли бы посреди
+// легитимного старта; поэтому тест сжимает бюджет до миллисекунд.
+@Test @MainActor func orchestrator_connectWatchdog_failsSessionAfterBudget() async throws {
+    let factory = MockTranslationStreamFactory()
+    factory.gateNextConnect = true
+    let o = makeOrchestrator(factory: factory)
+    o.connectWatchdogBudget = 0.05
+    let startTask = Task { await o.start(mode: .listen, languages: .default) }
+    await spinUntil { factory.streams[.peer]?.connectWaiting == true }
+    if case .connecting = o.state {} else {
+        Issue.record("Expected .connecting, got \(o.state)")
+    }
+    await spinUntil { o.state.errorValue == .networkLost }
+    #expect(o.state.errorValue == .networkLost, "вотчдог не сработал: \(o.state)")
+    factory.streams[.peer]?.releaseConnect()
+    await startTask.value
+    #expect(o.state.errorValue == .networkLost)
+}
+
+// Обратная сторона D2: успешный старт обязан снять вотчдог — он не должен
+// выстрелить позже и убить здоровую сессию.
+@Test @MainActor func orchestrator_connectWatchdog_cancelledOnSuccessfulStart() async throws {
+    let o = makeOrchestrator()
+    // Бюджет wall-clock: 0.5с — с большим запасом длиннее mock-старта
+    // (микросекунды–десятки мс даже под нагрузкой параллельной сюиты;
+    // 0.05 флачил — редкий stall планировщика превышал бюджет, и вотчдог
+    // ЧЕСТНО убивал ещё не завершившийся старт), но достаточно короткий,
+    // чтобы окно проверки «не выстрелил после снятия» осталось быстрым.
+    o.connectWatchdogBudget = 0.5
+    await o.start(mode: .listen, languages: .default)
+    if case .translating = o.state {} else {
+        Issue.record("Expected .translating, got \(o.state)")
+    }
+    // Дать снятому вотчдогу время «выстрелить», если бы он не был снят.
+    try await Task.sleep(nanoseconds: 1_200_000_000)
+    if case .translating = o.state {} else {
+        Issue.record("вотчдог убил здоровую сессию: \(o.state)")
+    }
+}
+
+// MARK: - Gemini goAway → проактивный мгновенный реконнект (D3)
+
+// serverGoingAway реконнектится БЕЗ backoff-сна: ManualClock подвешивает
+// любой sleep — если реконнект просит сон, тест не дойдёт до .translating.
+@Test @MainActor func orchestrator_serverGoingAway_reconnectsWithoutBackoff() async throws {
+    let clock = ManualClock()
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: clock)
+    await o.start(mode: .listen, languages: .default)
+    let first = try #require(factory.streams[.peer])
+    first.emitConnectionState(.failed(.serverGoingAway, receivedAnyData: true))
+    await spinUntil {
+        if case .translating = o.state { factory.streams[.peer] !== first } else { false }
+    }
+    if case .translating = o.state {} else {
+        Issue.record("реконнект не завершился без сна: \(o.state)")
+    }
+    #expect(factory.streams[.peer] !== first, "новый стрим не создан")
+    await o.stop()
+}
+
+// goAway ДО первых данных — это ротация сервера, а не невалидный ключ:
+// empty-close-эскалация не должна давать терминальный .apiKeyInvalid.
+@Test @MainActor func orchestrator_serverGoingAwayWithoutData_notApiKeyInvalid() async throws {
+    let clock = ManualClock()
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: clock)
+    await o.start(mode: .listen, languages: .default)
+    let first = try #require(factory.streams[.peer])
+    first.emitConnectionState(.failed(.serverGoingAway, receivedAnyData: false))
+    await spinUntil {
+        if case .translating = o.state { factory.streams[.peer] !== first } else { false }
+    }
+    #expect(o.state.errorValue == nil, "goAway без данных эскалировался в \(String(describing: o.state.errorValue))")
+    if case .translating = o.state {} else {
+        Issue.record("сессия не пережила goAway: \(o.state)")
+    }
+    await o.stop()
+}
+
+// MARK: - Sleep/wake (D5): сон Mac при активной сессии
+
+// willSleep при активной сессии: стримы закрыты, капчеры остановлены,
+// state = .paused(.systemSleep) — вместо зомби-сессии с мёртвыми сокетами.
+@Test @MainActor func orchestrator_systemSleep_pausesActiveSession() async throws {
+    let mic = MockMicrophoneCapture()
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(mic: mic, factory: factory)
+    await o.start(mode: .call, languages: .default)
+    o.systemWillSleep()
+    await spinUntil {
+        if case .paused(_, _, _, .systemSleep) = o.state { true } else { false }
+    }
+    if case .paused(_, _, _, .systemSleep) = o.state {} else {
+        Issue.record("Expected .paused(.systemSleep), got \(o.state)")
+    }
+    #expect(mic.stopCalls >= 1, "мик не остановлен перед сном")
+    await spinUntil { (factory.streams[.peer]?.closeCalls ?? 0) >= 1 }
+    #expect((factory.streams[.peer]?.closeCalls ?? 0) >= 1, "peer-стрим не закрыт перед сном")
+    await o.stop()
+}
+
+// didWake при живой сети: сессия возобновляется сама, таймер не сбрасывается.
+@Test @MainActor func orchestrator_wakeWithNetwork_resumesSession() async throws {
+    let net = MockNetworkPathMonitor(initial: .satisfied)
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, networkMonitor: net)
+    await o.start(mode: .listen, languages: .default)
+    let startedAt = o.state.sessionStartedAt
+    o.systemWillSleep()
+    await spinUntil {
+        if case .paused = o.state { true } else { false }
+    }
+    o.systemDidWake()
+    await spinUntil {
+        if case .translating = o.state { true } else { false }
+    }
+    if case .translating = o.state {} else {
+        Issue.record("сессия не возобновилась после пробуждения: \(o.state)")
+    }
+    #expect(o.state.sessionStartedAt == startedAt, "таймер сессии сбросился")
+    await o.stop()
+}
+
+// didWake без сети: переходим в сетевую паузу, существующий network-observer
+// возобновляет сессию, когда сеть поднимется.
+@Test @MainActor func orchestrator_wakeWithoutNetwork_waitsForNetworkThenResumes() async throws {
+    let net = MockNetworkPathMonitor(initial: .satisfied)
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, networkMonitor: net)
+    await o.start(mode: .listen, languages: .default)
+    o.systemWillSleep()
+    await spinUntil {
+        if case .paused(_, _, _, .systemSleep) = o.state { true } else { false }
+    }
+    net.simulate(.unsatisfied)
+    o.systemDidWake()
+    await spinUntil {
+        if case .paused(_, _, _, .networkLost) = o.state { true } else { false }
+    }
+    if case .paused(_, _, _, .networkLost) = o.state {} else {
+        Issue.record("Expected .paused(.networkLost) после пробуждения без сети, got \(o.state)")
+    }
+    net.simulate(.satisfied)
+    await spinUntil {
+        if case .translating = o.state { true } else { false }
+    }
+    if case .translating = o.state {} else {
+        Issue.record("сессия не возобновилась после возврата сети: \(o.state)")
+    }
+    await o.stop()
+}
+
+// willSleep вне активной сессии — no-op.
+@Test @MainActor func orchestrator_systemSleepWhileIdle_noop() async {
+    let o = makeOrchestrator()
+    o.systemWillSleep()
+    #expect(o.state == .idle)
+}
+
+// MARK: - Ревью PR #17: epoch-guard (стейл-хвосты start), wake-fallback, goAway-демпфер
+
+// Находка №1(a): connect() разрешается, пока stop() подвис в teardown —
+// state в этом окне всё ещё .connecting, и хвост start() по одной лишь
+// форме состояния «воскресил» бы сессию: заново стартовал захват, ставил
+// .translating и повторно брал App-Nap токен. Epoch-guard обязан это отсечь.
+@Test @MainActor func orchestrator_connectResolvesDuringHungStop_doesNotResurrectSession() async throws {
+    let mixer = MockAudioOutputMixer()
+    let peerCap = MockPeerAudioCapture()
+    let factory = MockTranslationStreamFactory()
+    factory.gateNextConnect = true
+    let o = makeOrchestrator(peer: peerCap, mixer: mixer, factory: factory)
+    let startTask = Task { await o.start(mode: .listen, languages: .default) }
+    await spinUntil { factory.streams[.peer]?.connectWaiting == true }
+    #expect(peerCap.startCalls == 0, "захват не должен стартовать до connect")
+
+    mixer.blockStopUntilReleased = true
+    let stopTask = Task { await o.stop() }
+    // Дождаться, пока стоповый teardown упрётся в заблокированный mixer.stop
+    // (SystemClock: stop() будет висеть в teardownFinished до releaseStop).
+    await spinUntil { mixer.stopCalls >= 1 }
+
+    // connect() завершается успехом РОВНО в окно подвисшего stop().
+    factory.streams[.peer]?.releaseConnect()
+    await startTask.value
+
+    #expect(peerCap.startCalls == 0, "хвост start() заново стартовал захват в окно стопа")
+    if case .translating = o.state {
+        Issue.record("хвост start() воскресил .translating во время stop()")
+    }
+
+    mixer.releaseStop()
+    await stopTask.value
+    #expect(o.state == .idle)
+    #expect(o.isHoldingAudioActivity == false, "App-Nap токен утёк из хвоста start()")
+}
+
+// Находка №1(b): start→stop→start№2 — поздний хвост попытки №1 не имеет
+// права трогать сессию попытки №2 (ни фантомным .error, ни глобальным
+// stopAllStreams).
+@Test @MainActor func orchestrator_staleStartTail_doesNotKillSecondAttempt() async throws {
+    let factory = MockTranslationStreamFactory()
+    factory.gateNextConnect = true
+    let o = makeOrchestrator(factory: factory)
+    let start1 = Task { await o.start(mode: .listen, languages: .default) }
+    await spinUntil { factory.streams[.peer]?.connectWaiting == true }
+    let stream1 = try #require(factory.streams[.peer])
+
+    await o.stop()
+    #expect(o.state == .idle)
+
+    factory.gateNextConnect = false
+    let start2 = Task { await o.start(mode: .listen, languages: .default) }
+    await spinUntil { if case .translating = o.state { true } else { false } }
+    await start2.value
+    let stream2 = try #require(factory.streams[.peer])
+    #expect(stream2 !== stream1)
+
+    // Хвост №1 просыпается с фейлом ПОСЛЕ того как №2 уже translating.
+    stream1.connectError = TranslationError.networkLost
+    stream1.releaseConnect()
+    await start1.value
+    for _ in 0..<300 { await Task.yield() }
+
+    if case .translating = o.state {} else {
+        Issue.record("хвост start#1 убил здоровый start#2: \(o.state)")
+    }
+    #expect(stream2.closeCalls == 0, "хвост start#1 закрыл стримы start#2 (глобальный teardown из стейл-хвоста)")
+    await o.stop()
+}
+
+// Находка №2: didWake резюмирует по протухшему кэшу сети; первый connect
+// после пробуждения падает (Wi-Fi ещё реассоциируется). Это должно давать
+// откат в сетевую паузу с дорезюмированием по свежему .satisfied — а не
+// терминальную .error(.networkLost).
+@Test @MainActor func orchestrator_wakeResumeFails_fallsBackToNetworkPause_thenRecovers() async throws {
+    let net = MockNetworkPathMonitor(initial: .satisfied)
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, networkMonitor: net)
+    await o.start(mode: .listen, languages: .default)
+    let startedAt = o.state.sessionStartedAt
+    o.systemWillSleep()
+    await spinUntil { if case .paused(_, _, _, .systemSleep) = o.state { true } else { false } }
+
+    // Гейт на резюмном connect'е — фейл wake-резюма инжектится строго в
+    // ЕГО стрим и строго в контролируемый момент. Прежний вариант
+    // (фабричный nextConnectError + simulate'ы сразу после спина)
+    // гонялся с задержанным под нагрузкой сюиты resume-таском и флачил.
+    factory.gateNextConnect = true
+    o.systemDidWake()
+    await spinUntil { factory.streams[.peer]?.connectWaiting == true }
+    let wakeStream = try #require(factory.streams[.peer])
+    factory.gateNextConnect = false
+    wakeStream.connectError = TranslationError.networkLost
+    wakeStream.releaseConnect()   // Wi-Fi «ещё реассоциируется»: первый connect падает
+
+    await spinUntil { if case .paused(_, _, _, .networkLost) = o.state { true } else { false } }
+    if case .paused(_, _, _, .networkLost) = o.state {} else {
+        Issue.record("wake-фейл дал \(o.state) вместо отката в сетевую паузу")
+    }
+
+    // Сеть реально поднялась → свежий .satisfied → дорезюмировались.
+    net.simulate(.unsatisfied)
+    net.simulate(.satisfied)
+    await spinUntil { if case .translating = o.state { true } else { false } }
+    if case .translating = o.state {} else {
+        Issue.record("сессия не дорезюмировалась по свежему .satisfied: \(o.state)")
+    }
+    #expect(o.state.sessionStartedAt == startedAt, "таймер сессии сбросился")
+    await o.stop()
+}
+
+// Находка №5: сервер, который принимает сокет и сразу шлёт goAway (без
+// единого фрейма данных), не должен крутить вечный zero-backoff-чурн:
+// после maxImmediateGoAwaySwaps подряд включается обычный backoff.
+@Test @MainActor func orchestrator_goAwayChurn_pastDamper_requiresBackoff() async throws {
+    let clock = ManualClock()
+    let factory = MockTranslationStreamFactory()
+    let o = makeOrchestrator(factory: factory, clock: clock)
+    await o.start(mode: .listen, languages: .default)
+
+    // Первые 3 data-less свопа мгновенны (никаких advance у часов).
+    for i in 1...3 {
+        let s = try #require(factory.streams[.peer])
+        s.emitConnectionState(.failed(.serverGoingAway, receivedAnyData: false))
+        await spinUntil {
+            if case .translating = o.state { factory.streams[.peer] !== s } else { false }
+        }
+        #expect(factory.streams[.peer] !== s, "swap #\(i) не прошёл мгновенно")
+    }
+
+    // 4-й эпизод — демпфер: без advance реконнект не должен завершиться.
+    let s4 = try #require(factory.streams[.peer])
+    s4.emitConnectionState(.failed(.serverGoingAway, receivedAnyData: false))
+    await spinUntil { if case .reconnecting = o.state { true } else { false } }
+    for _ in 0..<300 { await Task.yield() }
+    if case .reconnecting = o.state {} else {
+        Issue.record("4-й goAway-эпизод прошёл без backoff: \(o.state)")
+    }
+
+    clock.advance(by: 2)   // первая backoff-задержка (1с) пройдена
+    await spinUntil { if case .translating = o.state { true } else { false } }
+    if case .translating = o.state {} else {
+        Issue.record("реконнект не завершился после backoff: \(o.state)")
+    }
+    await o.stop()
 }

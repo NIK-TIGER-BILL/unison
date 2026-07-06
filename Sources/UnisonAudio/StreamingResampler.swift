@@ -45,6 +45,15 @@ public final class StreamingResampler: AudioFormatTransformer, @unchecked Sendab
 
     private let lock = NSLock()
     private var lanes: [Key: Lane] = [:]
+    /// Same category as `ResamplerAdapter` — the "conversion path came up
+    /// with the right formats" diagnostic moved here when the live
+    /// pipelines switched to the streaming path (PR #16), silently killing
+    /// the adapter's first-call lines (and the VM integration assertion
+    /// that greps for them). Latched per instance: one line per pipeline
+    /// per direction, hot path stays log-free.
+    private static let log = UnisonLog(category: "Resampler")
+    private var loggedToWire = false
+    private var loggedFromWire = false
 
     public init() {}
 
@@ -58,12 +67,31 @@ public final class StreamingResampler: AudioFormatTransformer, @unchecked Sendab
         if frame.sampleRate == sampleRate, frame.format == .int16, frame.channels == 1 { return frame }
         let f32 = frame.format == .float32 ? frame : Resampler.convertInt16ToFloat32(frame)
         let resampled = resample(Resampler.mixdownToMono(f32), to: sampleRate)
-        return Resampler.convertFloat32ToInt16(resampled)
+        let out = Resampler.convertFloat32ToInt16(resampled)
+        logFirstCall(direction: "toWire", flag: &loggedToWire, input: frame, output: out)
+        return out
     }
 
     public func fromWire(_ frame: AudioFrame, targetSampleRate: Int) -> AudioFrame {
         let f32 = frame.format == .float32 ? frame : Resampler.convertInt16ToFloat32(frame)
-        return resample(Resampler.mixdownToMono(f32), to: targetSampleRate)
+        let out = resample(Resampler.mixdownToMono(f32), to: targetSampleRate)
+        logFirstCall(direction: "fromWire", flag: &loggedFromWire, input: frame, output: out)
+        return out
+    }
+
+    /// One diagnostic line per direction per pipeline instance, proving the
+    /// conversion path is live and the formats are what we expect (e.g.
+    /// `fromWire — first call: in=24000Hz int16 → out=48000Hz float32`).
+    /// The VM integration test asserts on it.
+    private func logFirstCall(direction: String, flag: inout Bool,
+                              input: AudioFrame, output: AudioFrame) {
+        lock.lock()
+        let shouldLog = !flag
+        if shouldLog { flag = true }
+        lock.unlock()
+        guard shouldLog else { return }
+        Self.log.info("\(direction) — first call: in=\(input.sampleRate)Hz \(String(describing: input.format))"
+            + " → out=\(output.sampleRate)Hz \(String(describing: output.format))")
     }
 
     // MARK: - Streaming conversion core
