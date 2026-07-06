@@ -29,6 +29,14 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
     /// `AudioDeviceStart` and cleared strictly after `AudioDeviceStop`).
     private let workQueue = DispatchQueue(
         label: "com.unison.app.ProcessTapCapture.lifecycle", qos: .userInitiated)
+    /// Marks `workQueue` so `deinit` can detect it is ALREADY running on
+    /// it — the bring-up block briefly holds the only strong reference
+    /// (weak→strong upgrade); if the owner dropped theirs mid-bring-up,
+    /// the block's release triggers deinit ON the queue, where a
+    /// `workQueue.sync` would self-deadlock. Unreachable with today's
+    /// owners (Composition holds the capture for the process lifetime),
+    /// but two lines close it for good.
+    private static let workQueueKey = DispatchSpecificKey<Bool>()
 
     /// Static-scope init (tests, benchmark, permission probe). Defaults to a
     /// blocklist with no user exclusions = tap everything except self.
@@ -37,6 +45,7 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
         self.scopeProvider = { scope }
         self.muteBehavior = muteBehavior
         self.log = UnisonLog(category: "ProcessTapCapture")
+        workQueue.setSpecific(key: Self.workQueueKey, value: true)
     }
 
     /// Closure-based init (production — re-reads on every start).
@@ -45,6 +54,7 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
         self.scopeProvider = scopeProvider
         self.muteBehavior = muteBehavior
         self.log = UnisonLog(category: "ProcessTapCapture")
+        workQueue.setSpecific(key: Self.workQueueKey, value: true)
     }
 
     public func start() -> AsyncStream<AudioFrame> {
@@ -116,11 +126,18 @@ public final class ProcessTapCapture: PeerAudioCapture, @unchecked Sendable {
         // doesn't hang forever when the owner is dropped without calling
         // stop(). Sync on the lifecycle queue: any queued bring-up holds
         // only weak self, so it cannot delay deinit indefinitely, and FIFO
-        // ordering runs it (as a no-op) before this block.
+        // ordering runs it (as a no-op) before this block. If deinit fires
+        // ON the queue itself (a bring-up block's strong ref was the last
+        // one — see `workQueueKey`), run inline: we're already serialized.
         self.log.info("[tap.stop] reason=deinit")
-        workQueue.sync {
+        if DispatchQueue.getSpecific(key: Self.workQueueKey) == true {
             teardown()
             continuation?.finish()
+        } else {
+            workQueue.sync {
+                teardown()
+                continuation?.finish()
+            }
         }
     }
 

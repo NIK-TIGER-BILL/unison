@@ -251,6 +251,18 @@ public final class FileLogStore: @unchecked Sendable {
     private func rotateIfNeededLocked() {
         let url = currentFileURL
         let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        // The live file vanished under the cached handle (user or a
+        // cleaner deleted it). write(2) into the unlinked inode keeps
+        // succeeding, so without this check logging would silently go
+        // nowhere until app restart — and this size check would read 0
+        // forever, never rotating the handle out (review finding). Drop
+        // the handle; the next line recreates the file. Free: this stat
+        // runs after every line anyway.
+        if attrs == nil, writeHandle != nil {
+            try? writeHandle?.close()
+            writeHandle = nil
+            return
+        }
         let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
         guard size > maxFileBytes else { return }
         rotateLocked()
