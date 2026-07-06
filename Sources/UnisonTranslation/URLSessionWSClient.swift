@@ -106,7 +106,13 @@ public final class URLSessionWSClient: NSObject, WSClient, URLSessionWebSocketDe
     private func startKeepalive(task: URLSessionWebSocketTask) {
         keepalive?.stop()
         keepalive = WSKeepalive(
-            sleeper: { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
+            sleeper: {
+                // Clamp before the UInt64 cast — a non-finite/negative
+                // interval traps (same guard as SystemClock.sleep).
+                let ns = $0 * 1_000_000_000
+                guard ns.isFinite, ns > 0 else { return }
+                try await Task.sleep(nanoseconds: UInt64(ns))
+            },
             sendPing: { [weak task] done in
                 guard let task, task.state == .running else {
                     done(URLError(.networkConnectionLost))

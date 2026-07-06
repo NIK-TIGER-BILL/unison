@@ -795,8 +795,12 @@ public final class TranslationOrchestrator {
         connectWatchdogTask?.cancel()
         let budget = connectWatchdogBudget
         connectWatchdogTask = Task { @MainActor [weak self] in
-            // Wall-clock on purpose — see `connectWatchdogBudget`.
-            try? await Task.sleep(nanoseconds: UInt64(budget * 1_000_000_000))
+            // Wall-clock on purpose — see `connectWatchdogBudget`. Clamp
+            // before the UInt64 cast: a non-finite/negative budget traps at
+            // runtime (same guard as SystemClock.sleep).
+            let ns = budget * 1_000_000_000
+            guard ns.isFinite, ns > 0 else { return }
+            try? await Task.sleep(nanoseconds: UInt64(ns))
             guard let self, !Task.isCancelled else { return }
             if case .connecting = self.state {
                 Self.log.error("connect watchdog fired after \(budget)s — session stuck in .connecting; forcing terminal .error(.networkLost)")
