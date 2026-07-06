@@ -58,6 +58,20 @@ private func peerEntry(_ original: String, _ translated: String, at seconds: Tim
 
 // MARK: - Count cap
 
+// The freeze-time memo must not accumulate across sessions: once the store
+// is cleared (entries empty), stale stamps are pruned so it can't leak for
+// the app's whole lifetime.
+@MainActor
+@Test func feed_finalizedAt_prunedWhenBubblesGone() {
+    let feed = TranscriptFeed(config: .init(finalizeAfter: 2.5, window: 30, maxBubbles: 6))
+    let e = peerEntry("Hi.", "Привет.", at: 0) // completed → freezes → stamped
+    _ = feed.visibleBubbles(entries: [e], now: epochDate(0))
+    #expect(feed.finalizedAt.count == 1)
+    // New session: the store was cleared → no entries.
+    _ = feed.visibleBubbles(entries: [], now: epochDate(1))
+    #expect(feed.finalizedAt.isEmpty)
+}
+
 @MainActor
 @Test func feed_capsToMaxBubbles_keepingNewest() {
     let feed = TranscriptFeed(config: .init(finalizeAfter: 2.5, window: 30, maxBubbles: 6))

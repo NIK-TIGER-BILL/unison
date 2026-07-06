@@ -25,7 +25,9 @@ final class TranscriptFeed {
 
     private let config: Config
     /// When each frozen bubble id was first seen frozen — its lifetime clock.
-    private var finalizedAt: [UUID: Date] = [:]
+    /// Pruned to the currently-present bubbles on every call so it can't grow
+    /// unbounded across sessions (the feed outlives a session's store).
+    private(set) var finalizedAt: [UUID: Date] = [:]
 
     init(config: Config = Config()) {
         self.config = config
@@ -41,6 +43,11 @@ final class TranscriptFeed {
         for bubble in all where !bubble.isLive && finalizedAt[bubble.id] == nil {
             finalizedAt[bubble.id] = now
         }
+        // Forget stamps for bubbles that are no longer present — chiefly when
+        // a new session clears the store — so the memo stays bounded by the
+        // current session rather than the app's whole lifetime.
+        let presentIds = Set(all.map(\.id))
+        finalizedAt = finalizedAt.filter { presentIds.contains($0.key) }
         // Keep the live bubble and every frozen bubble still inside its
         // window. The filter is per-bubble, so removal is always whole.
         var visible = all.filter { bubble in
@@ -52,11 +59,5 @@ final class TranscriptFeed {
             visible = Array(visible.suffix(config.maxBubbles))
         }
         return visible
-    }
-
-    /// Drop all lifetime memory (call on session clear so a new session's
-    /// bubbles don't inherit stale freeze times).
-    func clear() {
-        finalizedAt.removeAll()
     }
 }
