@@ -679,6 +679,7 @@ UNISON_DISABLE_DECLICK=1 swift run pacing-eval --audio /path/to/model-output.wav
 - [x] **Lifecycle-устойчивость (2026-07-03)** — stop-vs-connect гонки, connect-вотчдог, Gemini goAway → мгновенный swap, WS keepalive против зомби-сессий, sleep/wake-пауза, HAL bring-up с MainActor убран — см. раздел «Устойчивость сессии»
 - [ ] Gemini `sessionResumption` (переживать goAway-реконнект с сохранением контекста перевода) + make-before-break swap (двойной стрим на время ротации)
 - [ ] Bounded teardown в `applicationWillTerminate` (сейчас синхронный; известный wedge закрыт reset()-фиксом, остаточный риск — перманентно зависший coreaudiod на quit)
+- [ ] Сон во время `.connecting`: willSleep игнорирует эту фазу → connect-вотчдог (continuous clock) добьёт попытку на пробуждении в честный `.error(.networkLost)` с рабочей кнопкой «Начать перевод». v2: паузить и `.connecting`-сессии. Ревью-нота: keepalive может ложно убить соединение при ≥40с непрерывного насыщения сокета (2 pong-мисса) — принятый трейд-офф, реконнект в этой ситуации оправдан
 
 ---
 
