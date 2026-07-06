@@ -639,6 +639,28 @@ UNISON_DISABLE_DECLICK=1 swift run pacing-eval --audio /path/to/model-output.wav
 
 ---
 
+## Устойчивость сессии (lifecycle, 2026-07-03)
+
+Слой защит вокруг «сессия живёт всегда»: второй запуск, долгий простой,
+многочасовые сессии, зависший coreaudiod. Все машины — в
+`TranslationOrchestrator`, транспортная — в `URLSessionWSClient`.
+
+| Защита | Механизм | Где |
+|---|---|---|
+| Stop во время connect | `start()` перепроверяет `.connecting` после КАЖДОГО await (как guards в `resumeStreams`); поздний фейл/успех connect не перетирает юзерский `.idle` и не воскрешает зомби-`.translating` | `TranslationOrchestrator.start()`, `abortedByStateChange()` |
+| Зависший connect | Вотчдог фазы `.connecting`: 30с **wall-clock** (`connectWatchdogBudget`; НЕ инжектируемые часы — InstantClock проматывал бы бюджет мгновенно) → teardown + `.error(.networkLost)` | `armConnectWatchdog` |
+| Gemini `goAway` (лимит сессии Live API) | Стрим отдаёт `.failed(.serverGoingAway)` → оркестратор реконнектит с **нулевым** backoff (проактивный swap, пока старый сокет ещё жив); исключён из empty-close→apiKeyInvalid эскалации. TODO v2: sessionResumption (сохранение контекста) | `GeminiLiveTranslateStream.handle(.goAway)`, `runReconnectLoop` |
+| Полуоткрытый сокет (сон, NAT idle-timeout, тихая смерть сервера) | WS ping каждые 15с, pong-timeout 10с, 2 пропуска подряд → `.error` в close-канал → стандартный reconnect. Один пропуск прощается. Ядро `WSKeepalive` транспортно-нейтрально (инжектируемые sendPing/sleeper, юнит-тесты) | `URLSessionWSClient.startKeepalive` |
+| Сон Mac при активной сессии | `NSWorkspace.willSleep` → `.paused(.systemSleep)` (стримы закрыты, пока сокеты живы; recovery-вотчдог НЕ армится — ночной сон не отказ). `didWake` → resume сразу (сеть есть) или через сетевую паузу (сети нет). Сетевые флапы на границах сна игнорируются: `.systemSleep` главнее `.networkLost` | `systemWillSleep`/`systemDidWake`, `PauseReason.systemSleep` |
+| HAL bring-up на MainActor | Симметрично teardown-фиксу: `AVAudioOutputMixer.start` — detached; tap/mic bring-up — на своих serial lifecycle-очередях (FIFO как у прежнего синхронного кода; `stop()` остался sync для сериализации HAL-destroy). Занятый coreaudiod больше не фризит UI на старте | `AVAudioOutputMixer.start`, `ProcessTapCapture.workQueue`, `AVAudioEngineMicrophone.workQueue` |
+| Лог-файл на долгих сессиях | `FileLogStore` держит `FileHandle` открытым (было 4 syscall'а на строку); ротация/ошибка записи инвалидируют хендл | `FileLogStore.appendLineRaw` |
+
+Регрессионные тесты: `orchestrator_stopDuringConnect_*`,
+`orchestrator_connectWatchdog_*`, `orchestrator_serverGoingAway_*`,
+`orchestrator_systemSleep_*` / `orchestrator_wakeWith*`, `WSKeepaliveTests`.
+
+---
+
 ## Открытые вопросы / TODO
 
 - [x] Минимальное repro для bug report провайдерам (fade — есть и у OpenAI, и у Gemini) — `scripts/fade-minrepro.sh` + черновик `docs/fade-bug-report-draft.md`; прогнать вживую и отправить
@@ -654,7 +676,10 @@ UNISON_DISABLE_DECLICK=1 swift run pacing-eval --audio /path/to/model-output.wav
 - [x] **BT/HFP «из-за стены»** (2026-07-02) — корень доказан логом (выход 16000Hz×1ch); детект `isNarrowbandRoute` + хинт в поповере + предпочтение встроенного мика при BT-дефолте
 - [ ] Concealment на peer-пути (`BlackHole2chPlayer`) — v2, если пир жалуется на микропаузы
 - [ ] Подтвердить на слух: потолок 1.0с + concealment + streaming resampler = гладко (лог-маркеры: `[conceal speakers]` появляется на гэпах, `[UNDERRUN]` реже, `[sched-stall]` только на настоящих стволах)
+- [x] **Lifecycle-устойчивость (2026-07-03)** — stop-vs-connect гонки, connect-вотчдог, Gemini goAway → мгновенный swap, WS keepalive против зомби-сессий, sleep/wake-пауза, HAL bring-up с MainActor убран — см. раздел «Устойчивость сессии»
+- [ ] Gemini `sessionResumption` (переживать goAway-реконнект с сохранением контекста перевода) + make-before-break swap (двойной стрим на время ротации)
+- [ ] Bounded teardown в `applicationWillTerminate` (сейчас синхронный; известный wedge закрыт reset()-фиксом, остаточный риск — перманентно зависший coreaudiod на quit)
 
 ---
 
-*Last updated: 2026-07-02*
+*Last updated: 2026-07-03*

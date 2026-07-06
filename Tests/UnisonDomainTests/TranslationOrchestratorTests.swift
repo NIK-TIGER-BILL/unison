@@ -907,8 +907,18 @@ final class ScaledRealClock: Clock, @unchecked Sendable {
     }
 
     // Advance virtual time past 60 s without the network returning.
-    clock.advance(by: 65)
-    try? await Task.sleep(nanoseconds: 200_000_000)
+    // Retry the advance: the watchdog task parks on ManualClock.sleep
+    // asynchronously, and under parallel-suite load it may not have
+    // parked yet when the first advance() lands (its deadline then
+    // bases past the advanced now). A later advance crosses any
+    // late-parked deadline, making the test deterministic instead of
+    // racing real-time sleeps against task scheduling (was a rare
+    // flake under full-suite parallelism).
+    for _ in 0..<5 {
+        clock.advance(by: 65)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        if case .error = o.state { break }
+    }
 
     if case .error(.networkLost) = o.state {
         // ok

@@ -350,17 +350,6 @@ public final class TranslationOrchestrator {
         // busy coreaudiod. Without a budget the session sits in .connecting
         // forever and Start looks dead (start() requires .idle).
         armConnectWatchdog()
-        // start() suspends at several awaits below; the user can click Stop
-        // (or the connect watchdog can fire) during any of them. Each await
-        // re-checks that we're still the active .connecting attempt before
-        // proceeding — otherwise the interloper's settled state (.idle after
-        // stop, .error after watchdog) must win, not be overwritten by this
-        // stale continuation (same shape as resumeStreams' reentrancy guards).
-        func abortedByStateChange() -> Bool {
-            if case .connecting = state { return false }
-            Self.log.info("start() — state changed mid-start (\(String(describing: self.state))); aborting this attempt")
-            return true
-        }
 
         // Permission gates. Mic permission is required by both `.call`
         // and `.test` (anything that captures from the mic). `.listen`
@@ -370,7 +359,7 @@ public final class TranslationOrchestrator {
             Self.log.info("start() — microphone permission currentStatus=\(String(describing: status))")
             let resolved = status == .notDetermined ? await permissions.request(.microphone) : status
             Self.log.info("start() — microphone permission resolved=\(String(describing: resolved))")
-            if abortedByStateChange() { return }
+            if startAborted() { return }
             guard resolved == .granted else {
                 Self.log.error("start() guard failed: microphone permission denied → .error(.permissionDenied)")
                 state = .error(.permissionDenied(.microphone))
@@ -400,19 +389,19 @@ public final class TranslationOrchestrator {
            await teardownFinished(pending, within: Self.coreAudioTeardownBudgetSeconds) == false {
             Self.log.error("start() — previous CoreAudio teardown still draining after \(Self.coreAudioTeardownBudgetSeconds)s; starting the shared engine anyway (audio may stutter until the old HAL stop unwedges)")
         }
-        if abortedByStateChange() { return }
+        if startAborted() { return }
 
         Self.log.info("start() — starting output mixer (outputDeviceUID=\(settings.outputDeviceUID ?? "default"))")
         do {
             try await outputMixer.start(deviceUID: settings.outputDeviceUID)
             outputMixer.setOriginalGain(settings.originalMixVolume)
         } catch {
-            if abortedByStateChange() { return }
+            if startAborted() { return }
             Self.log.error("start() output mixer failed: \(String(describing: error)) → .error(.outputDeviceUnavailable)")
             state = .error(.outputDeviceUnavailable)
             return
         }
-        if abortedByStateChange() {
+        if startAborted() {
             // The mixer may have finished starting after the interloper's
             // teardown ran — leave nothing running behind a settled state.
             await stopAllStreams()
@@ -423,40 +412,7 @@ public final class TranslationOrchestrator {
         // Not in `.test` — test mode only verifies the user's own
         // mic→translate→speakers loop.
         if mode == .call || mode == .listen {
-            Self.log.info("start() — connecting peer stream (target=\(languages.mine.rawValue))")
-            let peer = translationFactory.make(speaker: .peer)
-            peerStream = peer
-            do {
-                try await peer.connect(target: languages.mine)
-            } catch {
-                let mapped = mapConnectError(error)
-                // A late connect failure after the user already stopped (or
-                // the watchdog fired) must not overwrite the settled state.
-                // `peerStream` was nil-ed by the interloper's teardown, so
-                // close the local half-open stream explicitly.
-                if abortedByStateChange() {
-                    await peer.close()
-                    await stopAllStreams()
-                    return
-                }
-                Self.log.error("start() peer.connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
-                // Partial-start teardown: the output mixer is already
-                // running and `peerStream` holds a half-open stream.
-                // Without this, they keep running behind a terminal
-                // `.error` state (and `start()` refuses to run again
-                // because the state never returns to `.idle`).
-                await stopAllStreams()
-                state = .error(mapped)
-                return
-            }
-            if abortedByStateChange() {
-                await peer.close()
-                await stopAllStreams()
-                return
-            }
-            Self.log.info("start() — peer stream connected; wiring incoming pipeline")
-            wireIncomingPipeline(stream: peer)
-            observeConnectionState(stream: peer, speaker: .peer, target: languages.mine, mode: mode)
+            guard await connectStreamForStart(speaker: .peer, target: languages.mine, mode: mode) else { return }
         }
 
         // Me (outgoing) stream — used in `.call` and `.test`.
@@ -464,40 +420,7 @@ public final class TranslationOrchestrator {
         //   .call: me-stream output → BlackHole 2ch (peer hears in their Zoom)
         //   .test: me-stream output → speakers (user hears their own translation)
         if mode == .call || mode == .test {
-            // Allocate the outbound audio ring buffer alongside the
-            // me-stream — see `audioBufferBySpeaker` for rationale.
-            audioBufferBySpeaker[.me] = AudioRingBuffer(maxFrames: Self.audioBufferFrames)
-            Self.log.info("start() — connecting me stream (target=\(languages.peer.rawValue))")
-            let me = translationFactory.make(speaker: .me)
-            meStream = me
-            do {
-                try await me.connect(target: languages.peer)
-            } catch {
-                let mapped = mapConnectError(error)
-                // Same late-failure reentrancy rule as the peer stream above.
-                if abortedByStateChange() {
-                    await me.close()
-                    await stopAllStreams()
-                    return
-                }
-                Self.log.error("start() me.connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
-                // Partial-start teardown: in `.call` mode the peer
-                // pipeline is already wired and translating at this
-                // point — leaving it running behind `.error` keeps
-                // streaming audio to OpenAI with no way to stop it
-                // from the UI (`start()` requires `.idle`).
-                await stopAllStreams()
-                state = .error(mapped)
-                return
-            }
-            if abortedByStateChange() {
-                await me.close()
-                await stopAllStreams()
-                return
-            }
-            Self.log.info("start() — me stream connected; wiring outgoing pipeline (destination=\(mode == .test ? "speakers" : "BlackHole 2ch"))")
-            wireOutgoingPipeline(stream: me, destination: mode == .test ? .speakers : .virtualMic)
-            observeConnectionState(stream: me, speaker: .me, target: languages.peer, mode: mode)
+            guard await connectStreamForStart(speaker: .me, target: languages.peer, mode: mode) else { return }
         }
 
         // Capture session start time once and reuse across reconnects so
@@ -785,6 +708,80 @@ public final class TranslationOrchestrator {
     private func mapConnectError(_ error: Error) -> TranslationError {
         if let te = error as? TranslationError { return te }
         return .networkLost
+    }
+
+    /// `start()` suspends at several awaits; the user can click Stop (or
+    /// the connect watchdog can fire) during any of them. Every await
+    /// re-checks that we're still the active `.connecting` attempt before
+    /// proceeding — otherwise the interloper's settled state (`.idle`
+    /// after stop, `.error` after the watchdog) must win, not be
+    /// overwritten by the stale continuation (same shape as
+    /// `resumeStreams`' reentrancy guards).
+    private func startAborted() -> Bool {
+        if case .connecting = state { return false }
+        Self.log.info("start() — state changed mid-start (\(String(describing: self.state))); aborting this attempt")
+        return true
+    }
+
+    /// Make + connect + wire one speaker's stream on behalf of `start()`.
+    /// Returns `false` when `start()` must bail: either a terminal error
+    /// was surfaced here, or the attempt was superseded mid-connect and
+    /// the settled state must stand. On abort the locally-created stream
+    /// is closed explicitly — the property (`peerStream`/`meStream`) was
+    /// already nil-ed by the interloper's teardown, so `stopAllStreams()`
+    /// alone would leak the half-open WS.
+    private func connectStreamForStart(
+        speaker: Speaker,
+        target: Language,
+        mode: SessionMode
+    ) async -> Bool {
+        Self.log.info("start() — connecting \(String(describing: speaker)) stream (target=\(target.rawValue))")
+        let stream = translationFactory.make(speaker: speaker)
+        switch speaker {
+        case .peer:
+            peerStream = stream
+        case .me:
+            // Allocate the outbound audio ring buffer alongside the
+            // me-stream — see `audioBufferBySpeaker` for rationale.
+            audioBufferBySpeaker[.me] = AudioRingBuffer(maxFrames: Self.audioBufferFrames)
+            meStream = stream
+        }
+        do {
+            try await stream.connect(target: target)
+        } catch {
+            let mapped = mapConnectError(error)
+            // A late connect failure after the user already stopped (or
+            // the watchdog fired) must not overwrite the settled state.
+            if startAborted() {
+                await stream.close()
+                await stopAllStreams()
+                return false
+            }
+            Self.log.error("start() \(String(describing: speaker)).connect failed: \(String(describing: error)) → .error(\(String(describing: mapped)))")
+            // Partial-start teardown: the output mixer is already running
+            // (and for the me-stream in `.call` mode, the peer pipeline is
+            // already translating). Leaving them running behind a terminal
+            // `.error` keeps streaming audio with no way to stop it from
+            // the UI (`start()` requires `.idle`).
+            await stopAllStreams()
+            state = .error(mapped)
+            return false
+        }
+        if startAborted() {
+            await stream.close()
+            await stopAllStreams()
+            return false
+        }
+        switch speaker {
+        case .peer:
+            Self.log.info("start() — peer stream connected; wiring incoming pipeline")
+            wireIncomingPipeline(stream: stream)
+        case .me:
+            Self.log.info("start() — me stream connected; wiring outgoing pipeline (destination=\(mode == .test ? "speakers" : "BlackHole 2ch"))")
+            wireOutgoingPipeline(stream: stream, destination: mode == .test ? .speakers : .virtualMic)
+        }
+        observeConnectionState(stream: stream, speaker: speaker, target: target, mode: mode)
+        return true
     }
 
     /// Arm the connect-phase watchdog — see `connectWatchdogTask` for why.
