@@ -314,9 +314,15 @@ public final class OnboardingViewModel {
         audioCaptureStatus = .inProgress
         refreshOverallBlackHoleStatus()
         await MainActor.run {
-            // NSApp is nil in unit-test runs (no AppKit instance), so
-            // guard before calling — otherwise the OnboardingViewModel
-            // tests trap on this implicitly-unwrapped optional.
+            // Pre-prompt activation: bring the app up so the TCC prompt
+            // appears over the onboarding window. This is a distinct event
+            // from the post-prompt re-foreground below (which restores us
+            // *after* macOS demotes the accessory app), so it stays a
+            // direct poke rather than routing through `onRequestForeground`
+            // — folding both into one callback would conflate the two and
+            // double-fire it. NSApp is nil in unit-test runs (no AppKit
+            // instance), so guard — otherwise the tests trap on the
+            // implicitly-unwrapped optional.
             if let app = NSApp {
                 app.activate(ignoringOtherApps: true)
             }
@@ -326,8 +332,10 @@ public final class OnboardingViewModel {
         Self.log.info("AudioCapturePermission.triggerPrompt() returned")
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         audioCaptureStatus = .done
-        // TCC prompt has (best-effort) been dismissed — re-foreground the
-        // accessory app so the window doesn't stay behind other apps.
+        // Best-effort re-foreground: unlike the mic prompt, TCC audio
+        // capture exposes no completion signal, so we can only assume the
+        // prompt is gone after the fixed wait above. Re-foreground anyway
+        // so the accessory app's window doesn't stay behind other apps.
         onRequestForeground?()
         refresh()
     }

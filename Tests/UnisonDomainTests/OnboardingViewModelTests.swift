@@ -360,6 +360,36 @@ func onboarding_requestAudioCapturePermission_firesOnRequestForeground() async {
 
 @MainActor
 @Test
+func onboarding_onRequestForeground_firesBeforeOnCompleted_onCompletingStep() async {
+    // The fix's correctness on a step that COMPLETES onboarding hinges on
+    // onRequestForeground firing before refresh() — refresh() fires
+    // onCompleted → window.orderOut(nil), which must win so the finished
+    // window closes instead of being re-shown. Lock the order so a future
+    // refactor that moves the callback below refresh() can't silently
+    // reintroduce the "re-show a just-closed window" bug.
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let kc = MockKeychain()
+    try? kc.saveAPIKey("sk-proj-1234567890abcdef", for: .openAIRealtime)
+    // 2ch installed by default in MockInstaller → audio capture is the
+    // only step left, so completing it flips allDone true.
+    let vm = OnboardingViewModel(
+        permissions: perms,
+        installer: MockInstaller(),
+        keychain: kc
+    )
+    var events: [String] = []
+    vm.onRequestForeground = { events.append("foreground") }
+    vm.onCompleted = { events.append("completed") }
+    await vm.requestAudioCapturePermission()
+    #expect(
+        events == ["foreground", "completed"],
+        "re-foreground must precede completion/orderOut, got: \(events)"
+    )
+}
+
+@MainActor
+@Test
 func onboarding_progressLabel_countsDoneSteps() {
     let installer = MockInstaller()
     installer.installed2ch = false
