@@ -69,10 +69,6 @@ public final class TranscriptViewModel {
     @ObservationIgnored
     public var onOriginalVolumeChanged: ((Float) -> Void)?
 
-    /// Delay before a live (typing-dots) bubble auto-finalises. Mirrors the
-    /// JS `liveTimer` constant (`2500ms`).
-    public static let liveFinalizeDelaySeconds: TimeInterval = 2.5
-
     /// Recency window: a bubble is visible only if its source entry's
     /// last activity was within this many seconds of "now". Older
     /// bubbles dissolve; after this long of silence the transcript is
@@ -95,7 +91,6 @@ public final class TranscriptViewModel {
     /// The "commit and freeze" feed: derives immutable frozen bubbles + one
     /// live tail from the store, and owns each bubble's whole-unit lifetime.
     private let feed = TranscriptFeed(config: TranscriptFeed.Config(
-        finalizeAfter: TranscriptViewModel.liveFinalizeDelaySeconds,
         window: TranscriptViewModel.windowSeconds,
         maxBubbles: TranscriptViewModel.maxVisibleBubbles
     ))
