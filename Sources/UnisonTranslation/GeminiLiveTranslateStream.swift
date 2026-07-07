@@ -40,7 +40,10 @@ public actor GeminiLiveTranslateStream: TranslationStream {
     /// rotate, so an original never cross-pairs with the NEXT utterance's
     /// translation. The live DISPLAY's pairing is `TranscriptModel`'s job (it
     /// ignores `entryId` and segments on pause itself); this id is only for the
-    /// history store.
+    /// history store. Edge: a translation lagging LONGER than the gap (slow
+    /// network) can land after the rotation and cross-pair onto the next
+    /// entry — history-only, atypical, still far better than the pre-fix
+    /// one-entry-per-chunk fragmentation.
     private var currentEntryId = UUID()
     private var lastInputAt: Date?
     private static let utteranceGapSeconds: TimeInterval = 1.5

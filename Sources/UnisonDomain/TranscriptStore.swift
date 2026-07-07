@@ -11,13 +11,14 @@ public final class TranscriptStore {
 
     /// Maps a stream's reused utterance id → the live entry now feeding it.
     /// Each translation stream mints ONE id per utterance and rotates it on
-    /// its own signals alone (a 5 s input-gap or the server's
-    /// `session.output_transcript.done`). A stream cannot see the OTHER
-    /// speaker take a turn, so when one side pauses < 5 s while the other
-    /// speaks and then resumes, its stream reuses a now-stale id for a
-    /// genuinely new utterance. `apply` forks a fresh entry in that case and
-    /// records the mapping here so the rest of that utterance's deltas keep
-    /// accumulating into the fork. Reset by `clear()`.
+    /// its own signals alone (OpenAI: a 5 s input-gap or the server's
+    /// `session.output_transcript.done`; Gemini: an input pause ≥ 1.5 s). A
+    /// stream cannot see the OTHER speaker take a turn, so when one side pauses
+    /// shorter than its rotation gap while the other speaks and then resumes,
+    /// its stream reuses a now-stale id for a genuinely new utterance. `apply`
+    /// forks a fresh entry in that case and records the mapping here so the
+    /// rest of that utterance's deltas keep accumulating into the fork. Reset
+    /// by `clear()`.
     private var forkedEntryId: [UUID: UUID] = [:]
 
     /// Wall-clock of the most recent `.original` (source-transcript) delta
@@ -34,11 +35,11 @@ public final class TranscriptStore {
     /// has spoken since. That combination is a real conversational handoff;
     /// two people talking over each other keep the same id streaming with no
     /// input gap, and must NOT fragment into a fresh bubble on every
-    /// alternation. Kept shorter than the stream's 5 s same-speaker turn-gap
-    /// because a cross-speaker handoff is a stronger boundary than a lone
-    /// pause. A whole handoff compressed under this threshold (sub-second
-    /// ping-pong) is intentionally left merged rather than risk fragmenting
-    /// fast overlap.
+    /// alternation. Kept shorter than either stream's same-speaker turn-gap
+    /// (5 s OpenAI, 1.5 s Gemini) because a cross-speaker handoff is a stronger
+    /// boundary than a lone pause. A whole handoff compressed under this
+    /// threshold (sub-second ping-pong) is intentionally left merged rather
+    /// than risk fragmenting fast overlap.
     private static let crossSpeakerHandoffGapSeconds: TimeInterval = 1.0
 
     public init(clock: Clock = SystemClock()) {
