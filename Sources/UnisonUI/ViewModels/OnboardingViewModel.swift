@@ -57,6 +57,13 @@ public final class OnboardingViewModel {
     private let installer: any BlackHoleInstaller
     private let keychain: any KeychainService
 
+    /// Nudges macOS to show the TCC audio-capture prompt. Injected so
+    /// tests can substitute a no-op — the production default spins a real
+    /// CoreAudio ProcessTap, which stalls ~3 min on a headless CI runner
+    /// (no audio session), blowing the test-job timeout. Never invoked
+    /// outside `requestAudioCapturePermission()`.
+    private let triggerAudioCapture: @Sendable () async -> Void
+
     public private(set) var steps: [OnboardingStep] = []
 
     /// Per-step UI state. Always contains an entry for every
@@ -124,11 +131,15 @@ public final class OnboardingViewModel {
     public init(
         permissions: any PermissionsService,
         installer: any BlackHoleInstaller,
-        keychain: any KeychainService
+        keychain: any KeychainService,
+        triggerAudioCapture: @escaping @Sendable () async -> Void = {
+            await AudioCapturePermission.triggerPrompt()
+        }
     ) {
         self.permissions = permissions
         self.installer = installer
         self.keychain = keychain
+        self.triggerAudioCapture = triggerAudioCapture
         refresh()
     }
 
@@ -328,7 +339,7 @@ public final class OnboardingViewModel {
             }
         }
         try? await Task.sleep(nanoseconds: 100_000_000)
-        await AudioCapturePermission.triggerPrompt()
+        await triggerAudioCapture()
         Self.log.info("AudioCapturePermission.triggerPrompt() returned")
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         audioCaptureStatus = .done

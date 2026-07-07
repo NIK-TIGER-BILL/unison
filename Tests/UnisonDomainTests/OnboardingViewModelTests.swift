@@ -350,7 +350,9 @@ func onboarding_requestAudioCapturePermission_firesOnRequestForeground() async {
     let vm = OnboardingViewModel(
         permissions: MockPermissionsService(),
         installer: MockInstaller(),
-        keychain: MockKeychain()
+        keychain: MockKeychain(),
+        // No-op trigger: a real ProcessTap stalls ~3 min on headless CI.
+        triggerAudioCapture: {}
     )
     var foregrounded = 0
     vm.onRequestForeground = { foregrounded += 1 }
@@ -376,7 +378,8 @@ func onboarding_onRequestForeground_firesBeforeOnCompleted_onCompletingStep() as
     let vm = OnboardingViewModel(
         permissions: perms,
         installer: MockInstaller(),
-        keychain: kc
+        keychain: kc,
+        triggerAudioCapture: {}
     )
     var events: [String] = []
     vm.onRequestForeground = { events.append("foreground") }
@@ -417,7 +420,9 @@ func onboarding_onCompleted_firesExactlyOnce() async {
     let vm = OnboardingViewModel(
         permissions: perms,
         installer: MockInstaller(),
-        keychain: kc
+        keychain: kc,
+        // No-op trigger: a real ProcessTap stalls ~3 min on headless CI.
+        triggerAudioCapture: {}
     )
     var fired = 0
     vm.onCompleted = { fired += 1 }
@@ -518,7 +523,9 @@ func onboarding_systemSettingsURL_microphoneOnly() {
     let vm = OnboardingViewModel(
         permissions: MockPermissionsService(),
         installer: installer,
-        keychain: MockKeychain()
+        keychain: MockKeychain(),
+        // No-op trigger: a real ProcessTap stalls ~3 min on headless CI.
+        triggerAudioCapture: {}
     )
     vm.refresh()
     await vm.requestAudioCapturePermission()
