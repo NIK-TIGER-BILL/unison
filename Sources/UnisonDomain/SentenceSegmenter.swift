@@ -21,13 +21,53 @@ public enum SentenceSegmenter {
             if !s.isEmpty { sentences.append(s) }
             return true
         }
-        guard let last = sentences.last else { return ([], "") }
+        // Merge a sentence into the following one when it ends on a title
+        // abbreviation NLTokenizer wrongly split from its name. "When in doubt,
+        // merge, don't split" — an over-merge is only a coarser bubble; a wrong
+        // split mis-pairs source↔translation.
+        let abbr = abbreviations(for: language)
+        var merged: [String] = []
+        for s in sentences {
+            if let prev = merged.last,
+               let tok = trailingDottedToken(prev), abbr.contains(tok) {
+                merged[merged.count - 1] = prev + " " + s
+            } else {
+                merged.append(s)
+            }
+        }
+        guard let last = merged.last else { return ([], "") }
         // The tokenizer always emits the trailing fragment as its own token;
         // if that token doesn't end with a terminator it's the live trailing.
         if endsWithTerminator(last) {
-            return (sentences, "")
+            return (merged, "")
         }
-        return (Array(sentences.dropLast()), last)
+        return (Array(merged.dropLast()), last)
+    }
+
+    /// Lowercased title abbreviations that precede a (capitalised) name, e.g.
+    /// "Sr. Silva", "Dr. Smith". NLTokenizer's Latin-script models wrongly
+    /// treat the title's period as a sentence end, so we merge the title back
+    /// onto the following fragment. Russian is deliberately absent: its model
+    /// already handles "и т.д."/"Н.В."/"стр." correctly (verified), and listing
+    /// those stems would wrongly rejoin real boundaries like "…и т.д. Это…".
+    private static func abbreviations(for language: Language) -> Set<String> {
+        switch language {
+        case .pt, .es: return ["sr", "sra", "dr", "dra"]
+        case .en: return ["mr", "mrs", "ms", "dr", "prof"]
+        case .de: return ["hr", "fr", "dr", "prof"]
+        default: return []
+        }
+    }
+
+    /// The letters immediately before a trailing period, lowercased, or nil.
+    private static func trailingDottedToken(_ s: String) -> String? {
+        var t = Substring(s)
+        while let c = t.last, c.isWhitespace { t = t.dropLast() }
+        guard t.last == "." else { return nil }
+        t = t.dropLast()
+        let letters = t.reversed().prefix { $0.isLetter }
+        let token = String(letters.reversed())
+        return token.isEmpty ? nil : token.lowercased()
     }
 
     private static func endsWithTerminator(_ s: String) -> Bool {
