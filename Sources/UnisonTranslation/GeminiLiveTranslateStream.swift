@@ -163,7 +163,14 @@ public actor GeminiLiveTranslateStream: TranslationStream {
         case .text(let str): data = Data(str.utf8)
         case .data(let d): data = d
         }
-        guard let event = try? JSONDecoder().decode(GeminiServerEvent.self, from: data) else { return }
+        // A serverContent frame can bundle several signals (e.g. the final
+        // outputTranscription AND turnComplete); process each in order so the
+        // turn boundary is never dropped — dropping it stalled the pairing FIFO.
+        guard let frame = try? JSONDecoder().decode(GeminiServerFrame.self, from: data) else { return }
+        for event in frame.events { apply(event: event) }
+    }
+
+    private func apply(event: GeminiServerEvent) {
         switch event {
         case .setupComplete:
             break

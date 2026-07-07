@@ -204,6 +204,38 @@ private final class SteppingClock: UnisonDomain.Clock, @unchecked Sendable {
         #expect(out3?.entryId == in3?.entryId, "turn-3 translation → utterance-3 bubble")
     }
 
+    /// The field bug (2026-07-07): Gemini bundles `turnComplete` into the SAME
+    /// serverContent as the final `outputTranscription` chunk (the log showed
+    /// ZERO standalone turnComplete). If the boundary is dropped the FIFO never
+    /// pops, so utterance-2's translation glues onto utterance-1's bubble
+    /// (crossed original↔translation). Honoring the bundled boundary keeps
+    /// pairing aligned. Fails if the decoder drops the bundled turnComplete.
+    @Test func bundledTurnComplete_keepsPairingAligned() async throws {
+        let ws = FakeWSClient()
+        let clock = SteppingClock()
+        let stream = GeminiLiveTranslateStream(
+            apiKey: "AQ.k", client: ws, clock: clock, speaker: .peer)
+        try await stream.connect(target: .ru)
+        var it = stream.transcripts.makeAsyncIterator()
+
+        ws.push(.text(#"{"serverContent":{"inputTranscription":{"text":"one"}}}"#))
+        let in1 = await it.next()
+        // Utterance 1's translation arrives BUNDLED with its turnComplete.
+        ws.push(.text(#"{"serverContent":{"outputTranscription":{"text":"раз."},"turnComplete":true}}"#))
+        let out1 = await it.next()
+
+        clock.advance(by: 1.0)
+        ws.push(.text(#"{"serverContent":{"inputTranscription":{"text":"two"}}}"#))
+        let in2 = await it.next()
+        ws.push(.text(#"{"serverContent":{"outputTranscription":{"text":"два."},"turnComplete":true}}"#))
+        let out2 = await it.next()
+
+        #expect(in1?.entryId == out1?.entryId, "utterance 1 original+translation share a bubble")
+        #expect(in2?.entryId != in1?.entryId, "utterance 2 opens its own bubble")
+        #expect(out2?.entryId == in2?.entryId,
+                "utterance 2's translation must NOT glue onto bubble 1 (the crossed-pairing field bug)")
+    }
+
     @Test func decodesAudioFromBinaryFrame() async throws {
         // Gemini delivers serverContent as BINARY WebSocket frames (not text
         // like OpenAI); handle(_:) must decode `.data` frames too, else the

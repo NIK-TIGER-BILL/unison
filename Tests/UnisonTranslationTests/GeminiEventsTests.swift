@@ -46,36 +46,37 @@ import Testing
         let json = """
         {"serverContent":{"modelTurn":{"parts":[{"inlineData":{"data":"QUJD","mimeType":"audio/pcm;rate=24000"}}]}}}
         """
-        let evt = try decodeGeminiServerEvent(json)
-        guard case .audio(let b64) = evt else { Issue.record("expected .audio"); return }
-        #expect(b64 == "QUJD")
+        #expect(try decodeGeminiFrame(json) == [.audio(base64: "QUJD")])
     }
 
     @Test func decodesInputAndOutputTranscription() throws {
-        let inJSON = #"{"serverContent":{"inputTranscription":{"text":"привет"}}}"#
-        let outJSON = #"{"serverContent":{"outputTranscription":{"text":"hello"}}}"#
-        guard case .inputTranscript(let i) = try decodeGeminiServerEvent(inJSON) else {
-            Issue.record("expected input"); return
-        }
-        guard case .outputTranscript(let o) = try decodeGeminiServerEvent(outJSON) else {
-            Issue.record("expected output"); return
-        }
-        #expect(i == "привет")
-        #expect(o == "hello")
+        #expect(try decodeGeminiFrame(#"{"serverContent":{"inputTranscription":{"text":"привет"}}}"#)
+            == [.inputTranscript("привет")])
+        #expect(try decodeGeminiFrame(#"{"serverContent":{"outputTranscription":{"text":"hello"}}}"#)
+            == [.outputTranscript("hello")])
     }
 
     @Test func decodesTurnCompleteAndSetupComplete() throws {
-        guard case .turnComplete = try decodeGeminiServerEvent(#"{"serverContent":{"turnComplete":true}}"#) else {
-            Issue.record("expected turnComplete"); return
-        }
-        guard case .setupComplete = try decodeGeminiServerEvent(#"{"setupComplete":{}}"#) else {
-            Issue.record("expected setupComplete"); return
-        }
+        #expect(try decodeGeminiFrame(#"{"serverContent":{"turnComplete":true}}"#) == [.turnComplete])
+        #expect(try decodeGeminiFrame(#"{"setupComplete":{}}"#) == [.setupComplete])
     }
 
     @Test func decodesTurnCompleteEmptyObjectForm() throws {
-        guard case .turnComplete = try decodeGeminiServerEvent(#"{"serverContent":{"turnComplete":{}}}"#) else {
-            Issue.record("expected turnComplete for empty-object form"); return
-        }
+        #expect(try decodeGeminiFrame(#"{"serverContent":{"turnComplete":{}}}"#) == [.turnComplete])
+    }
+
+    // Regression (field log 2026-07-07): Gemini bundles `turnComplete` into the
+    // SAME serverContent as the final content chunk. The single-event decoder
+    // returned only the content and dropped the boundary (0 turnComplete in the
+    // whole log) → the pairing FIFO never popped → crossed original↔translation.
+    // A frame must surface the final content AND the boundary, in that order.
+    @Test func decodesBundledTurnCompleteWithTranscript() throws {
+        #expect(try decodeGeminiFrame(#"{"serverContent":{"outputTranscription":{"text":"Привет."},"turnComplete":true}}"#)
+            == [.outputTranscript("Привет."), .turnComplete])
+    }
+
+    @Test func decodesBundledTurnCompleteWithAudio() throws {
+        let json = #"{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"data":"QUJD"}}]},"turnComplete":true}}"#
+        #expect(try decodeGeminiFrame(json) == [.audio(base64: "QUJD"), .turnComplete])
     }
 }

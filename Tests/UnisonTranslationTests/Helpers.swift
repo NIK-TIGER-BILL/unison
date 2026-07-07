@@ -38,9 +38,9 @@ func posixOperationCanceledError() -> Error {
     )
 }
 
-func decodeGeminiServerEvent(_ json: String) throws -> GeminiServerEvent {
+func decodeGeminiFrame(_ json: String) throws -> [GeminiServerEvent] {
     let data = json.data(using: .utf8)!
-    return try JSONDecoder().decode(GeminiServerEvent.self, from: data)
+    return try JSONDecoder().decode(GeminiServerFrame.self, from: data).events
 }
 
 /// Structural check on a Gemini setup payload: the transcription configs must

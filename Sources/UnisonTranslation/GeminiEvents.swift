@@ -94,16 +94,8 @@ public struct GeminiSetupPayload: Sendable {
     }
 }
 
-/// Server → client messages we act on. Everything else → `.unknown`.
-///
-/// One event per WS message, decoded audio-first. If a single
-/// `serverContent` frame ever carried BOTH a `modelTurn` audio part AND
-/// `turnComplete`, the boundary signal would be dropped — but that's not
-/// observed in practice (audio and `turnComplete` arrive in separate
-/// frames), and a dropped boundary self-heals via the stream's
-/// `rotateOnInputGap` plus the turn-aware `TranscriptStore`. Kept simple
-/// deliberately; revisit only if the API starts coalescing them.
-public enum GeminiServerEvent: Sendable {
+/// Server → client signals we act on. Everything else → `.unknown`.
+public enum GeminiServerEvent: Sendable, Equatable {
     case setupComplete
     case audio(base64: String)         // 24 kHz int16 PCM
     case inputTranscript(String)        // source-language text
@@ -113,7 +105,23 @@ public enum GeminiServerEvent: Sendable {
     case unknown
 }
 
-extension GeminiServerEvent: Decodable {
+/// One decoded WS frame → the ORDERED list of signals it carried.
+///
+/// A single Gemini `serverContent` routinely BUNDLES `turnComplete` into the
+/// SAME frame as the final content chunk (an `outputTranscription`/audio
+/// part), and can also carry audio plus a transcription together. Decoding a
+/// frame to a single event dropped every bundled signal but the first — so
+/// `turnComplete` was silently dropped on every turn (field log 2026-07-07:
+/// zero turnComplete decoded), the pairing FIFO never popped, and
+/// original↔translation crossed. A frame therefore surfaces EVERY present
+/// signal in a fixed order (audio, input, output, then the `turnComplete`
+/// boundary LAST — so the stream routes the final content before the
+/// boundary pops the FIFO).
+public struct GeminiServerFrame: Sendable {
+    public let events: [GeminiServerEvent]
+}
+
+extension GeminiServerFrame: Decodable {
     private enum Top: String, CodingKey { case serverContent, setupComplete, goAway }
     private enum Content: String, CodingKey {
         case modelTurn, inputTranscription, outputTranscription, turnComplete
@@ -125,36 +133,37 @@ extension GeminiServerEvent: Decodable {
 
     public init(from decoder: Decoder) throws {
         let top = try decoder.container(keyedBy: Top.self)
-        if top.contains(.setupComplete) { self = .setupComplete; return }
-        if top.contains(.goAway) { self = .goAway; return }
-        guard top.contains(.serverContent) else { self = .unknown; return }
+        if top.contains(.setupComplete) { events = [.setupComplete]; return }
+        if top.contains(.goAway) { events = [.goAway]; return }
+        guard top.contains(.serverContent) else { events = [.unknown]; return }
         let content = try top.nestedContainer(keyedBy: Content.self, forKey: .serverContent)
 
-        // Audio in the first inlineData part of the model turn.
+        var out: [GeminiServerEvent] = []
+        // Audio: first inlineData part of the model turn.
         if let turn = try? content.nestedContainer(keyedBy: Turn.self, forKey: .modelTurn),
            var parts = try? turn.nestedUnkeyedContainer(forKey: .parts) {
             while !parts.isAtEnd {
-                let part = try parts.nestedContainer(keyedBy: Part.self)
+                guard let part = try? parts.nestedContainer(keyedBy: Part.self) else { break }
                 if let inline = try? part.nestedContainer(keyedBy: Inline.self, forKey: .inlineData),
                    let data = try? inline.decode(String.self, forKey: .data) {
-                    self = .audio(base64: data); return
+                    out.append(.audio(base64: data)); break
                 }
             }
         }
         if let t = try? content.nestedContainer(keyedBy: Text.self, forKey: .inputTranscription),
            let text = try? t.decode(String.self, forKey: .text) {
-            self = .inputTranscript(text); return
+            out.append(.inputTranscript(text))
         }
         if let t = try? content.nestedContainer(keyedBy: Text.self, forKey: .outputTranscription),
            let text = try? t.decode(String.self, forKey: .text) {
-            self = .outputTranscript(text); return
+            out.append(.outputTranscript(text))
         }
-        // Gemini sends turnComplete as a JSON bool `true`; be tolerant of an
-        // empty-object form too. Present-and-not-explicitly-false ⇒ turn boundary.
+        // Gemini sends turnComplete as a JSON bool `true`; tolerate an empty-
+        // object form too. Present-and-not-explicitly-false ⇒ turn boundary.
         if content.contains(.turnComplete),
            (try? content.decode(Bool.self, forKey: .turnComplete)) != false {
-            self = .turnComplete; return
+            out.append(.turnComplete)
         }
-        self = .unknown
+        events = out.isEmpty ? [.unknown] : out
     }
 }
