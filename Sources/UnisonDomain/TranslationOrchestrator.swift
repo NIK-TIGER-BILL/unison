@@ -382,14 +382,6 @@ public final class TranslationOrchestrator {
         transcript.currentLanguagePair = languages
         transcriptModel.clear()
         transcriptModel.currentLanguagePair = languages
-        transcriptTickTask?.cancel()
-        let tickClock = self.clock
-        transcriptTickTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                try? await tickClock.sleep(for: 1.0)
-                self?.transcriptModel.tick(now: tickClock.now())
-            }
-        }
 
         // Permission gates. Mic permission is required by both `.call`
         // and `.test` (anything that captures from the mic). `.listen`
@@ -506,6 +498,18 @@ public final class TranslationOrchestrator {
         startNetworkObserver(mode: mode, languages: languages)
         observeDeviceChanges()
         armNoDataWatchdog()
+        // ~1 s heartbeat that freezes a speaker's live bubble after a pause.
+        // Started here (after the permission/device gates pass) so an early
+        // start() bail-out can't leak a looping task. Survives pauses;
+        // cancelled in the full-stop teardown.
+        transcriptTickTask?.cancel()
+        let tickClock = self.clock
+        transcriptTickTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await tickClock.sleep(for: 1.0)
+                self?.transcriptModel.tick(now: tickClock.now())
+            }
+        }
         Self.log.info("start() — translating session active")
     }
 

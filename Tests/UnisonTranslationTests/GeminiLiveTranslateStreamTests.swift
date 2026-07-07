@@ -91,6 +91,31 @@ import UnisonDomain
         #expect(translated?.language == .ru)
     }
 
+    // An utterance's original AND its lagging translation share ONE entryId, so
+    // `TranscriptStore` groups them into a single history entry; the id rotates
+    // after a speech pause (input gap ≥ 1.5 s) so the next utterance is a fresh
+    // entry. Regression: emitting a fresh UUID per delta fragmented Gemini
+    // meeting history/export into one-entry-per-chunk.
+    @Test func transcripts_shareEntryIdWithinUtterance_rotateOnPause() async throws {
+        let ws = FakeWSClient()
+        let clock = ManualClock(Date(timeIntervalSince1970: 1000))
+        let stream = GeminiLiveTranslateStream(apiKey: "AQ.k", client: ws, clock: clock, speaker: .peer)
+        try await stream.connect(target: .ru)
+        var it = stream.transcripts.makeAsyncIterator()
+
+        ws.push(.text(#"{"serverContent":{"inputTranscription":{"text":"Hello","languageCode":"en"}}}"#))
+        let original = await it.next()
+        clock.advance(0.4)   // translation lag < utteranceGap → same utterance
+        ws.push(.text(#"{"serverContent":{"outputTranscription":{"text":"Привет","languageCode":"ru"}}}"#))
+        let translation = await it.next()
+        clock.advance(2.0)   // speech pause ≥ utteranceGap → new utterance
+        ws.push(.text(#"{"serverContent":{"inputTranscription":{"text":"World","languageCode":"en"}}}"#))
+        let nextOriginal = await it.next()
+
+        #expect(original?.entryId == translation?.entryId)   // paired within the utterance
+        #expect(nextOriginal?.entryId != original?.entryId)  // rotated after the pause
+    }
+
     @Test func decodesAudioFromBinaryFrame() async throws {
         // Gemini delivers serverContent as BINARY WebSocket frames (not text
         // like OpenAI); handle(_:) must decode `.data` frames too, else the

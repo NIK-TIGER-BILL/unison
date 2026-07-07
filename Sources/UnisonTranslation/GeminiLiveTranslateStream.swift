@@ -31,6 +31,20 @@ public actor GeminiLiveTranslateStream: TranslationStream {
     private var receivedAnyData = false
     private var closeStarted = false
 
+    /// One utterance's entry id — the original AND its (lagging) translation
+    /// share it so `TranscriptStore` groups them into ONE history entry (the
+    /// store keys entries by `entryId`; it still backs meeting history/export).
+    /// Rotated when the input goes quiet for `utteranceGapSeconds`, a real
+    /// speech pause: since that pause exceeds the translation lag (~0.5–1 s),
+    /// the current utterance's translation has already arrived before we
+    /// rotate, so an original never cross-pairs with the NEXT utterance's
+    /// translation. The live DISPLAY's pairing is `TranscriptModel`'s job (it
+    /// ignores `entryId` and segments on pause itself); this id is only for the
+    /// history store.
+    private var currentEntryId = UUID()
+    private var lastInputAt: Date?
+    private static let utteranceGapSeconds: TimeInterval = 1.5
+
     public init(apiKey: String, client: any WSClient, clock: any Clock, speaker: Speaker = .peer) {
         self.apiKey = apiKey
         self.client = client
@@ -122,13 +136,18 @@ public actor GeminiLiveTranslateStream: TranslationStream {
             outputContinuation.yield(AudioFrame(pcm: pcm, sampleRate: 24_000, channels: 1, format: .int16))
         case .inputTranscript(let text, let lang):
             receivedAnyData = true
+            let now = clock.now()
+            if let last = lastInputAt, now.timeIntervalSince(last) >= Self.utteranceGapSeconds {
+                currentEntryId = UUID()   // speech pause ⇒ a new utterance
+            }
+            lastInputAt = now
             transcriptContinuation.yield(TranscriptDelta(
-                entryId: UUID(), speaker: speaker, kind: .original, text: text,
+                entryId: currentEntryId, speaker: speaker, kind: .original, text: text,
                 isFinal: false, language: lang.flatMap(Language.init(rawValue:))))
         case .outputTranscript(let text, let lang):
             receivedAnyData = true
             transcriptContinuation.yield(TranscriptDelta(
-                entryId: UUID(), speaker: speaker, kind: .translated, text: text,
+                entryId: currentEntryId, speaker: speaker, kind: .translated, text: text,
                 isFinal: false, language: lang.flatMap(Language.init(rawValue:))))
         case .turnComplete:
             // No longer used for pairing (TranscriptModel segments on pause).

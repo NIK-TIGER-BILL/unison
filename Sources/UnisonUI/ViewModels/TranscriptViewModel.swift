@@ -82,10 +82,10 @@ public final class TranscriptViewModel {
     /// more retained history reads as calm context rather than churn.
     public static let maxVisibleBubbles: Int = 6
 
-    /// When `false`, the recency window is bypassed and the full
-    /// transcript renders (legacy behaviour). `seedTranscriptDemo` sets
-    /// this `false` so the screenshot harness shows all seeded bubbles
-    /// and doesn't empty out `windowSeconds` after launch.
+    /// When `false`, the recency window + count cap are bypassed and every
+    /// live-model bubble renders. Production leaves it `true`; some tests flip
+    /// it to assert grouping without the window. (The screenshot harness uses
+    /// `previewBubbles` instead, which bypasses windowing on its own.)
     public var windowingEnabled: Bool = true
 
     /// The "commit and freeze" feed: derives immutable frozen bubbles + one
