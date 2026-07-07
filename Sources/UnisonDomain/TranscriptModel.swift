@@ -99,17 +99,49 @@ public final class TranscriptModel {
         return now.timeIntervalSince(last) >= seconds
     }
 
-    /// Freeze the whole segment as ONE bubble (source↔translation paired as a
-    /// unit — the same speech span) and reset the speaker's live segment.
+    /// Freeze the segment's source↔translation, splitting into per-sentence
+    /// bubbles when both sides agree on sentence count (safe 1:1 pairing);
+    /// otherwise freeze the whole segment as ONE bubble, and reset the
+    /// speaker's live segment.
     private func commit(_ speaker: Speaker, _ seg: Segment, now: Date) {
         let source = seg.source.trimmingCharacters(in: .whitespacesAndNewlines)
         let translation = seg.translation.trimmingCharacters(in: .whitespacesAndNewlines)
         live[speaker] = nil
         guard !(source.isEmpty && translation.isEmpty) else { return }
-        frozen.append(TranscriptBubble(
-            id: seg.id, speaker: speaker, source: source, translation: translation,
-            translationLost: false, committedAt: now, isLive: false))
+
+        for (s, t) in pairs(source: source, translation: translation,
+                            sourceLang: seg.sourceLang ?? defaultSourceLang(speaker),
+                            translationLang: seg.translationLang ?? defaultTranslationLang(speaker)) {
+            frozen.append(TranscriptBubble(
+                id: UUID(), speaker: speaker, source: s, translation: t,
+                translationLost: false, committedAt: now, isLive: false))
+        }
         if frozen.count > config.historyCap { frozen.removeFirst(frozen.count - config.historyCap) }
+    }
+
+    /// Pair source↔translation for a committed segment. If both sides split
+    /// into the SAME number of sentences, pair them 1:1 (nice, safe). If the
+    /// counts differ, do NOT risk a wrong split — emit ONE whole-segment pair.
+    private func pairs(source: String, translation: String,
+                       sourceLang: Language, translationLang: Language) -> [(String, String)] {
+        let src = SentenceSegmenter.segment(source, language: sourceLang)
+        let tr = SentenceSegmenter.segment(translation, language: translationLang)
+        let srcSentences = src.complete + (src.trailing.isEmpty ? [] : [src.trailing])
+        let trSentences = tr.complete + (tr.trailing.isEmpty ? [] : [tr.trailing])
+        if srcSentences.count == trSentences.count && srcSentences.count > 1 {
+            return Array(zip(srcSentences, trSentences))
+        }
+        return [(source, translation)]
+    }
+
+    private func defaultSourceLang(_ speaker: Speaker) -> Language {
+        // Original is the speaker's own language.
+        guard let p = currentLanguagePair else { return .en }
+        return speaker == .me ? p.mine : p.peer
+    }
+    private func defaultTranslationLang(_ speaker: Speaker) -> Language {
+        guard let p = currentLanguagePair else { return .en }
+        return speaker == .me ? p.peer : p.mine
     }
 
     public func clear() { live.removeAll(); frozen.removeAll() }
