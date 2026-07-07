@@ -205,3 +205,28 @@ private func model(_ clock: FakeClock) -> TranscriptModel {
     #expect(b.count == 2)
     #expect(b[0].speaker == .peer && b[1].speaker == .me)   // deterministic: by segment start
 }
+
+// End-to-end regression: the real captured Gemini timeline from the spec §2
+// (en→ru, real audio, real pace) — two sentences streamed with the translation
+// lagging ~0.5–1 s, then a ~5 s pause. It must pair source↔translation as a
+// unit and split into two correctly-aligned bubbles on the pause.
+@MainActor @Test func model_recordedGeminiTimeline_pairsCorrectly() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    func at(_ t: Double, _ kind: TranscriptDelta.Kind, _ text: String, _ lang: Language) {
+        clock.set(epochDate(t))
+        m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: kind,
+                                 text: text, isFinal: false, language: lang))
+    }
+    at(6.083, .original, "First, we look at a simple idea.", .en)
+    at(6.451, .translated, "Сначала мы рассмотрим", .ru)
+    at(7.159, .translated, " простую идею.", .ru)
+    at(7.536, .original, " Then we", .en)
+    at(9.598, .original, " make it more complex.", .en)
+    at(10.278, .translated, " Затем мы делаем ее более сложной.", .ru)
+    clock.set(epochDate(14.0)); m.tick(now: clock.now())   // ~5 s pause → commit
+    let b = m.bubbles.filter { !$0.isLive }
+    #expect(b.count == 2)
+    #expect(b[0].source.contains("simple idea") && b[0].translation.contains("простую идею"))
+    #expect(b[1].source.contains("more complex") && b[1].translation.contains("сложной"))
+}
