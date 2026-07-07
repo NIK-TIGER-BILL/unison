@@ -126,3 +126,27 @@ private func model(_ clock: FakeClock) -> TranscriptModel {
     #expect(b.last?.source == "All good now.")
     #expect(b.last?.translation == "Теперь всё хорошо.")   // correctly paired, no carryover
 }
+
+@MainActor @Test func model_ordersBubblesByTime_acrossSpeakers() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original, text: "Hi.", isFinal: false, language: .en))
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated, text: "Привет.", isFinal: false, language: .ru))
+    clock.advance(by: 3); m.tick(now: clock.now())
+    clock.advance(by: 1)
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .me, kind: .original, text: "Да.", isFinal: false, language: .ru))
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .me, kind: .translated, text: "Yes.", isFinal: false, language: .en))
+    clock.advance(by: 3); m.tick(now: clock.now())
+    let b = m.bubbles
+    #expect(b.count == 2)
+    #expect(b[0].speaker == .peer && b[1].speaker == .me)
+}
+
+@MainActor @Test func model_cumulativeRestatement_replacesNotAppends() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original, text: "Hello", isFinal: false, language: .en))
+    // Some models re-send the cumulative transcript: "Hello world" contains "Hello".
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original, text: "Hello world", isFinal: false, language: .en))
+    #expect(m.bubbles.first?.source == "Hello world")   // replaced, not "Hello Hello world"
+}
