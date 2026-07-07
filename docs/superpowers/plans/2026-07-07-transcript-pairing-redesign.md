@@ -167,13 +167,23 @@ git commit -m "SentenceSegmenter: NLTokenizer-based complete/trailing split"
 
 ```swift
 @Test func segmenter_abbreviations_notSplit() {
-    // NLTokenizer handles most; the guard fixes the ones it misses (ru стр., pt Sr.).
+    // Russian: NLTokenizer's own model is abbreviation-aware — it already keeps
+    // "и т.д."/"Н.В."/"стр." intact and splits only real boundaries (verified
+    // empirically). So ru needs NO merge list; adding one would wrongly rejoin
+    // real boundaries like "…и т.д. Это удобно." into a single sentence.
     #expect(SentenceSegmenter.segment("Мы поддерживаем Telegram и т.д. Это удобно.", language: .ru).complete
             == ["Мы поддерживаем Telegram и т.д.", "Это удобно."])
     #expect(SentenceSegmenter.segment("Замулдинов Н.В. пришёл. Всё хорошо.", language: .ru).complete
             == ["Замулдинов Н.В. пришёл.", "Всё хорошо."])
     #expect(SentenceSegmenter.segment("См. стр. 5 внимательно. Там всё.", language: .ru).complete
             == ["См. стр. 5 внимательно.", "Там всё."])
+    // Guards: a broad ru list (the wrong fix) would break these two.
+    #expect(SentenceSegmenter.segment("Итого мы имеем и т.д.", language: .ru).complete
+            == ["Итого мы имеем и т.д."])
+    #expect(SentenceSegmenter.segment("Например, см. рис. 3 и т.д. Далее идём.", language: .ru).complete
+            == ["Например, см. рис. 3 и т.д.", "Далее идём."])
+    // Portuguese: NLTokenizer WRONGLY splits the title from the name
+    // ("O Sr." | "Silva chegou.") — the title merge rejoins them.
     #expect(SentenceSegmenter.segment("O Sr. Silva chegou. Tudo bem.", language: .pt).complete
             == ["O Sr. Silva chegou.", "Tudo bem."])
 }
@@ -189,28 +199,29 @@ git commit -m "SentenceSegmenter: NLTokenizer-based complete/trailing split"
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `scripts/test.sh --filter "segmenter_abbreviations_notSplit"`
-Expected: FAIL — "См. стр. 5..." and "O Sr. Silva..." split at the abbreviation (extra sentences). (CJK/danda already pass — they validate the language mapping.)
+Expected: FAIL — only the Portuguese assertion fails ("O Sr. Silva chegou." → NLTokenizer emits `["O Sr.", "Silva chegou.", …]`, so `complete` has an extra sentence). The five Russian assertions and CJK/danda already pass on Task 1's code — they lock in that NLTokenizer's own model handles ru, and guard against a future broad ru list.
 
-- [ ] **Step 3: Implement the abbreviation guard**
+- [ ] **Step 3: Implement the title merge**
 
-Add to `SentenceSegmenter`, and apply it by merging a sentence into the next when it ends with a known abbreviation:
+Add to `SentenceSegmenter`, and apply it by merging a sentence into the next when it ends with a known **title** abbreviation (Sr., Dr., …) that NLTokenizer wrongly split from the following name:
 
 ```swift
-    /// Lowercased abbreviation stems (without the trailing dot) that end in a
-    /// period but do NOT end a sentence. NLTokenizer misses a few of these.
+    /// Lowercased title abbreviations that precede a (capitalised) name, e.g.
+    /// "Sr. Silva", "Dr. Smith". NLTokenizer's Latin-script models wrongly
+    /// treat the title's period as a sentence end, so we merge the title back
+    /// onto the following fragment. Russian is deliberately absent: its model
+    /// already handles "и т.д."/"Н.В."/"стр." correctly (verified), and listing
+    /// those stems would wrongly rejoin real boundaries like "…и т.д. Это…".
     private static func abbreviations(for language: Language) -> Set<String> {
         switch language {
-        case .ru: return ["стр", "см", "рис", "табл", "гл", "т", "тд", "тп", "тк", "др", "г", "ул", "д", "пр", "им"]
-        case .pt: return ["sr", "sra", "dr", "dra", "av", "pág"]
-        case .es: return ["sr", "sra", "dr", "dra", "pág", "núm"]
-        case .en: return ["mr", "mrs", "ms", "dr", "st", "vs", "etc", "no", "fig", "pp"]
-        case .de: return ["hr", "fr", "dr", "nr", "bzw", "usw", "ca", "abb"]
+        case .pt, .es: return ["sr", "sra", "dr", "dra"]
+        case .en: return ["mr", "mrs", "ms", "dr", "prof"]
+        case .de: return ["hr", "fr", "dr", "prof"]
         default: return []
         }
     }
 
-    /// The last dotted token of `s` (letters right before a trailing period),
-    /// lowercased, or nil.
+    /// The letters immediately before a trailing period, lowercased, or nil.
     private static func trailingDottedToken(_ s: String) -> String? {
         var t = Substring(s)
         while let c = t.last, c.isWhitespace { t = t.dropLast() }
@@ -225,8 +236,10 @@ Add to `SentenceSegmenter`, and apply it by merging a sentence into the next whe
 Then, after building `sentences` in `segment(...)`, merge forward across abbreviation ends (replace the `guard let last`/return block):
 
 ```swift
-        // Merge a sentence into the following one when it ends on a known
-        // abbreviation the tokenizer wrongly treated as a boundary.
+        // Merge a sentence into the following one when it ends on a title
+        // abbreviation NLTokenizer wrongly split from its name. "When in doubt,
+        // merge, don't split" — an over-merge is only a coarser bubble; a wrong
+        // split mis-pairs source↔translation.
         let abbr = abbreviations(for: language)
         var merged: [String] = []
         for s in sentences {
