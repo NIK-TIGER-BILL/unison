@@ -861,9 +861,11 @@ Replace `appendChunk` to detect cumulative restatement:
         let c = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
         if a.isEmpty { return c }
         if c.isEmpty { return a }
-        // Cumulative restatement (some models resend the whole transcript):
-        // the new chunk already contains the accumulation → replace.
-        if c.hasPrefix(a) { return c }
+        // Cumulative restatement (some models resend the whole transcript, each
+        // longer than the last): the new chunk STRICTLY extends the accumulation
+        // → replace. Must be strictly longer — an identical repeat is a normal
+        // append (a string is its own prefix), not a restatement.
+        if c.count > a.count && c.hasPrefix(a) { return c }
         return a + " " + c
     }
 ```
