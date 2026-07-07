@@ -6,14 +6,6 @@ import Observation
 public final class TranscriptStore {
     public private(set) var entries: [TranscriptEntry] = []
     public var currentLanguagePair: LanguagePair?
-    /// Fires after each delta is folded into `entries`. The view-model
-    /// uses this to bump the "live" typing-dots timer — without this
-    /// hook, the live indicator that the design ships (and that the
-    /// unit tests exercise) never appears in production because the
-    /// orchestrator calls `apply()` directly and never touched the
-    /// `setLive` / `extendLive` API. Composition wires the callback to
-    /// `TranscriptViewModel.extendLive(entryId:)`.
-    public var onDeltaApplied: (@MainActor (UUID) -> Void)?
 
     private let clock: Clock
 
@@ -82,7 +74,6 @@ public final class TranscriptStore {
                 let forkId = UUID()
                 forkedEntryId[delta.entryId] = forkId
                 appendEntry(id: forkId, delta: delta)
-                onDeltaApplied?(forkId)
                 return
             }
             switch delta.kind {
@@ -106,7 +97,6 @@ public final class TranscriptStore {
                 }
             }
             entries[idx].lastActivityAt = clock.now()
-            onDeltaApplied?(liveId)
         } else {
             // Don't mint an entry for an empty delta with an unknown
             // entryId — an empty `.translated` handshake/reconstruct
@@ -115,7 +105,6 @@ public final class TranscriptStore {
             // ghost bubble that nothing ever removes.
             guard !delta.text.isEmpty else { return }
             appendEntry(id: delta.entryId, delta: delta)
-            onDeltaApplied?(delta.entryId)
         }
     }
 

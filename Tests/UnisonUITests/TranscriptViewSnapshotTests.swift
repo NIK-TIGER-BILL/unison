@@ -74,7 +74,8 @@ struct TranscriptViewSnapshotTests {
         let id = UUID()
         store.apply(TranscriptDelta(entryId: id, speaker: .peer, kind: .original, text: "Hi, let's meet tomorrow", isFinal: false))
         store.apply(TranscriptDelta(entryId: id, speaker: .peer, kind: .translated, text: "Привет, давай встретимся", isFinal: false))
-        vm.setLive(entryId: id)
+        // No terminator yet + just applied → the feed derives this as the
+        // live (typing-dots) bubble automatically.
         snapSmoke(panel(TranscriptView(vm: vm), size: SnapSize.transcript), size: SnapSize.transcript)
     }
 

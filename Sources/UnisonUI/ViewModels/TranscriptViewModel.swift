@@ -6,13 +6,11 @@ import UnisonDomain
 /// `design/transcript-final/index.html`:
 ///
 /// - exposes a flat list of `BubbleGroup`s derived from `TranscriptStore`
-///   entries via `TranscriptGrouping.group(...)`;
+///   entries via the commit-and-freeze `TranscriptFeed`;
 /// - drives the bubble-size slider (XS … XL) and the original-track volume
 ///   slider in the settings popover;
 /// - tracks "hidden" (transcript collapsed → only pill visible) and the
-///   stop-confirmation modal state;
-/// - finalises a live (typing-dots) bubble after `liveFinalizeDelaySeconds`
-///   of inactivity, matching the JS `liveTimer` behaviour.
+///   stop-confirmation modal state.
 ///
 /// The view layer reads:
 /// - `bubbleGroups` for the bubble list;
@@ -81,8 +79,10 @@ public final class TranscriptViewModel {
 
     /// Hard cap on how many bubbles are visible at once, even within the
     /// time window. Counts individual bubbles — a long split message can
-    /// crowd out older ones.
-    public static let maxVisibleBubbles: Int = 4
+    /// crowd out older ones. Bumped from 4 to 6 alongside coalescing:
+    /// bubbles now arrive as whole sentences (far less often), so a little
+    /// more retained history reads as calm context rather than churn.
+    public static let maxVisibleBubbles: Int = 6
 
     /// When `false`, the recency window is bypassed and the full
     /// transcript renders (legacy behaviour). `seedTranscriptDemo` sets
@@ -90,11 +90,13 @@ public final class TranscriptViewModel {
     /// and doesn't empty out `windowSeconds` after launch.
     public var windowingEnabled: Bool = true
 
-    /// The entry currently in "live" state (renders typing dots on its last
-    /// bubble). `nil` when no live entry is being tracked.
-    public private(set) var activeLiveEntryId: UUID?
-
-    private var liveFinalizeTask: Task<Void, Never>?
+    /// The "commit and freeze" feed: derives immutable frozen bubbles + one
+    /// live tail from the store, and owns each bubble's whole-unit lifetime.
+    private let feed = TranscriptFeed(config: TranscriptFeed.Config(
+        finalizeAfter: TranscriptViewModel.liveFinalizeDelaySeconds,
+        window: TranscriptViewModel.windowSeconds,
+        maxBubbles: TranscriptViewModel.maxVisibleBubbles
+    ))
 
     public init(
         store: TranscriptStore,
@@ -106,10 +108,9 @@ public final class TranscriptViewModel {
 
     // MARK: - Derived data
 
-    /// Grouped bubbles for the view layer. Mirrors the JS algorithm:
-    /// continuous-speaker runs collapse, long entries split on sentence
-    /// boundaries, and the very last bubble carries the live flag when the
-    /// last entry matches `activeLiveEntryId`.
+    /// Grouped bubbles for the view layer: consecutive same-speaker
+    /// utterances collapse into a group, and the current (still-forming)
+    /// utterance of the last group carries the live flag.
     public var bubbleGroups: [BubbleGroup] {
         visibleBubbleGroups(at: nowProvider())
     }
@@ -120,22 +121,21 @@ public final class TranscriptViewModel {
     /// The view passes a `TimelineView` clock so bubbles expire on
     /// schedule during silence, not only when new content arrives.
     public func visibleBubbleGroups(at now: Date) -> [BubbleGroup] {
-        guard windowingEnabled else {
-            return TranscriptGrouping.group(
+        let bubbles: [DisplayBubble]
+        if windowingEnabled {
+            bubbles = feed.visibleBubbles(entries: store.entries, now: now)
+        } else {
+            // Legacy/demo path: same commit-and-freeze bubble shapes, but
+            // the full history with no expiry or count cap (the screenshot
+            // harness seeds fixed-timestamp bubbles and captures at an
+            // arbitrary later moment).
+            bubbles = TranscriptGrouping.liveBubbles(
                 entries: store.entries,
-                liveEntryId: activeLiveEntryId
+                now: now,
+                finalizeAfter: Self.liveFinalizeDelaySeconds
             )
         }
-        let recent = TranscriptGrouping.recentEntries(
-            store.entries,
-            now: now,
-            within: Self.windowSeconds
-        )
-        let groups = TranscriptGrouping.group(
-            entries: recent,
-            liveEntryId: activeLiveEntryId
-        )
-        return TranscriptGrouping.capTail(groups, max: Self.maxVisibleBubbles)
+        return TranscriptGrouping.groupDisplayBubbles(bubbles)
     }
 
     /// Seconds since the orchestrator first entered `.translating`. The
@@ -288,49 +288,6 @@ public final class TranscriptViewModel {
     public func confirmStop() {
         showStopConfirmation = false
         onStopRequested()
-    }
-
-    /// Mark a transcript entry as the active "live" bubble — its last
-    /// chunk renders the pulsing typing dots. The schedule runs on the
-    /// MainActor; arriving content (new entry or extended text on the
-    /// current entry) within `liveFinalizeDelaySeconds` resets the timer
-    /// via `extendLive(entryId:)`.
-    public func setLive(entryId: UUID?) {
-        guard let entryId else {
-            finalizeLive()
-            return
-        }
-        activeLiveEntryId = entryId
-        rescheduleFinalize()
-    }
-
-    /// Call after applying a delta to the same `entryId`: resets the live
-    /// timer so a stream of partial deltas keeps the dots showing. If the
-    /// id changed, the previous live entry is finalised and the new one
-    /// becomes live.
-    public func extendLive(entryId: UUID) {
-        if activeLiveEntryId == entryId {
-            rescheduleFinalize()
-        } else {
-            setLive(entryId: entryId)
-        }
-    }
-
-    /// Drop the live state immediately (clear typing dots).
-    public func finalizeLive() {
-        activeLiveEntryId = nil
-        liveFinalizeTask?.cancel()
-        liveFinalizeTask = nil
-    }
-
-    private func rescheduleFinalize() {
-        liveFinalizeTask?.cancel()
-        let delay = Self.liveFinalizeDelaySeconds
-        liveFinalizeTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            if Task.isCancelled { return }
-            await MainActor.run { self?.finalizeLive() }
-        }
     }
 
     // MARK: - Pure helpers (tested without an instance)

@@ -173,16 +173,18 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     #expect(vm.bubbleGroups[1].speaker == .peer)
 }
 
+// The last run, still in progress (no sentence terminator yet), renders a
+// live bubble; a completed earlier run is frozen. Live is derived from the
+// feed (recent + unfinished), not a manual flag.
 @MainActor
-@Test func transcriptVM_bubbleGroups_setLive_marksLastBubbleLive() {
+@Test func transcriptVM_lastRunInProgress_marksBubbleLive() {
     let store = TranscriptStore()
     let vm = TranscriptViewModel(store: store)
-    vm.windowingEnabled = false   // testing live-flag delegation, not the recency window
-    _ = appendMe(store, "Привет.", "Hi.")
-    let liveEntry = appendPeer(store, "Hello.", "Привет.")
-    vm.setLive(entryId: liveEntry.id)
-    #expect(vm.bubbleGroups[1].bubbles.last?.isLive == true)
-    #expect(vm.bubbleGroups[0].bubbles.last?.isLive == false)
+    vm.windowingEnabled = false
+    _ = appendMe(store, "Привет.", "Hi.")          // complete → frozen
+    _ = appendPeer(store, "Hello", "Прив")          // no terminator → live tail
+    #expect(vm.bubbleGroups.last?.bubbles.last?.isLive == true)
+    #expect(vm.bubbleGroups.first?.bubbles.first?.isLive == false)
 }
 
 // MARK: - translationLost surfacing (T9)
@@ -209,57 +211,6 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     let vm = TranscriptViewModel(store: store)
     vm.windowingEnabled = false   // testing translationLost clearing, not the recency window
     #expect(vm.bubbleGroups.first?.bubbles.first?.translationLost == false)
-}
-
-// MARK: - Live bubble finalisation
-
-@MainActor
-@Test func transcriptVM_setLive_thenIdle_finalisesAfterDelay() async {
-    let store = TranscriptStore()
-    let vm = TranscriptViewModel(store: store)
-    let liveEntry = appendMe(store, "Привет", "Hi")
-
-    vm.setLive(entryId: liveEntry.id)
-    #expect(vm.activeLiveEntryId == liveEntry.id)
-    // Poll instead of a fixed sleep: the fixed-slack version (0.5s, then
-    // 1.5s) kept flaking as the suite grew — under parallel load the
-    // cooperative executor can stretch real elapsed time arbitrarily.
-    // Polling with a generous deadline is load-immune and still fails
-    // fast if finalisation never happens.
-    let deadline = Date().addingTimeInterval(TranscriptViewModel.liveFinalizeDelaySeconds + 6)
-    while vm.activeLiveEntryId != nil, Date() < deadline {
-        try? await Task.sleep(nanoseconds: 50_000_000)
-    }
-    #expect(vm.activeLiveEntryId == nil)
-}
-
-@MainActor
-@Test func transcriptVM_extendLive_resetsTimer() async {
-    let store = TranscriptStore()
-    let vm = TranscriptViewModel(store: store)
-    let liveEntry = appendMe(store, "Привет", "Hi")
-
-    vm.setLive(entryId: liveEntry.id)
-    // Halfway through the delay, "extend" the live state — should restart
-    // the timer so the entry is still marked live afterwards.
-    let half = UInt64((TranscriptViewModel.liveFinalizeDelaySeconds / 2.0) * 1_000_000_000)
-    try? await Task.sleep(nanoseconds: half)
-    vm.extendLive(entryId: liveEntry.id)
-    // After another half-delay we are past the original 2.5s but inside the
-    // restarted window — the VM must still be live.
-    try? await Task.sleep(nanoseconds: half)
-    #expect(vm.activeLiveEntryId == liveEntry.id)
-}
-
-@MainActor
-@Test func transcriptVM_finalizeLive_clearsImmediately() {
-    let store = TranscriptStore()
-    let vm = TranscriptViewModel(store: store)
-    let liveEntry = appendMe(store, "Привет", "Hi")
-    vm.setLive(entryId: liveEntry.id)
-    #expect(vm.activeLiveEntryId == liveEntry.id)
-    vm.finalizeLive()
-    #expect(vm.activeLiveEntryId == nil)
 }
 
 // MARK: - Elapsed time
@@ -325,16 +276,18 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
 
 // MARK: - Recency window (visibleBubbleGroups)
 
+// An old frozen bubble expires once its window elapses; a fresh one stays.
 @MainActor
-@Test func transcriptVM_window_dropsEntriesOlderThanWindow() {
+@Test func transcriptVM_window_dropsBubblesOlderThanWindow() {
     let clock = FakeClock(now: epochDate(1000))
     let store = TranscriptStore(clock: clock)
     let vm = TranscriptViewModel(store: store)
-    _ = appendMe(store, "старое", "old")        // lastActivityAt = 1000
-    clock.advance(by: 100)                        // t = 1100
-    _ = appendPeer(store, "new", "новое")        // lastActivityAt = 1100
-    let groups = vm.visibleBubbleGroups(at: clock.now())  // now = 1100
-    #expect(groups.count == 1)
+    _ = appendMe(store, "Старое.", "Old.")            // complete → freezes
+    _ = vm.visibleBubbleGroups(at: epochDate(1000))   // feed stamps it at 1000
+    clock.advance(by: 100)                            // t = 1100
+    _ = appendPeer(store, "New.", "Новое.")           // fresh, freezes at 1100
+    let groups = vm.visibleBubbleGroups(at: epochDate(1100))
+    #expect(groups.count == 1)                        // "Старое." (100 s old) gone
     #expect(groups[0].speaker == .peer)
 }
 
@@ -343,7 +296,8 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     let clock = FakeClock(now: epochDate(1000))
     let store = TranscriptStore(clock: clock)
     let vm = TranscriptViewModel(store: store)
-    _ = appendMe(store, "a", "x")
+    _ = appendMe(store, "Готово.", "Done.")          // complete → freezes
+    _ = vm.visibleBubbleGroups(at: epochDate(1000))  // feed stamps it at 1000
     let groups = vm.visibleBubbleGroups(at: epochDate(1031)) // 31 s later, silence
     #expect(groups.isEmpty)
 }
@@ -353,9 +307,60 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     let clock = FakeClock(now: epochDate(1000))
     let store = TranscriptStore(clock: clock)
     let vm = TranscriptViewModel(store: store)
-    for i in 0..<6 { _ = appendMe(store, "m\(i)", "t\(i)") } // one me-run → 6 bubbles
+    // Terminated sentences so the coalescing pre-pass keeps them as
+    // distinct bubbles; more than the cap so the tail-trim actually fires.
+    let n = TranscriptViewModel.maxVisibleBubbles + 3
+    for i in 0..<n { _ = appendMe(store, "m\(i).", "t\(i).") }
     let groups = vm.visibleBubbleGroups(at: clock.now())
     #expect(groups.flatMap { $0.bubbles }.count == TranscriptViewModel.maxVisibleBubbles)
+}
+
+// MARK: - Coalescing (fewer, sentence-sized bubbles)
+
+// The fix: the streams cut a "turn" per clause, so one sentence arrives
+// as several terminator-less fragments. The windowed view must stitch
+// them into ONE bubble instead of a jumpy stack of scraps.
+@MainActor
+@Test func transcriptVM_coalescesFragmentsIntoOneBubble() {
+    let clock = FakeClock(now: epochDate(1000))
+    let store = TranscriptStore(clock: clock)
+    let vm = TranscriptViewModel(store: store)
+    _ = appendPeer(store, "Sometimes I'm", "Иногда я")
+    _ = appendPeer(store, "halfway through boilerplate", "на середине шаблона")
+    _ = appendPeer(store, "and it finishes my thought.", "и заканчивает мысль.")
+    let groups = vm.visibleBubbleGroups(at: clock.now())
+    #expect(groups.count == 1)
+    #expect(groups.flatMap { $0.bubbles }.count == 1)
+    let bubble = groups[0].bubbles[0]
+    #expect(bubble.primaryText.contains("Иногда я"))
+    #expect(bubble.primaryText.contains("заканчивает"))
+}
+
+@MainActor
+@Test func transcriptVM_completedSentences_stayInSeparateBubbles() {
+    let clock = FakeClock(now: epochDate(1000))
+    let store = TranscriptStore(clock: clock)
+    let vm = TranscriptViewModel(store: store)
+    _ = appendPeer(store, "First sentence.", "Первое предложение.")
+    _ = appendPeer(store, "Second sentence.", "Второе предложение.")
+    let groups = vm.visibleBubbleGroups(at: clock.now())
+    #expect(groups.flatMap { $0.bubbles }.count == 2)
+}
+
+// Fragments of one unfinished utterance (no terminator yet) merge into a
+// single LIVE bubble — the live flag is derived from being the last active
+// utterance, not marked manually.
+@MainActor
+@Test func transcriptVM_unfinishedUtterance_marksBubbleLive() {
+    let clock = FakeClock(now: epochDate(1000))
+    let store = TranscriptStore(clock: clock)
+    let vm = TranscriptViewModel(store: store)
+    _ = appendPeer(store, "Sometimes I'm", "Иногда я")
+    _ = appendPeer(store, "halfway", "на середине")
+    let groups = vm.visibleBubbleGroups(at: clock.now())
+    #expect(groups.count == 1)
+    #expect(groups[0].bubbles.count == 1)
+    #expect(groups[0].bubbles[0].isLive == true)
 }
 
 @MainActor
@@ -364,22 +369,28 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     let store = TranscriptStore(clock: clock)
     let vm = TranscriptViewModel(store: store)
     vm.windowingEnabled = false
-    for i in 0..<6 { _ = appendMe(store, "m\(i)", "t\(i)") }
+    // Terminated sentences so each is its own frozen bubble; windowing off
+    // means no expiry and no count cap.
+    for i in 0..<6 { _ = appendMe(store, "m\(i).", "t\(i).") }
     let groups = vm.visibleBubbleGroups(at: epochDate(99_999)) // far future, silence
     #expect(groups.flatMap { $0.bubbles }.count == 6)
 }
 
+// `bubbleGroups` reads the clock through `nowProvider`, so a frozen bubble
+// ages out on schedule as the provider advances.
 @MainActor
 @Test func transcriptVM_bubbleGroups_usesNowProvider() {
     let clock = FakeClock(now: epochDate(1000))
     let store = TranscriptStore(clock: clock)
     let vm = TranscriptViewModel(store: store)
-    vm.nowProvider = { clock.now() }
-    _ = appendMe(store, "старое", "old")
-    clock.advance(by: 100)
-    _ = appendPeer(store, "new", "новое")
-    #expect(vm.bubbleGroups.count == 1)          // windowed via nowProvider
-    #expect(vm.bubbleGroups[0].speaker == .peer)
+    var nowSeconds = 1000.0
+    vm.nowProvider = { epochDate(nowSeconds) }
+    _ = appendMe(store, "Первое.", "First.")     // complete → freezes at 1000
+    #expect(vm.bubbleGroups.flatMap { $0.bubbles }.count == 1)
+    nowSeconds = 1029
+    #expect(vm.bubbleGroups.flatMap { $0.bubbles }.count == 1) // still within window
+    nowSeconds = 1031
+    #expect(vm.bubbleGroups.isEmpty)                            // whole bubble gone
 }
 
 // Core requirement: the recency window is view-only. Even after every
@@ -390,8 +401,9 @@ private func appendPeer(_ store: TranscriptStore, _ original: String, _ translat
     let clock = FakeClock(now: epochDate(1000))
     let store = TranscriptStore(clock: clock)
     let vm = TranscriptViewModel(store: store)
-    for i in 0..<6 { _ = appendMe(store, "m\(i)", "t\(i)") }
-    #expect(vm.visibleBubbleGroups(at: epochDate(9999)).isEmpty) // window emptied
+    for i in 0..<6 { _ = appendMe(store, "m\(i).", "t\(i).") } // terminated → freeze
+    _ = vm.visibleBubbleGroups(at: epochDate(1000))            // feed stamps them at 1000
+    #expect(vm.visibleBubbleGroups(at: epochDate(1040)).isEmpty) // 40 s later, all expired
     #expect(store.entries.count == 6)                            // history intact
 }
 
