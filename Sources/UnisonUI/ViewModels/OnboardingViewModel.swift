@@ -110,6 +110,17 @@ public final class OnboardingViewModel {
     @ObservationIgnored
     public var onStateRefreshed: (@MainActor () -> Void)?
 
+    /// Fired after a foreign-process system dialog dismisses (the TCC
+    /// microphone / audio-capture prompt, or the installer's admin-auth
+    /// dialog). Unison is `LSUIElement=true`, so when such a dialog
+    /// closes macOS restores the *previously-frontmost regular app* —
+    /// never this accessory app. Without re-activating, the borderless
+    /// onboarding window sinks behind other apps' windows and the user
+    /// has to hunt for it. The host `OnboardingWindowController` wires
+    /// this to re-run its `activate + orderFrontRegardless` dance.
+    @ObservationIgnored
+    public var onRequestForeground: (@MainActor () -> Void)?
+
     public init(
         permissions: any PermissionsService,
         installer: any BlackHoleInstaller,
@@ -268,6 +279,9 @@ public final class OnboardingViewModel {
                 "Не удалось установить BlackHole. Подробности в Console.app (subsystem com.unison.app)."
             )
         }
+        // The installer's admin-auth dialog has closed — pull the
+        // accessory app's window back in front (see `onRequestForeground`).
+        onRequestForeground?()
         refresh()
     }
 
@@ -312,6 +326,9 @@ public final class OnboardingViewModel {
         Self.log.info("AudioCapturePermission.triggerPrompt() returned")
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         audioCaptureStatus = .done
+        // TCC prompt has (best-effort) been dismissed — re-foreground the
+        // accessory app so the window doesn't stay behind other apps.
+        onRequestForeground?()
         refresh()
     }
 
@@ -329,6 +346,9 @@ public final class OnboardingViewModel {
         case .notDetermined:
             status[.microphone] = .pending
         }
+        // The AVFoundation TCC prompt has closed — re-foreground the
+        // accessory app so the window doesn't stay behind other apps.
+        onRequestForeground?()
         refresh()
     }
 

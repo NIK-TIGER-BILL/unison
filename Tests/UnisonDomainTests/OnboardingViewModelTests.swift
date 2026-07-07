@@ -297,6 +297,67 @@ func onboarding_requestMicPermission_deniedSetsError() async {
     #expect(vm.status[.microphone]?.errorMessage != nil)
 }
 
+// MARK: - Re-foreground after foreign system dialogs (LSUIElement fix)
+
+@MainActor
+@Test
+func onboarding_requestMicPermission_firesOnRequestForeground() async {
+    // After the TCC prompt dismisses, the accessory (LSUIElement) app
+    // must ask the host to re-foreground the window — otherwise it sinks
+    // behind other apps' windows. Fires regardless of grant/deny.
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let vm = OnboardingViewModel(
+        permissions: perms,
+        installer: MockInstaller(),
+        keychain: MockKeychain()
+    )
+    var foregrounded = 0
+    vm.onRequestForeground = { foregrounded += 1 }
+    await vm.requestMicPermission()
+    #expect(foregrounded == 1)
+
+    perms.statuses[.microphone] = .denied
+    await vm.requestMicPermission()
+    #expect(foregrounded == 2, "must re-foreground even when the user denies")
+}
+
+@MainActor
+@Test
+func onboarding_installBlackHole_firesOnRequestForeground() async {
+    // The installer's admin-password dialog is a foreign-process dialog
+    // too — re-foreground after it closes, on both success and failure.
+    let installer = MockInstaller()
+    installer.installed2ch = false
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: installer,
+        keychain: MockKeychain()
+    )
+    var foregrounded = 0
+    vm.onRequestForeground = { foregrounded += 1 }
+    await vm.installBlackHole()
+    #expect(foregrounded == 1)
+
+    installer._runBundledInstaller = { throw BlackHoleInstallError.downloadFailed }
+    await vm.installBlackHole()
+    #expect(foregrounded == 2, "must re-foreground even when the install fails")
+}
+
+@MainActor
+@Test
+func onboarding_requestAudioCapturePermission_firesOnRequestForeground() async {
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: MockInstaller(),
+        keychain: MockKeychain()
+    )
+    var foregrounded = 0
+    vm.onRequestForeground = { foregrounded += 1 }
+    await vm.requestAudioCapturePermission()
+    #expect(foregrounded == 1)
+}
+
 @MainActor
 @Test
 func onboarding_progressLabel_countsDoneSteps() {
