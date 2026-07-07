@@ -297,6 +297,100 @@ func onboarding_requestMicPermission_deniedSetsError() async {
     #expect(vm.status[.microphone]?.errorMessage != nil)
 }
 
+// MARK: - Re-foreground after foreign system dialogs (LSUIElement fix)
+
+@MainActor
+@Test
+func onboarding_requestMicPermission_firesOnRequestForeground() async {
+    // After the TCC prompt dismisses, the accessory (LSUIElement) app
+    // must ask the host to re-foreground the window — otherwise it sinks
+    // behind other apps' windows. Fires regardless of grant/deny.
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let vm = OnboardingViewModel(
+        permissions: perms,
+        installer: MockInstaller(),
+        keychain: MockKeychain()
+    )
+    var foregrounded = 0
+    vm.onRequestForeground = { foregrounded += 1 }
+    await vm.requestMicPermission()
+    #expect(foregrounded == 1)
+
+    perms.statuses[.microphone] = .denied
+    await vm.requestMicPermission()
+    #expect(foregrounded == 2, "must re-foreground even when the user denies")
+}
+
+@MainActor
+@Test
+func onboarding_installBlackHole_firesOnRequestForeground() async {
+    // The installer's admin-password dialog is a foreign-process dialog
+    // too — re-foreground after it closes, on both success and failure.
+    let installer = MockInstaller()
+    installer.installed2ch = false
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: installer,
+        keychain: MockKeychain()
+    )
+    var foregrounded = 0
+    vm.onRequestForeground = { foregrounded += 1 }
+    await vm.installBlackHole()
+    #expect(foregrounded == 1)
+
+    installer._runBundledInstaller = { throw BlackHoleInstallError.downloadFailed }
+    await vm.installBlackHole()
+    #expect(foregrounded == 2, "must re-foreground even when the install fails")
+}
+
+@MainActor
+@Test
+func onboarding_requestAudioCapturePermission_firesOnRequestForeground() async {
+    let vm = OnboardingViewModel(
+        permissions: MockPermissionsService(),
+        installer: MockInstaller(),
+        keychain: MockKeychain(),
+        // No-op trigger: a real ProcessTap stalls ~3 min on headless CI.
+        triggerAudioCapture: {}
+    )
+    var foregrounded = 0
+    vm.onRequestForeground = { foregrounded += 1 }
+    await vm.requestAudioCapturePermission()
+    #expect(foregrounded == 1)
+}
+
+@MainActor
+@Test
+func onboarding_onRequestForeground_firesBeforeOnCompleted_onCompletingStep() async {
+    // The fix's correctness on a step that COMPLETES onboarding hinges on
+    // onRequestForeground firing before refresh() — refresh() fires
+    // onCompleted → window.orderOut(nil), which must win so the finished
+    // window closes instead of being re-shown. Lock the order so a future
+    // refactor that moves the callback below refresh() can't silently
+    // reintroduce the "re-show a just-closed window" bug.
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let kc = MockKeychain()
+    try? kc.saveAPIKey("sk-proj-1234567890abcdef", for: .openAIRealtime)
+    // 2ch installed by default in MockInstaller → audio capture is the
+    // only step left, so completing it flips allDone true.
+    let vm = OnboardingViewModel(
+        permissions: perms,
+        installer: MockInstaller(),
+        keychain: kc,
+        triggerAudioCapture: {}
+    )
+    var events: [String] = []
+    vm.onRequestForeground = { events.append("foreground") }
+    vm.onCompleted = { events.append("completed") }
+    await vm.requestAudioCapturePermission()
+    #expect(
+        events == ["foreground", "completed"],
+        "re-foreground must precede completion/orderOut, got: \(events)"
+    )
+}
+
 @MainActor
 @Test
 func onboarding_progressLabel_countsDoneSteps() {
@@ -326,7 +420,9 @@ func onboarding_onCompleted_firesExactlyOnce() async {
     let vm = OnboardingViewModel(
         permissions: perms,
         installer: MockInstaller(),
-        keychain: kc
+        keychain: kc,
+        // No-op trigger: a real ProcessTap stalls ~3 min on headless CI.
+        triggerAudioCapture: {}
     )
     var fired = 0
     vm.onCompleted = { fired += 1 }
@@ -427,7 +523,9 @@ func onboarding_systemSettingsURL_microphoneOnly() {
     let vm = OnboardingViewModel(
         permissions: MockPermissionsService(),
         installer: installer,
-        keychain: MockKeychain()
+        keychain: MockKeychain(),
+        // No-op trigger: a real ProcessTap stalls ~3 min on headless CI.
+        triggerAudioCapture: {}
     )
     vm.refresh()
     await vm.requestAudioCapturePermission()

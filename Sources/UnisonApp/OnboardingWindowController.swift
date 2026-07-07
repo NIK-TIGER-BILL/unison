@@ -21,6 +21,14 @@ public final class OnboardingWindowController {
         self.viewModel.onCompleted = { [weak self] in
             self?.window?.orderOut(nil)
         }
+        // After a foreign-process system dialog (TCC mic / audio-capture
+        // prompt, installer admin-auth) closes, macOS restores the prior
+        // regular app — not this `LSUIElement` agent. Re-run the
+        // bring-to-front dance so the onboarding window doesn't sink
+        // behind other apps' windows.
+        self.viewModel.onRequestForeground = { [weak self] in
+            self?.bringToFront()
+        }
     }
 
     public func show() {
@@ -66,9 +74,15 @@ public final class OnboardingWindowController {
         viewModel.refresh()
 
         window?.center()
-        // `LSUIElement=true` agents need explicit activation to come
-        // forward — otherwise the window opens behind whatever app
-        // the user was in.
+        bringToFront()
+    }
+
+    /// Brings the onboarding window to the foreground. `LSUIElement=true`
+    /// agents need explicit activation to come forward — otherwise the
+    /// window opens (or ends up) behind whatever app the user was in.
+    /// Called on first `show()` and re-invoked via `onRequestForeground`
+    /// after every foreign system dialog dismisses.
+    private func bringToFront() {
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()

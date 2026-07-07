@@ -57,6 +57,13 @@ public final class OnboardingViewModel {
     private let installer: any BlackHoleInstaller
     private let keychain: any KeychainService
 
+    /// Nudges macOS to show the TCC audio-capture prompt. Injected so
+    /// tests can substitute a no-op — the production default spins a real
+    /// CoreAudio ProcessTap, which stalls ~3 min on a headless CI runner
+    /// (no audio session), blowing the test-job timeout. Never invoked
+    /// outside `requestAudioCapturePermission()`.
+    private let triggerAudioCapture: @Sendable () async -> Void
+
     public private(set) var steps: [OnboardingStep] = []
 
     /// Per-step UI state. Always contains an entry for every
@@ -110,14 +117,29 @@ public final class OnboardingViewModel {
     @ObservationIgnored
     public var onStateRefreshed: (@MainActor () -> Void)?
 
+    /// Fired after a foreign-process system dialog dismisses (the TCC
+    /// microphone / audio-capture prompt, or the installer's admin-auth
+    /// dialog). Unison is `LSUIElement=true`, so when such a dialog
+    /// closes macOS restores the *previously-frontmost regular app* —
+    /// never this accessory app. Without re-activating, the borderless
+    /// onboarding window sinks behind other apps' windows and the user
+    /// has to hunt for it. The host `OnboardingWindowController` wires
+    /// this to re-run its `activate + orderFrontRegardless` dance.
+    @ObservationIgnored
+    public var onRequestForeground: (@MainActor () -> Void)?
+
     public init(
         permissions: any PermissionsService,
         installer: any BlackHoleInstaller,
-        keychain: any KeychainService
+        keychain: any KeychainService,
+        triggerAudioCapture: @escaping @Sendable () async -> Void = {
+            await AudioCapturePermission.triggerPrompt()
+        }
     ) {
         self.permissions = permissions
         self.installer = installer
         self.keychain = keychain
+        self.triggerAudioCapture = triggerAudioCapture
         refresh()
     }
 
@@ -268,6 +290,9 @@ public final class OnboardingViewModel {
                 "Не удалось установить BlackHole. Подробности в Console.app (subsystem com.unison.app)."
             )
         }
+        // The installer's admin-auth dialog has closed — pull the
+        // accessory app's window back in front (see `onRequestForeground`).
+        onRequestForeground?()
         refresh()
     }
 
@@ -300,18 +325,29 @@ public final class OnboardingViewModel {
         audioCaptureStatus = .inProgress
         refreshOverallBlackHoleStatus()
         await MainActor.run {
-            // NSApp is nil in unit-test runs (no AppKit instance), so
-            // guard before calling — otherwise the OnboardingViewModel
-            // tests trap on this implicitly-unwrapped optional.
+            // Pre-prompt activation: bring the app up so the TCC prompt
+            // appears over the onboarding window. This is a distinct event
+            // from the post-prompt re-foreground below (which restores us
+            // *after* macOS demotes the accessory app), so it stays a
+            // direct poke rather than routing through `onRequestForeground`
+            // — folding both into one callback would conflate the two and
+            // double-fire it. NSApp is nil in unit-test runs (no AppKit
+            // instance), so guard — otherwise the tests trap on the
+            // implicitly-unwrapped optional.
             if let app = NSApp {
                 app.activate(ignoringOtherApps: true)
             }
         }
         try? await Task.sleep(nanoseconds: 100_000_000)
-        await AudioCapturePermission.triggerPrompt()
+        await triggerAudioCapture()
         Self.log.info("AudioCapturePermission.triggerPrompt() returned")
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         audioCaptureStatus = .done
+        // Best-effort re-foreground: unlike the mic prompt, TCC audio
+        // capture exposes no completion signal, so we can only assume the
+        // prompt is gone after the fixed wait above. Re-foreground anyway
+        // so the accessory app's window doesn't stay behind other apps.
+        onRequestForeground?()
         refresh()
     }
 
@@ -329,6 +365,9 @@ public final class OnboardingViewModel {
         case .notDetermined:
             status[.microphone] = .pending
         }
+        // The AVFoundation TCC prompt has closed — re-foreground the
+        // accessory app so the window doesn't stay behind other apps.
+        onRequestForeground?()
         refresh()
     }
 
