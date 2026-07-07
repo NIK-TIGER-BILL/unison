@@ -59,3 +59,20 @@ private func model(_ clock: FakeClock) -> TranscriptModel {
     #expect(b[0].source == "First one." && b[0].translation == "Первое.")
     #expect(b[1].source == "Second one now." && b[1].translation == "Второе теперь.")
 }
+
+@MainActor @Test func model_maxLength_forcesCommit_noInfiniteBubble() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    m.config.maxSegmentChars = 40
+    // No punctuation, keeps growing.
+    let chunk = "word word word word word word word "
+    for _ in 0..<4 {
+        m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
+                                 text: chunk, isFinal: false, language: .en))
+        m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
+                                 text: chunk, isFinal: false, language: .en))
+    }
+    // No pause; but the segment must have been force-sealed at least once.
+    #expect(m.bubbles.contains { !$0.isLive })
+    #expect(m.bubbles.allSatisfy { $0.source.count <= 40 + chunk.count })
+}

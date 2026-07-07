@@ -56,6 +56,9 @@ public final class TranscriptModel {
             seg.lastTranslationAt = clock.now()
         }
         live[delta.speaker] = seg
+        if seg.source.count >= config.maxSegmentChars || seg.translation.count >= config.maxSegmentChars {
+            commit(delta.speaker, seg, now: clock.now())
+        }
     }
 
     /// Deltas are appended; leading/trailing spacing is the model's. Single-
