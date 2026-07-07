@@ -90,3 +90,39 @@ private func model(_ clock: FakeClock) -> TranscriptModel {
     #expect(b[0].translation.isEmpty)
     #expect(b[0].translationLost == true)
 }
+
+@MainActor @Test func model_mismatchedSentenceCounts_stayWholeSegment() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    // Source: 2 sentences; translation merged into 1 → counts differ.
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
+                             text: "First one. Second one.", isFinal: false, language: .en))
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
+                             text: "Первое и второе вместе.", isFinal: false, language: .ru))
+    clock.advance(by: 3); m.tick(now: clock.now())
+    let b = m.bubbles.filter { !$0.isLive }
+    #expect(b.count == 1)   // NOT split into a wrong pair
+    #expect(b[0].source == "First one. Second one.")
+    #expect(b[0].translation == "Первое и второе вместе.")
+}
+
+// A bad/mismatched segment must NOT poison the next one — each segment is
+// independent (pause resets alignment).
+@MainActor @Test func model_badSegment_doesNotDriftNext() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
+                             text: "First one. Second one.", isFinal: false, language: .en))
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
+                             text: "Первое и второе.", isFinal: false, language: .ru))
+    clock.advance(by: 3); m.tick(now: clock.now())
+    // New, clean segment.
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
+                             text: "All good now.", isFinal: false, language: .en))
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
+                             text: "Теперь всё хорошо.", isFinal: false, language: .ru))
+    clock.advance(by: 3); m.tick(now: clock.now())
+    let b = m.bubbles.filter { !$0.isLive }
+    #expect(b.last?.source == "All good now.")
+    #expect(b.last?.translation == "Теперь всё хорошо.")   // correctly paired, no carryover
+}
