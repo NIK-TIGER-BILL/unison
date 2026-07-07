@@ -150,3 +150,58 @@ private func model(_ clock: FakeClock) -> TranscriptModel {
     m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original, text: "Hello world", isFinal: false, language: .en))
     #expect(m.bubbles.first?.source == "Hello world")   // replaced, not "Hello Hello world"
 }
+
+@MainActor @Test func model_liveBubbleId_isStableIntoFrozen() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
+                             text: "One whole thought.", isFinal: false, language: .en))
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
+                             text: "Одна цельная мысль.", isFinal: false, language: .ru))
+    let liveId = m.bubbles.first?.id
+    clock.advance(by: 3); m.tick(now: clock.now())
+    let frozen = m.bubbles.filter { !$0.isLive }
+    #expect(frozen.count == 1)
+    #expect(frozen.first?.id == liveId)   // freeze is an in-place lock, not delete+insert
+}
+
+@MainActor @Test func model_cjkChunks_joinWithoutSpuriousSpace() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
+                             text: "今天天气", isFinal: false, language: .zh))
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
+                             text: "很好。", isFinal: false, language: .zh))
+    #expect(m.bubbles.first?.source == "今天天气很好。")   // no spurious inter-chunk space
+}
+
+@MainActor @Test func model_historyCap_trimsOldest() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    m.config.historyCap = 3
+    for i in 0..<6 {
+        m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
+                                 text: "Line \(i).", isFinal: false, language: .en))
+        m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
+                                 text: "Строка \(i).", isFinal: false, language: .ru))
+        clock.advance(by: 3); m.tick(now: clock.now())
+    }
+    let frozen = m.bubbles.filter { !$0.isLive }
+    #expect(frozen.count == 3)                    // capped
+    #expect(frozen.first?.source == "Line 3.")    // oldest three dropped
+}
+
+@MainActor @Test func model_bothSpeakersLive_orderedByStart() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    // peer starts first…
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
+                             text: "Peer talking", isFinal: false, language: .en))
+    clock.advance(by: 1)
+    // …then me starts while peer is still live (overlap / double capture).
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .me, kind: .original,
+                             text: "Я говорю", isFinal: false, language: .ru))
+    let b = m.bubbles
+    #expect(b.count == 2)
+    #expect(b[0].speaker == .peer && b[1].speaker == .me)   // deterministic: by segment start
+}
