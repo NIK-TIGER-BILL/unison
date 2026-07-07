@@ -30,21 +30,6 @@ private func peerEntry(_ original: String, _ translated: String, at seconds: Tim
     #expect(feed.visibleBubbles(entries: [e], now: epochDate(31)).isEmpty)
 }
 
-// The lifetime clock starts when the bubble FREEZES, not when its text
-// first appeared live.
-@MainActor
-@Test func feed_lifetimeStartsAtFreeze_notFirstAppearance() {
-    let feed = TranscriptFeed(config: .init(finalizeAfter: 2.5, window: 30, maxBubbles: 6))
-    let e = peerEntry("Hi", "Прив", at: 0) // no terminator → live while active
-    #expect(feed.visibleBubbles(entries: [e], now: epochDate(0)).first?.isLive == true)
-    // Goes quiet → freezes at t=10 (inactivity), so its window runs 10…40.
-    let atFreeze = feed.visibleBubbles(entries: [e], now: epochDate(10))
-    #expect(atFreeze.count == 1)
-    #expect(atFreeze[0].isLive == false)
-    #expect(feed.visibleBubbles(entries: [e], now: epochDate(39)).count == 1)
-    #expect(feed.visibleBubbles(entries: [e], now: epochDate(41)).isEmpty)
-}
-
 // MARK: - Live bubble
 
 @MainActor
@@ -58,18 +43,30 @@ private func peerEntry(_ original: String, _ translated: String, at seconds: Tim
 
 // MARK: - Count cap
 
-// The freeze-time memo must not accumulate across sessions: once the store
-// is cleared (entries empty), stale stamps are pruned so it can't leak for
-// the app's whole lifetime.
+// Regression (review round 2): a bubble that froze with a lagging
+// translation, then is revived by a late `.translated` delta and re-settles,
+// must NOT vanish from a stale freeze time — its lifetime resets on the new
+// activity. (This is the exact "bubble disappears / re-initialises" failure
+// the model is meant to prevent.)
 @MainActor
-@Test func feed_finalizedAt_prunedWhenBubblesGone() {
+@Test func feed_lateTranslationRevivesBubble_withFreshLifetime() {
     let feed = TranscriptFeed(config: .init(finalizeAfter: 2.5, window: 30, maxBubbles: 6))
-    let e = peerEntry("Hi.", "Привет.", at: 0) // completed → freezes → stamped
-    _ = feed.visibleBubbles(entries: [e], now: epochDate(0))
-    #expect(feed.finalizedAt.count == 1)
-    // New session: the store was cleared → no entries.
-    _ = feed.visibleBubbles(entries: [], now: epochDate(1))
-    #expect(feed.finalizedAt.isEmpty)
+    let id = freshUUID()
+    func entry(_ translated: String, activeAt seconds: TimeInterval) -> TranscriptEntry {
+        TranscriptEntry(
+            id: id, speaker: .peer, originalText: "Hi there.", translatedText: translated,
+            sourceLanguage: .en, targetLanguage: .ru,
+            timestamp: epochDate(0), lastActivityAt: epochDate(seconds))
+    }
+    // Translation incomplete + run quiet → frozen around t=5.
+    _ = feed.visibleBubbles(entries: [entry("Прив", activeAt: 0)], now: epochDate(5))
+    #expect(feed.visibleBubbles(entries: [entry("Прив", activeAt: 0)], now: epochDate(29)).count == 1)
+    // A late translation lands at t=40 (> window since first freeze) and
+    // completes the sentence. The bubble must still be visible (fresh
+    // lifetime), re-frozen — not expired against the old freeze time.
+    let v = feed.visibleBubbles(entries: [entry("Привет.", activeAt: 40)], now: epochDate(41))
+    #expect(v.count == 1)
+    #expect(v[0].isLive == false)
 }
 
 @MainActor

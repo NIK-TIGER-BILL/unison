@@ -144,9 +144,9 @@ private func makeEntryAt(
 
 @Test func groupDisplay_bucketsBySpeaker_flagsAndLive() {
     let bubbles = [
-        DisplayBubble(id: freshUUID(), speaker: .peer, primaryText: "A", secondaryText: "", isLive: false, translationLost: false),
-        DisplayBubble(id: freshUUID(), speaker: .peer, primaryText: "B", secondaryText: "", isLive: false, translationLost: false),
-        DisplayBubble(id: freshUUID(), speaker: .me, primaryText: "C", secondaryText: "", isLive: true, translationLost: false)
+        DisplayBubble(id: freshUUID(), speaker: .peer, primaryText: "A", secondaryText: "", isLive: false, translationLost: false, lastActivityAt: epochDate(0)),
+        DisplayBubble(id: freshUUID(), speaker: .peer, primaryText: "B", secondaryText: "", isLive: false, translationLost: false, lastActivityAt: epochDate(0)),
+        DisplayBubble(id: freshUUID(), speaker: .me, primaryText: "C", secondaryText: "", isLive: true, translationLost: false, lastActivityAt: epochDate(0))
     ]
     let g = TranscriptGrouping.groupDisplayBubbles(bubbles)
     #expect(g.count == 2)

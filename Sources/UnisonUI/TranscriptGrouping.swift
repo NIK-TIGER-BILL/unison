@@ -14,6 +14,10 @@ struct DisplayBubble: Identifiable, Equatable, Sendable {
     let secondaryText: String
     let isLive: Bool
     let translationLost: Bool
+    /// Newest activity across the utterance's entries. The feed expires a
+    /// frozen bubble `window` after this instant; a late delta that bumps
+    /// it resets the clock, so a revived bubble never vanishes early.
+    let lastActivityAt: Date
 }
 
 /// Pure "commit and freeze" derivation of the transcript bubbles.
@@ -58,12 +62,15 @@ enum TranscriptGrouping {
                 let settled = endsSentence(original) && endsSentence(translation)
                 let isLive = isLastGroup && active && !settled
 
-                out.append(makeDisplayBubble(
+                // .me shows the original bold; .peer shows the translation bold.
+                out.append(DisplayBubble(
                     id: group[0].id,
                     speaker: speaker,
-                    text: (original, translation),
+                    primaryText: speaker == .me ? original : translation,
+                    secondaryText: speaker == .me ? translation : original,
                     isLive: isLive,
-                    runAtRisk: runAtRisk))
+                    translationLost: runAtRisk && translation.isEmpty,
+                    lastActivityAt: lastActivity))
             }
         }
         return out
@@ -166,34 +173,4 @@ enum TranscriptGrouping {
             .joined(separator: " ")
     }
 
-    /// Build one `DisplayBubble`. Primary / secondary follow the speaker
-    /// convention (`.me` shows the original bold, `.peer` shows the
-    /// translation bold). `translationLost` marks a pause/reconnect drop
-    /// where no translation arrived.
-    private static func makeDisplayBubble(
-        id: UUID,
-        speaker: Speaker,
-        text: (original: String, translation: String),
-        isLive: Bool,
-        runAtRisk: Bool
-    ) -> DisplayBubble {
-        let primary: String
-        let secondary: String
-        switch speaker {
-        case .me:
-            primary = text.original
-            secondary = text.translation
-        case .peer:
-            primary = text.translation
-            secondary = text.original
-        }
-        return DisplayBubble(
-            id: id,
-            speaker: speaker,
-            primaryText: primary,
-            secondaryText: secondary,
-            isLive: isLive,
-            translationLost: runAtRisk && text.translation.isEmpty
-        )
-    }
 }
