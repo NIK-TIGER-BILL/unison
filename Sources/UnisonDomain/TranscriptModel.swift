@@ -31,6 +31,15 @@ public final class TranscriptModel {
     private var live: [Speaker: Segment] = [:]
     private var frozen: [TranscriptBubble] = []
 
+    public struct Config: Sendable {
+        public var pauseSeconds: TimeInterval = 2.0
+        public var maxSegmentChars: Int = 240
+        public var translationLagTimeout: TimeInterval = 5.0
+        public var historyCap: Int = 40
+        public init() {}
+    }
+    public var config = Config()
+
     public init(clock: Clock = SystemClock()) { self.clock = clock }
 
     public func ingest(_ delta: TranscriptDelta) {
@@ -74,6 +83,33 @@ public final class TranscriptModel {
             translationLost: false,
             committedAt: seg.lastSourceAt ?? seg.lastTranslationAt ?? seg.startedAt,
             isLive: true)
+    }
+
+    /// Time-driven commits (pause / translation-lag). Call ~1/s from the view.
+    public func tick(now: Date) {
+        // snapshot: commit() mutates `live`
+        for (speaker, seg) in Array(live) where isQuiet(seg, now: now, for: config.pauseSeconds) {
+            commit(speaker, seg, now: now)
+        }
+    }
+
+    private func isQuiet(_ seg: Segment, now: Date, for seconds: TimeInterval) -> Bool {
+        let last = [seg.lastSourceAt, seg.lastTranslationAt].compactMap { $0 }.max()
+        guard let last else { return false }
+        return now.timeIntervalSince(last) >= seconds
+    }
+
+    /// Freeze the whole segment as ONE bubble (source↔translation paired as a
+    /// unit — the same speech span) and reset the speaker's live segment.
+    private func commit(_ speaker: Speaker, _ seg: Segment, now: Date) {
+        let source = seg.source.trimmingCharacters(in: .whitespacesAndNewlines)
+        let translation = seg.translation.trimmingCharacters(in: .whitespacesAndNewlines)
+        live[speaker] = nil
+        guard !(source.isEmpty && translation.isEmpty) else { return }
+        frozen.append(TranscriptBubble(
+            id: seg.id, speaker: speaker, source: source, translation: translation,
+            translationLost: false, committedAt: now, isLive: false))
+        if frozen.count > config.historyCap { frozen.removeFirst(frozen.count - config.historyCap) }
     }
 
     public func clear() { live.removeAll(); frozen.removeAll() }
