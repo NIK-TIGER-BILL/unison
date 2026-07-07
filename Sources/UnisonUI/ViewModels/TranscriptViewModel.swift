@@ -5,8 +5,8 @@ import UnisonDomain
 /// View model for the floating transcript window. Mirrors the JS demo in
 /// `design/transcript-final/index.html`:
 ///
-/// - exposes a flat list of `BubbleGroup`s derived from `TranscriptStore`
-///   entries via the commit-and-freeze `TranscriptFeed`;
+/// - exposes a flat list of `BubbleGroup`s mapped from the orchestrator's
+///   `TranscriptModel` bubbles, windowed by the `TranscriptFeed`;
 /// - drives the bubble-size slider (XS … XL) and the original-track volume
 ///   slider in the settings popover;
 /// - tracks "hidden" (transcript collapsed → only pill visible) and the
@@ -22,7 +22,9 @@ import UnisonDomain
 @MainActor
 @Observable
 public final class TranscriptViewModel {
-    public let store: TranscriptStore
+    /// Live source of truth: sentence/pause-paired bubbles from the new
+    /// `TranscriptModel` (the orchestrator ticks it; this VM only reads).
+    public let model: TranscriptModel
     /// Optional orchestrator used for both `elapsedSecondsString` (reads
     /// `state`) and `updateOriginalVolume(...)` (calls the mixer). Optional
     /// so unit tests can construct the VM without spinning up the full
@@ -98,11 +100,34 @@ public final class TranscriptViewModel {
         maxBubbles: TranscriptViewModel.maxVisibleBubbles
     ))
 
+    /// Snapshot-only override: when set, these bubbles render directly,
+    /// bypassing the live model + recency window. Seeded via
+    /// `seedPreviewBubbles(_:)` (public, for the composition demo) or set
+    /// directly by `@testable` snapshot tests. Internal, not public, because
+    /// `DisplayBubble` is a UnisonUI-internal type; mirrors the
+    /// `previewState` / `previewElapsedSeconds` override pattern.
+    var previewBubbles: [DisplayBubble]?
+
+    /// Snapshot-only: seed fixed demo bubbles (screenshot harness), bypassing
+    /// the live model + recency window. Each sample becomes one frozen bubble.
+    public func seedPreviewBubbles(
+        _ samples: [(speaker: Speaker, original: String, translated: String)]
+    ) {
+        let now = Date()
+        previewBubbles = samples.map { sample in
+            DisplayBubble(
+                id: UUID(), speaker: sample.speaker,
+                primaryText: sample.speaker == .me ? sample.original : sample.translated,
+                secondaryText: sample.speaker == .me ? sample.translated : sample.original,
+                isLive: false, translationLost: false, lastActivityAt: now)
+        }
+    }
+
     public init(
-        store: TranscriptStore,
+        model: TranscriptModel,
         orchestrator: TranslationOrchestrator? = nil
     ) {
-        self.store = store
+        self.model = model
         self.orchestrator = orchestrator
     }
 
@@ -115,27 +140,31 @@ public final class TranscriptViewModel {
         visibleBubbleGroups(at: nowProvider())
     }
 
-    /// The windowed slice of bubble groups at the given instant. A pure
-    /// projection over the full `store.entries` — the store is never
-    /// mutated, so the complete history stays available for export/save.
-    /// The view passes a `TimelineView` clock so bubbles expire on
-    /// schedule during silence, not only when new content arrives.
+    /// The windowed slice of bubble groups at the given instant. A PURE
+    /// projection over `model.bubbles` — it never mutates (the orchestrator's
+    /// heartbeat drives `model.tick`), so reading it from a SwiftUI body can't
+    /// trigger "modifying state during view update". The view passes a
+    /// `TimelineView` clock so bubbles expire on schedule during silence.
     public func visibleBubbleGroups(at now: Date) -> [BubbleGroup] {
-        let bubbles: [DisplayBubble]
-        if windowingEnabled {
-            bubbles = feed.visibleBubbles(entries: store.entries, now: now)
-        } else {
-            // Legacy/demo path: same commit-and-freeze bubble shapes, but
-            // the full history with no expiry or count cap (the screenshot
-            // harness seeds fixed-timestamp bubbles and captures at an
-            // arbitrary later moment).
-            bubbles = TranscriptGrouping.liveBubbles(
-                entries: store.entries,
-                now: now,
-                finalizeAfter: Self.liveFinalizeDelaySeconds
-            )
+        if let preview = previewBubbles {
+            return TranscriptGrouping.groupDisplayBubbles(preview)
         }
-        return TranscriptGrouping.groupDisplayBubbles(bubbles)
+        let display = model.bubbles.map(Self.displayBubble(from:))
+        // `windowingEnabled == false` (no expiry / no cap) is the snapshot
+        // path; production keeps the recency window + count cap.
+        let visible = windowingEnabled ? feed.visible(display, now: now) : display
+        return TranscriptGrouping.groupDisplayBubbles(visible)
+    }
+
+    /// `.me` shows the original bold (primary); `.peer` shows the translation
+    /// bold — the source language sits underneath as the secondary line.
+    private static func displayBubble(from bubble: TranscriptBubble) -> DisplayBubble {
+        DisplayBubble(
+            id: bubble.id, speaker: bubble.speaker,
+            primaryText: bubble.speaker == .me ? bubble.source : bubble.translation,
+            secondaryText: bubble.speaker == .me ? bubble.translation : bubble.source,
+            isLive: bubble.isLive, translationLost: bubble.translationLost,
+            lastActivityAt: bubble.committedAt)
     }
 
     /// Seconds since the orchestrator first entered `.translating`. The

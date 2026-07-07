@@ -126,6 +126,9 @@ public final class TranslationOrchestrator {
     private static let userSpeakingWindowSeconds: TimeInterval = 4
 
     public let transcript: TranscriptStore
+    /// Live-display source of truth: sentence/pause-paired bubbles. Fed the
+    /// SAME deltas as `transcript`, which stays the history/export store.
+    public let transcriptModel: TranscriptModel
 
     private let micCapture: any MicrophoneCapture
     private let peerCapture: any PeerAudioCapture
@@ -160,6 +163,10 @@ public final class TranslationOrchestrator {
     private var meStream: (any TranslationStream)?
     private var peerStream: (any TranslationStream)?
     private var silentFrameWatchdog: SilentFrameWatchdog?
+    /// ~1 s heartbeat that drives `transcriptModel.tick` so a speaker's live
+    /// bubble freezes after a pause even when no new deltas arrive. Runs for
+    /// the whole session (survives pauses), cancelled on full stop.
+    private var transcriptTickTask: Task<Void, Never>?
     // Pipeline tasks bucketed per speaker so a reconnect cancels exactly the
     // tasks bound to the failed stream and leaves the healthy side untouched.
     private var pipelineTasksBySpeaker: [Speaker: [Task<Void, Never>]] = [:]
@@ -330,6 +337,7 @@ public final class TranslationOrchestrator {
         meetingStore: any MeetingStore = InMemoryMeetingStore()
     ) {
         self.transcript = TranscriptStore()
+        self.transcriptModel = TranscriptModel(clock: clock)
         self.micCapture = micCapture
         self.peerCapture = peerCapture
         self.outputMixer = outputMixer
@@ -372,6 +380,16 @@ public final class TranslationOrchestrator {
         currentSettings = settings
         transcript.clear()
         transcript.currentLanguagePair = languages
+        transcriptModel.clear()
+        transcriptModel.currentLanguagePair = languages
+        transcriptTickTask?.cancel()
+        let tickClock = self.clock
+        transcriptTickTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await tickClock.sleep(for: 1.0)
+                self?.transcriptModel.tick(now: tickClock.now())
+            }
+        }
 
         // Permission gates. Mic permission is required by both `.call`
         // and `.test` (anything that captures from the mic). `.listen`
@@ -1592,6 +1610,8 @@ public final class TranslationOrchestrator {
         globalTasks.removeAll()
         pipelineTasksBySpeaker.removeAll()
         reconnectTasks.removeAll()
+        transcriptTickTask?.cancel()
+        transcriptTickTask = nil
         // Drop the per-speaker ring buffers entirely on stop — a fresh
         // start() re-allocates them. Keeping the instance around past
         // session boundaries would leak stale audio into a later
@@ -1998,11 +2018,12 @@ public final class TranslationOrchestrator {
             }
             pump.cancel()
         }
-        let task3 = Task { @MainActor [transcript, stream, weak self] in
+        let task3 = Task { @MainActor [transcript, transcriptModel, stream, weak self] in
             for await d in stream.transcripts {
                 self?.recordDeltaArrival(speaker: .me)
                 self?.markFirstDataReceived()
                 transcript.apply(d)
+                transcriptModel.ingest(d)
             }
         }
         pipelineTasksBySpeaker[.me, default: []].append(contentsOf: [task1, task2, task3])
@@ -2141,11 +2162,12 @@ public final class TranslationOrchestrator {
         let originalPlay = Task { [outputMixer] in
             await outputMixer.playOriginal(passthroughFrames)
         }
-        let transcripts = Task { @MainActor [transcript, stream, weak self] in
+        let transcripts = Task { @MainActor [transcript, transcriptModel, stream, weak self] in
             for await d in stream.transcripts {
                 self?.recordDeltaArrival(speaker: .peer)
                 self?.markFirstDataReceived()
                 transcript.apply(d)
+                transcriptModel.ingest(d)
             }
         }
         pipelineTasksBySpeaker[.peer, default: []].append(contentsOf: [splitter, sender, translatedPlay, originalPlay, transcripts])

@@ -29,10 +29,15 @@ final class TranscriptFeed {
     /// The bubbles to render at `now`: the live tail plus every frozen bubble
     /// whose last activity is within `window`, capped to the last `maxBubbles`.
     func visibleBubbles(entries: [TranscriptEntry], now: Date) -> [DisplayBubble] {
-        let all = TranscriptGrouping.liveBubbles(
-            entries: entries, now: now, finalizeAfter: config.finalizeAfter)
-        // Per-bubble filter → removal is always whole. A live bubble stays;
-        // a frozen one stays until it has been quiet for `window`.
+        visible(TranscriptGrouping.liveBubbles(
+            entries: entries, now: now, finalizeAfter: config.finalizeAfter), now: now)
+    }
+
+    /// Window a PRE-BUILT bubble list (e.g. mapped from `TranscriptModel`):
+    /// keep every live bubble and every frozen bubble whose last activity is
+    /// within `window`, capped to the last `maxBubbles`. Per-bubble filter →
+    /// removal is always whole; a live bubble always stays.
+    func visible(_ all: [DisplayBubble], now: Date) -> [DisplayBubble] {
         var visible = all.filter { bubble in
             bubble.isLive || now.timeIntervalSince(bubble.lastActivityAt) <= config.window
         }

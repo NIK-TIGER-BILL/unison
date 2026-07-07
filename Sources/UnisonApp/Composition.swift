@@ -215,7 +215,7 @@ public final class Composition {
             meetingStore: self.meetingStore
         )
         self.transcriptVM = TranscriptViewModel(
-            store: orchestrator.transcript,
+            model: orchestrator.transcriptModel,
             orchestrator: orchestrator
         )
         self.meetingHistoryVM = MeetingHistoryViewModel(store: self.meetingStore)
@@ -261,10 +261,7 @@ public final class Composition {
         // (mock installer, granted permissions, pre-seeded keychain)
         // are handled by the factories above.
         if force == .transcriptDemo {
-            Self.seedTranscriptDemo(
-                store: self.orchestrator.transcript,
-                viewModel: self.transcriptVM
-            )
+            Self.seedTranscriptDemo(viewModel: self.transcriptVM)
         }
         meetingStore.enforceSizeLimit()
     }
@@ -474,49 +471,21 @@ extension Composition {
     /// PEER_PHRASES). Used by `UNISON_FORCE_STATE=transcript-demo`. Note
     /// that the orchestrator's `state` stays `.idle` — the transcript
     /// window can still render historical entries from the store.
-    static func seedTranscriptDemo(store: TranscriptStore, viewModel: TranscriptViewModel) {
-        store.currentLanguagePair = .default
-        let samples: [(speaker: Speaker, original: String, translated: String)] = [
+    static func seedTranscriptDemo(viewModel: TranscriptViewModel) {
+        // Fixed frozen bubbles for the screenshot harness. `previewBubbles`
+        // bypasses the live model + recency window entirely, so the full
+        // seeded conversation renders deterministically at any capture moment.
+        viewModel.seedPreviewBubbles([
             (.me, "Привет, как дела?", "Hi, how are you?"),
             (.peer, "I'm good, thanks!", "Хорошо, спасибо!"),
             (.me, "Давай встретимся завтра?", "Let's meet tomorrow?"),
             (.peer, "Sounds good to me.", "Звучит хорошо."),
             (.me, "Что насчёт пятницы?", "What about Friday?"),
-            (.peer, "Friday works for me. See you then.",
-                                                   "Пятница подходит. До встречи.")
-        ]
-        for sample in samples {
-            let id = UUID()
-            // Seed both original + translated in one delta pair so the
-            // entry lands with both fields populated.
-            store.apply(
-                TranscriptDelta(
-                    entryId: id,
-                    speaker: sample.speaker,
-                    kind: .original,
-                    text: sample.original,
-                    isFinal: true
-                )
-            )
-            store.apply(
-                TranscriptDelta(
-                    entryId: id,
-                    speaker: sample.speaker,
-                    kind: .translated,
-                    text: sample.translated,
-                    isFinal: true
-                )
-            )
-        }
+            (.peer, "Friday works for me. See you then.", "Пятница подходит. До встречи.")
+        ])
         // Pin the elapsed-time pill at a recognisable value so the
         // screenshot is reproducible across captures.
         viewModel.previewElapsedSeconds = 47
-        // The recency window would trim these 6 seeded replies to the
-        // last 4 and empty the transcript 30 s after launch (their
-        // timestamps are fixed at seed time, and the screenshot harness
-        // captures at an arbitrary post-launch moment). Show the full
-        // seeded conversation deterministically instead.
-        viewModel.windowingEnabled = false
     }
 }
 
