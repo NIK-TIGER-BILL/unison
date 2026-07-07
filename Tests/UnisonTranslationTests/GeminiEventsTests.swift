@@ -51,9 +51,16 @@ import Testing
 
     @Test func decodesInputAndOutputTranscription() throws {
         #expect(try decodeGeminiFrame(#"{"serverContent":{"inputTranscription":{"text":"привет"}}}"#)
-            == [.inputTranscript("привет")])
+            == [.inputTranscript("привет", nil)])
         #expect(try decodeGeminiFrame(#"{"serverContent":{"outputTranscription":{"text":"hello"}}}"#)
-            == [.outputTranscript("hello")])
+            == [.outputTranscript("hello", nil)])
+    }
+
+    @Test func decodesTranscriptLanguageCode() throws {
+        #expect(try decodeGeminiFrame(#"{"serverContent":{"inputTranscription":{"text":"hi","languageCode":"en"}}}"#)
+                == [.inputTranscript("hi", "en")])
+        #expect(try decodeGeminiFrame(#"{"serverContent":{"outputTranscription":{"text":"привет","languageCode":"ru"}}}"#)
+                == [.outputTranscript("привет", "ru")])
     }
 
     @Test func decodesTurnCompleteAndSetupComplete() throws {
@@ -72,7 +79,7 @@ import Testing
     // A frame must surface the final content AND the boundary, in that order.
     @Test func decodesBundledTurnCompleteWithTranscript() throws {
         #expect(try decodeGeminiFrame(#"{"serverContent":{"outputTranscription":{"text":"Привет."},"turnComplete":true}}"#)
-            == [.outputTranscript("Привет."), .turnComplete])
+            == [.outputTranscript("Привет.", nil), .turnComplete])
     }
 
     @Test func decodesBundledTurnCompleteWithAudio() throws {

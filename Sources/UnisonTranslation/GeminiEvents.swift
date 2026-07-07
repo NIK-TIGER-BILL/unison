@@ -98,8 +98,8 @@ public struct GeminiSetupPayload: Sendable {
 public enum GeminiServerEvent: Sendable, Equatable {
     case setupComplete
     case audio(base64: String)         // 24 kHz int16 PCM
-    case inputTranscript(String)        // source-language text
-    case outputTranscript(String)       // translated text
+    case inputTranscript(String, String?)   // source text, source languageCode
+    case outputTranscript(String, String?)  // translated text, target languageCode
     case turnComplete
     case goAway
     case unknown
@@ -129,7 +129,7 @@ extension GeminiServerFrame: Decodable {
     private enum Turn: String, CodingKey { case parts }
     private enum Part: String, CodingKey { case inlineData }
     private enum Inline: String, CodingKey { case data }
-    private enum Text: String, CodingKey { case text }
+    private enum Text: String, CodingKey { case text, languageCode }
 
     public init(from decoder: Decoder) throws {
         let top = try decoder.container(keyedBy: Top.self)
@@ -152,11 +152,11 @@ extension GeminiServerFrame: Decodable {
         }
         if let t = try? content.nestedContainer(keyedBy: Text.self, forKey: .inputTranscription),
            let text = try? t.decode(String.self, forKey: .text) {
-            out.append(.inputTranscript(text))
+            out.append(.inputTranscript(text, try? t.decode(String.self, forKey: .languageCode)))
         }
         if let t = try? content.nestedContainer(keyedBy: Text.self, forKey: .outputTranscription),
            let text = try? t.decode(String.self, forKey: .text) {
-            out.append(.outputTranscript(text))
+            out.append(.outputTranscript(text, try? t.decode(String.self, forKey: .languageCode)))
         }
         // Gemini sends turnComplete as a JSON bool `true`; tolerate an empty-
         // object form too. Present-and-not-explicitly-false ⇒ turn boundary.

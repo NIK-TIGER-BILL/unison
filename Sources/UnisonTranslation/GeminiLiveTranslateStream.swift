@@ -185,7 +185,7 @@ public actor GeminiLiveTranslateStream: TranslationStream {
             // the input-side splitter (audio often precedes the transcript).
             markOutputStartedForCurrentTurn()
             outputContinuation.yield(AudioFrame(pcm: pcm, sampleRate: 24_000, channels: 1, format: .int16))
-        case .inputTranscript(let text):
+        case .inputTranscript(let text, _):
             rotateInputEntryIfNewUtterance()
             receivedAnyData = true
             // First original of a fresh entry enqueues it for translation
@@ -200,7 +200,7 @@ public actor GeminiLiveTranslateStream: TranslationStream {
             }
             transcriptContinuation.yield(TranscriptDelta(
                 entryId: inputEntryId, speaker: speaker, kind: .original, text: text, isFinal: false))
-        case .outputTranscript(let text):
+        case .outputTranscript(let text, _):
             receivedAnyData = true
             markOutputStartedForCurrentTurn()
             // Translation routes to the OLDEST utterance still awaiting its
