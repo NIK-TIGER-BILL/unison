@@ -76,3 +76,17 @@ private func model(_ clock: FakeClock) -> TranscriptModel {
     #expect(m.bubbles.contains { !$0.isLive })
     #expect(m.bubbles.allSatisfy { $0.source.count <= 40 + chunk.count })
 }
+
+@MainActor @Test func model_translationNeverArrives_commitsWithLostMarker() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
+                             text: "Hello there.", isFinal: false, language: .en))
+    // Translation never comes; after lag timeout, commit source-only.
+    clock.advance(by: 6); m.tick(now: clock.now())
+    let b = m.bubbles.filter { !$0.isLive }
+    #expect(b.count == 1)
+    #expect(b[0].source == "Hello there.")
+    #expect(b[0].translation.isEmpty)
+    #expect(b[0].translationLost == true)
+}

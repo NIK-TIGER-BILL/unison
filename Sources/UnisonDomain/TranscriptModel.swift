@@ -90,9 +90,15 @@ public final class TranscriptModel {
 
     /// Time-driven commits (pause / translation-lag). Call ~1/s from the view.
     public func tick(now: Date) {
-        // snapshot: commit() mutates `live`
-        for (speaker, seg) in Array(live) where isQuiet(seg, now: now, for: config.pauseSeconds) {
-            commit(speaker, seg, now: now)
+        for (speaker, seg) in Array(live) {   // snapshot: commit() mutates `live`
+            let sourceQuiet = seg.lastSourceAt.map { now.timeIntervalSince($0) >= config.pauseSeconds } ?? true
+            let hasSource = !seg.source.isEmpty
+            let translationBehind = seg.translation.count < seg.source.count / 2
+            if hasSource && sourceQuiet && translationBehind
+                && (seg.lastTranslationAt.map { now.timeIntervalSince($0) >= config.translationLagTimeout } ?? true) {
+                commit(speaker, seg, now: now); continue
+            }
+            if isQuiet(seg, now: now, for: config.pauseSeconds) { commit(speaker, seg, now: now) }
         }
     }
 
@@ -117,7 +123,8 @@ public final class TranscriptModel {
                             translationLang: seg.translationLang ?? defaultTranslationLang(speaker)) {
             frozen.append(TranscriptBubble(
                 id: UUID(), speaker: speaker, source: s, translation: t,
-                translationLost: false, committedAt: now, isLive: false))
+                translationLost: t.isEmpty && !s.isEmpty,
+                committedAt: now, isLive: false))
         }
         if frozen.count > config.historyCap { frozen.removeFirst(frozen.count - config.historyCap) }
     }
