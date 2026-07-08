@@ -18,9 +18,17 @@ public struct TranscriptBubble: Identifiable, Equatable, Sendable {
     public let isLive: Bool
 }
 
+/// Turns a speaker's streamed source+translation deltas into transcript
+/// bubbles. Deliberately simple: a bubble is ONE continuous speech segment,
+/// frozen WHOLE — never re-split by sentence (that read as jumpy: the bubble
+/// grows, then suddenly chops into pieces). A speaker's segment ends on the
+/// first of: a long pause (`pauseSeconds` of silence), the OTHER speaker
+/// taking a turn (interruption), or a length safety cap (`maxSegmentChars`).
 @MainActor
 @Observable
 public final class TranscriptModel {
+    /// Set by the orchestrator per session. Not read internally (segmentation
+    /// is language-agnostic now); kept as session context.
     public var currentLanguagePair: LanguagePair?
     private let clock: Clock
 
@@ -28,8 +36,6 @@ public final class TranscriptModel {
     private struct Segment {
         var source = ""
         var translation = ""
-        var sourceLang: Language?
-        var translationLang: Language?
         var lastSourceAt: Date?
         var lastTranslationAt: Date?
         let id: UUID
@@ -39,7 +45,12 @@ public final class TranscriptModel {
     private var frozen: [TranscriptBubble] = []
 
     public struct Config: Sendable {
-        public var pauseSeconds: TimeInterval = 2.0
+        /// A speaker's segment freezes after this much silence. Big on purpose
+        /// — real thinking pauses, not clause-level micro-gaps. Small pauses
+        /// would chop one thought into many bubbles.
+        public var pauseSeconds: TimeInterval = 7.0
+        /// Safety cap so a monologue with no pause can't grow forever. Rarely
+        /// hit; NOT a primary boundary (pauses / interruptions are).
         public var maxSegmentChars: Int = 240
         public var historyCap: Int = 40
         public init() {}
@@ -50,23 +61,27 @@ public final class TranscriptModel {
 
     public func ingest(_ delta: TranscriptDelta) {
         guard !delta.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // Interruption: the OTHER speaker actively speaking (an `.original`
+        // delta = voice activity) seals the current speaker's bubble. Gated on
+        // `.original` so a lagging translation of the SAME turn — which arrives
+        // as the other speaker's `.translated` — can't trigger a false handoff.
+        if delta.kind == .original {
+            let other: Speaker = delta.speaker == .me ? .peer : .me
+            if let otherSeg = live[other], !(otherSeg.source.isEmpty && otherSeg.translation.isEmpty) {
+                commit(other, otherSeg, now: clock.now())
+            }
+        }
         var seg = live[delta.speaker] ?? Segment(id: UUID(), startedAt: clock.now())
         switch delta.kind {
         case .original:
             seg.source = appendChunk(seg.source, delta.text)
-            seg.sourceLang = delta.language ?? seg.sourceLang
             seg.lastSourceAt = clock.now()
         case .translated:
             seg.translation = appendChunk(seg.translation, delta.text)
-            seg.translationLang = delta.language ?? seg.translationLang
             seg.lastTranslationAt = clock.now()
         }
         live[delta.speaker] = seg
-        // Safety valve: a segment with no pause and no punctuation can't grow
-        // forever. Rare (~240 pause-free chars ≈ 15–20 s of unbroken speech);
-        // the residual cost is that a translation still in flight when this
-        // fires seals partial and its tail opens the next segment — one coarser
-        // bubble, not a cross-segment drift.
+        // Safety cap only (see Config.maxSegmentChars) — never a primary boundary.
         if seg.source.count >= config.maxSegmentChars || seg.translation.count >= config.maxSegmentChars {
             commit(delta.speaker, seg, now: clock.now())
         }
@@ -111,12 +126,11 @@ public final class TranscriptModel {
 
     /// Frozen bubbles + each speaker's live bubble, ordered by the utterance's
     /// START time — stable across the live→frozen transition, so a bubble never
-    /// changes place (the reorder "jump" this model exists to avoid). A quick
+    /// changes place (the reorder "jump" this model avoids). A quick
     /// cross-speaker handoff can't invert order the way sorting on the
-    /// heterogeneous `committedAt` (freeze-instant vs. last-activity) would.
-    /// Ties (a split segment's sentences, same speaker + start) keep insertion
-    /// order via the stable sort; the speaker tiebreak makes an exact
-    /// same-instant cross-speaker start deterministic.
+    /// heterogeneous `committedAt` (freeze-instant vs. last-activity) would. The
+    /// speaker tiebreak makes an exact same-instant cross-speaker start
+    /// deterministic.
     public var bubbles: [TranscriptBubble] {
         var out = frozen
         for (speaker, seg) in live where !(seg.source.isEmpty && seg.translation.isEmpty) {
@@ -139,9 +153,7 @@ public final class TranscriptModel {
     }
 
     /// Time-driven commit: a speaker whose streams have gone quiet for
-    /// `pauseSeconds` freezes as a segment. Call ~1/s from the view. A segment
-    /// whose translation never arrived freezes source-only with
-    /// `translationLost` set (handled in `commit`).
+    /// `pauseSeconds` freezes as a segment. Call ~1/s from the view.
     public func tick(now: Date) {
         for (speaker, seg) in Array(live) where isQuiet(seg, now: now, for: config.pauseSeconds) {
             commit(speaker, seg, now: now)   // snapshot: commit() mutates `live`
@@ -154,54 +166,21 @@ public final class TranscriptModel {
         return now.timeIntervalSince(last) >= seconds
     }
 
-    /// Freeze the segment's source↔translation, splitting into per-sentence
-    /// bubbles when both sides agree on sentence count (safe 1:1 pairing);
-    /// otherwise freeze the whole segment as ONE bubble, and reset the
-    /// speaker's live segment. The first frozen bubble reuses the live
-    /// segment's `id` so the freeze reads as an in-place lock (not a
-    /// delete+insert) to the diffing view; extra split sentences are genuine
-    /// inserts.
+    /// Freeze the WHOLE segment as ONE bubble (source↔translation as a unit —
+    /// the same speech span) and reset the speaker's live segment. The bubble
+    /// reuses the live segment's `id`, so the freeze reads as an in-place lock
+    /// (not a delete+insert) to the diffing view. `translationLost` marks a
+    /// segment that sealed with a source but no translation.
     private func commit(_ speaker: Speaker, _ seg: Segment, now: Date) {
         let source = seg.source.trimmingCharacters(in: .whitespacesAndNewlines)
         let translation = seg.translation.trimmingCharacters(in: .whitespacesAndNewlines)
         live[speaker] = nil
         guard !(source.isEmpty && translation.isEmpty) else { return }
-
-        for (offset, pair) in pairs(source: source, translation: translation,
-                                    sourceLang: seg.sourceLang ?? defaultSourceLang(speaker),
-                                    translationLang: seg.translationLang ?? defaultTranslationLang(speaker)).enumerated() {
-            frozen.append(TranscriptBubble(
-                id: offset == 0 ? seg.id : UUID(),
-                speaker: speaker, source: pair.0, translation: pair.1,
-                translationLost: pair.1.isEmpty && !pair.0.isEmpty,
-                startedAt: seg.startedAt, committedAt: now, isLive: false))
-        }
+        frozen.append(TranscriptBubble(
+            id: seg.id, speaker: speaker, source: source, translation: translation,
+            translationLost: translation.isEmpty && !source.isEmpty,
+            startedAt: seg.startedAt, committedAt: now, isLive: false))
         if frozen.count > config.historyCap { frozen.removeFirst(frozen.count - config.historyCap) }
-    }
-
-    /// Pair source↔translation for a committed segment. If both sides split
-    /// into the SAME number of sentences, pair them 1:1 (nice, safe). If the
-    /// counts differ, do NOT risk a wrong split — emit ONE whole-segment pair.
-    private func pairs(source: String, translation: String,
-                       sourceLang: Language, translationLang: Language) -> [(String, String)] {
-        let src = SentenceSegmenter.segment(source, language: sourceLang)
-        let tr = SentenceSegmenter.segment(translation, language: translationLang)
-        let srcSentences = src.complete + (src.trailing.isEmpty ? [] : [src.trailing])
-        let trSentences = tr.complete + (tr.trailing.isEmpty ? [] : [tr.trailing])
-        if srcSentences.count == trSentences.count && srcSentences.count > 1 {
-            return Array(zip(srcSentences, trSentences))
-        }
-        return [(source, translation)]
-    }
-
-    private func defaultSourceLang(_ speaker: Speaker) -> Language {
-        // Original is the speaker's own language.
-        guard let p = currentLanguagePair else { return .en }
-        return speaker == .me ? p.mine : p.peer
-    }
-    private func defaultTranslationLang(_ speaker: Speaker) -> Language {
-        guard let p = currentLanguagePair else { return .en }
-        return speaker == .me ? p.peer : p.mine
     }
 
     public func clear() { live.removeAll(); frozen.removeAll() }

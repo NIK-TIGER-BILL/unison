@@ -5,7 +5,12 @@ import Testing
 private func model(_ clock: FakeClock) -> TranscriptModel {
     let m = TranscriptModel(clock: clock)
     m.currentLanguagePair = LanguagePair(mine: .ru, peer: .en)
+    m.config.pauseSeconds = 2   // small threshold for fast, deterministic tests
     return m
+}
+
+@MainActor @Test func model_defaultPauseSeconds_isBig() {
+    #expect(TranscriptModel().config.pauseSeconds == 7)   // real pauses, not clause gaps
 }
 
 @MainActor @Test func model_accumulatesLiveSegmentPerSpeaker() {
@@ -45,19 +50,20 @@ private func model(_ clock: FakeClock) -> TranscriptModel {
     #expect(b[0].id != b[1].id)
 }
 
-@MainActor @Test func model_matchedSentenceCounts_splitIntoPairedBubbles() {
+@MainActor @Test func model_multiSentenceSegment_freezesAsOneWholeBubble() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
-    // Two complete sentences on both sides, counts agree.
+    // Several sentences in one uninterrupted turn — NO sentence splitting; the
+    // whole segment freezes as ONE bubble.
     m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
                              text: "First one. Second one now.", isFinal: false, language: .en))
     m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
                              text: "Первое. Второе теперь.", isFinal: false, language: .ru))
     clock.advance(by: 3); m.tick(now: clock.now())
     let b = m.bubbles.filter { !$0.isLive }
-    #expect(b.count == 2)
-    #expect(b[0].source == "First one." && b[0].translation == "Первое.")
-    #expect(b[1].source == "Second one now." && b[1].translation == "Второе теперь.")
+    #expect(b.count == 1)
+    #expect(b[0].source == "First one. Second one now.")
+    #expect(b[0].translation == "Первое. Второе теперь.")
 }
 
 @MainActor @Test func model_maxLength_forcesCommit_noInfiniteBubble() {
@@ -191,19 +197,34 @@ private func model(_ clock: FakeClock) -> TranscriptModel {
     #expect(frozen.first?.source == "Line 3.")    // oldest three dropped
 }
 
-@MainActor @Test func model_bothSpeakersLive_orderedByStart() {
+@MainActor @Test func model_interruption_freezesPreviousSpeaker() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
-    // peer starts first…
     m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
                              text: "Peer talking", isFinal: false, language: .en))
     clock.advance(by: 1)
-    // …then me starts while peer is still live (overlap / double capture).
+    // me interrupts → peer's bubble seals IMMEDIATELY (not waiting for a pause).
     m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .me, kind: .original,
-                             text: "Я говорю", isFinal: false, language: .ru))
+                             text: "Я перебиваю", isFinal: false, language: .ru))
     let b = m.bubbles
     #expect(b.count == 2)
-    #expect(b[0].speaker == .peer && b[1].speaker == .me)   // deterministic: by segment start
+    #expect(b[0].speaker == .peer && b[0].isLive == false)   // frozen by the interruption
+    #expect(b[1].speaker == .me && b[1].isLive == true)
+}
+
+// A lagging translation of the SAME turn (the other speaker's `.translated`)
+// must NOT be mistaken for an interruption.
+@MainActor @Test func model_laggingTranslation_doesNotInterrupt() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .me, kind: .original,
+                             text: "Я говорю", isFinal: false, language: .ru))
+    clock.advance(by: 1)
+    // peer's TRANSLATION arrives (kind .translated) — not a new turn.
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
+                             text: "peer translation", isFinal: false, language: .en))
+    // me's segment stays live (not frozen by a translation delta).
+    #expect(m.bubbles.first { $0.speaker == .me }?.isLive == true)
 }
 
 // End-to-end regression: the real captured Gemini timeline from the spec §2
@@ -224,11 +245,11 @@ private func model(_ clock: FakeClock) -> TranscriptModel {
     at(7.536, .original, " Then we", .en)
     at(9.598, .original, " make it more complex.", .en)
     at(10.278, .translated, " Затем мы делаем ее более сложной.", .ru)
-    clock.set(epochDate(14.0)); m.tick(now: clock.now())   // ~5 s pause → commit
+    clock.set(epochDate(14.0)); m.tick(now: clock.now())   // pause → commit
     let b = m.bubbles.filter { !$0.isLive }
-    #expect(b.count == 2)
-    #expect(b[0].source.contains("simple idea") && b[0].translation.contains("простую идею"))
-    #expect(b[1].source.contains("more complex") && b[1].translation.contains("сложной"))
+    #expect(b.count == 1)   // one whole turn, NOT split by sentence
+    #expect(b[0].source.contains("simple idea") && b[0].source.contains("more complex"))
+    #expect(b[0].translation.contains("простую идею") && b[0].translation.contains("сложной"))
 }
 
 // Quick cross-speaker handoff: peer starts, me replies while peer is still

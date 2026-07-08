@@ -29,6 +29,7 @@ private func makeOrchestrator(mixer: MockAudioOutputMixer = .init()) -> Translat
 private func makeModel(_ clock: FakeClock = FakeClock(now: epochDate(0))) -> TranscriptModel {
     let m = TranscriptModel(clock: clock)
     m.currentLanguagePair = LanguagePair(mine: .ru, peer: .en)
+    m.config.pauseSeconds = 2   // small threshold for fast, deterministic tests
     return m
 }
 
@@ -205,9 +206,9 @@ private func commitUtterance(_ model: TranscriptModel, _ clock: FakeClock, _ spe
     #expect(groups[0].bubbles[0].isLive == true)
 }
 
-// Two completed sentences committed together split into two paired bubbles.
+// A multi-sentence turn commits as ONE whole bubble — no sentence splitting.
 @MainActor
-@Test func transcriptVM_committedTwoSentences_splitIntoTwoBubbles() {
+@Test func transcriptVM_committedMultiSentenceTurn_isOneBubble() {
     let clock = FakeClock(now: epochDate(0))
     let model = makeModel(clock)
     let vm = TranscriptViewModel(model: model)
@@ -217,7 +218,7 @@ private func commitUtterance(_ model: TranscriptModel, _ clock: FakeClock, _ spe
     model.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
                                  text: "Первое предложение. Второе предложение.", isFinal: false, language: .ru))
     clock.advance(by: 3); model.tick(now: clock.now())
-    #expect(vm.bubbleGroups.flatMap { $0.bubbles }.count == 2)
+    #expect(vm.bubbleGroups.flatMap { $0.bubbles }.count == 1)
 }
 
 // MARK: - translationLost surfacing
