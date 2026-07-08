@@ -40,6 +40,12 @@ final class LiquidGlassContainerView: NSView {
         glass.frame = bounds
         glass.autoresizingMask = [.width, .height]
         addSubview(glass)
+        // `maskLayer` is a detached CAShapeLayer (no view delegate), so its
+        // animatable `path`/`contentsScale` would implicit-animate (~0.25s)
+        // on every change. A clip mask must track content synchronously —
+        // otherwise a growing live bubble briefly shows its newest line with
+        // no glass behind it until the mask catches up. Disable the actions.
+        maskLayer.actions = ["path": NSNull(), "contentsScale": NSNull()]
         layer?.mask = maskLayer
     }
 
@@ -56,7 +62,8 @@ final class LiquidGlassContainerView: NSView {
         // NOT auto-track the window scale — set it so the clipped silhouette
         // stays crisp on Retina (matters for pill/popover/modal, which have
         // no border to hide a soft edge).
-        maskLayer.contentsScale = window?.backingScaleFactor ?? 2.0
+        maskLayer.contentsScale = window?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor ?? 2.0
         // Пути SwiftUI — top-left origin; маски CALayer — bottom-left.
         // Flip по Y, чтобы верхне-тяжёлый хвост бабла лёг на верный край.
         let raw = pathProvider(bounds)

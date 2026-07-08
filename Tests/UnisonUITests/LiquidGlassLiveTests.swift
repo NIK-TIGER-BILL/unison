@@ -36,14 +36,27 @@ struct LiquidGlassLiveTests {
         #expect(abs(bbox.height - 60) < 1.0)
     }
 
-    @Test func maskUsesBackingScaleForCrispCorners() {
-        // No window in the test → falls back to 2.0 so an offscreen mask
-        // isn't rasterized at 1x (which would soften the clipped corners).
+    @Test func maskContentsScaleMatchesWindowBackingScale() {
+        // Hosted in a window, the mask's contentsScale must track the real
+        // backing scale so the clipped silhouette stays crisp on Retina.
         let v = LiquidGlassContainerView(frame: NSRect(x: 0, y: 0, width: 100, height: 40))
+        let window = NSWindow(contentRect: v.frame, styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.contentView = v
         v.needsLayout = true
         v.layoutSubtreeIfNeeded()
         let mask = v.layer?.mask as? CAShapeLayer
-        #expect(mask?.contentsScale == 2.0)
+        #expect(mask?.contentsScale == window.backingScaleFactor)
+    }
+
+    @Test func maskDisablesImplicitAnimationSoClipSnaps() {
+        // A clip mask must snap, not animate: path/contentsScale actions are
+        // disabled so resize / live-bubble growth never exposes unglassed
+        // content at the edge.
+        let v = LiquidGlassContainerView(frame: NSRect(x: 0, y: 0, width: 100, height: 40))
+        let mask = v.layer?.mask as? CAShapeLayer
+        #expect(mask?.actions?["path"] is NSNull)
+        #expect(mask?.actions?["contentsScale"] is NSNull)
     }
 
     @Test func maskFlipsAsymmetricShapeToCorrectEdge() {
