@@ -501,13 +501,19 @@ public final class TranslationOrchestrator {
         // ~1 s heartbeat that freezes a speaker's live bubble after a pause.
         // Started here (after the permission/device gates pass) so an early
         // start() bail-out can't leak a looping task. Survives pauses;
-        // cancelled in the full-stop teardown.
+        // cancelled in the full-stop teardown. Paces on a REAL `Task.sleep`
+        // (not the injected clock): this is a pure production heartbeat that no
+        // test asserts on, and clock-driven pacing would busy-spin under a
+        // returning test clock (`InstantClock.sleep` only yields). The
+        // timestamp still comes from `clock.now()` so it matches the model's
+        // own delta timestamps.
         transcriptTickTask?.cancel()
         let tickClock = self.clock
         transcriptTickTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                try? await tickClock.sleep(for: 1.0)
-                self?.transcriptModel.tick(now: tickClock.now())
+                try? await Task.sleep(for: .seconds(1))
+                guard let self else { return }   // stop once the orchestrator is gone
+                self.transcriptModel.tick(now: tickClock.now())
             }
         }
         Self.log.info("start() — translating session active")

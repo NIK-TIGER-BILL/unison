@@ -7,6 +7,13 @@ public struct TranscriptBubble: Identifiable, Equatable, Sendable {
     public let source: String
     public let translation: String
     public let translationLost: Bool
+    /// When the utterance's segment STARTED. Stable across the live→frozen
+    /// transition, so bubbles order by this and a bubble never changes place
+    /// (a later-starting speaker can't jump above an earlier one).
+    public let startedAt: Date
+    /// When the bubble last had activity — the freeze instant for a frozen
+    /// bubble, the last delta for a live one. Drives the recency-window
+    /// expiry, NOT ordering.
     public let committedAt: Date
     public let isLive: Bool
 }
@@ -97,26 +104,31 @@ public final class TranscriptModel {
         return isSpacelessScript(last) || isSpacelessScript(first)
     }
 
-    /// Frozen bubbles (oldest→newest) followed by each speaker's live bubble.
-    /// Live segments are appended in a deterministic start order so two
-    /// simultaneously-active speakers never swap places between redraws.
+    /// Frozen bubbles + each speaker's live bubble, ordered by the utterance's
+    /// START time — stable across the live→frozen transition, so a bubble never
+    /// changes place (the reorder "jump" this model exists to avoid). A quick
+    /// cross-speaker handoff can't invert order the way sorting on the
+    /// heterogeneous `committedAt` (freeze-instant vs. last-activity) would.
+    /// Ties (a split segment's sentences, same speaker + start) keep insertion
+    /// order via the stable sort; the speaker tiebreak makes an exact
+    /// same-instant cross-speaker start deterministic.
     public var bubbles: [TranscriptBubble] {
         var out = frozen
-        let liveInStartOrder = live.sorted { lhs, rhs in
-            lhs.value.startedAt != rhs.value.startedAt
-                ? lhs.value.startedAt < rhs.value.startedAt
-                : lhs.key.rawValue < rhs.key.rawValue
-        }
-        for (speaker, seg) in liveInStartOrder where !(seg.source.isEmpty && seg.translation.isEmpty) {
+        for (speaker, seg) in live where !(seg.source.isEmpty && seg.translation.isEmpty) {
             out.append(liveBubble(speaker, seg))
         }
-        return out.sorted { $0.committedAt < $1.committedAt }
+        return out.sorted { lhs, rhs in
+            lhs.startedAt != rhs.startedAt
+                ? lhs.startedAt < rhs.startedAt
+                : lhs.speaker.rawValue < rhs.speaker.rawValue
+        }
     }
 
     private func liveBubble(_ speaker: Speaker, _ seg: Segment) -> TranscriptBubble {
         TranscriptBubble(
             id: seg.id, speaker: speaker, source: seg.source, translation: seg.translation,
             translationLost: false,
+            startedAt: seg.startedAt,
             committedAt: seg.lastSourceAt ?? seg.lastTranslationAt ?? seg.startedAt,
             isLive: true)
     }
@@ -157,7 +169,7 @@ public final class TranscriptModel {
                 id: offset == 0 ? seg.id : UUID(),
                 speaker: speaker, source: pair.0, translation: pair.1,
                 translationLost: pair.1.isEmpty && !pair.0.isEmpty,
-                committedAt: now, isLive: false))
+                startedAt: seg.startedAt, committedAt: now, isLive: false))
         }
         if frozen.count > config.historyCap { frozen.removeFirst(frozen.count - config.historyCap) }
     }

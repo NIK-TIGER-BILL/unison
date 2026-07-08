@@ -220,3 +220,52 @@ private func seedOneEntry(_ orch: TranslationOrchestrator) {
     #expect(store2.list().count == 1)
     #expect(store2.list().first?.mode == .call)
 }
+
+// Dual-write wiring: a transcript delta coming off the STREAM must reach the
+// orchestrator's `transcriptModel` (the live-display source of truth), not only
+// the history `transcript` store. Drives the real pipeline, not a direct apply.
+@MainActor
+@Test func dualWrite_streamDeltaReachesTranscriptModel() async throws {
+    let registry = MockAudioDeviceRegistry()
+    registry.bh2ch = AudioDevice(uid: "bh2", name: "BlackHole 2ch", kind: .output)
+    let perms = MockPermissionsService()
+    perms.statuses[.microphone] = .granted
+    let factory = MockTranslationStreamFactory()
+    let orch = TranslationOrchestrator(
+        micCapture: MockMicrophoneCapture(),
+        peerCapture: MockPeerAudioCapture(),
+        outputMixer: MockAudioOutputMixer(),
+        virtualMicPlayer: MockAudioPlayer(),
+        translationFactory: factory,
+        permissions: perms,
+        deviceRegistry: registry,
+        clock: InstantClock(),
+        transformer: MockAudioFormatTransformer(),
+        networkMonitor: MockNetworkPathMonitor(initial: .satisfied)
+    )
+    await orch.start(mode: .call, languages: .default)
+    guard case .translating = orch.state else {
+        Issue.record("Expected .translating after start(), got \(orch.state)")
+        return
+    }
+
+    // Emit an utterance through the peer STREAM (not `orch.transcript` directly).
+    let peer = factory.streams[.peer]
+    peer?.emitTranscript(TranscriptDelta(entryId: UUID(), speaker: .peer, kind: .original,
+                                         text: "Hello there.", isFinal: false, language: .en))
+    peer?.emitTranscript(TranscriptDelta(entryId: UUID(), speaker: .peer, kind: .translated,
+                                         text: "Привет.", isFinal: false, language: .ru))
+
+    // Let the pipeline task consume the yielded deltas (InstantClock stays at 0,
+    // so the segment never pauses → it remains the live bubble carrying both).
+    var bubble: TranscriptBubble?
+    for _ in 0..<200 {
+        try await Task.sleep(nanoseconds: 5_000_000)
+        bubble = orch.transcriptModel.bubbles.first { $0.source == "Hello there." }
+        if bubble?.translation == "Привет." { break }
+    }
+    #expect(bubble?.source == "Hello there.")
+    #expect(bubble?.translation == "Привет.")   // dual-write delivered both to the model
+
+    await orch.stop()
+}

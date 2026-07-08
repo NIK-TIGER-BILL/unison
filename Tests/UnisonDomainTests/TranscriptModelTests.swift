@@ -230,3 +230,23 @@ private func model(_ clock: FakeClock) -> TranscriptModel {
     #expect(b[0].source.contains("simple idea") && b[0].translation.contains("простую идею"))
     #expect(b[1].source.contains("more complex") && b[1].translation.contains("сложной"))
 }
+
+// Quick cross-speaker handoff: peer starts, me replies while peer is still
+// live, then peer freezes. peer STARTED first, so it must stay ABOVE me — the
+// heterogeneous committedAt sort (freeze-instant vs. last-activity) would
+// wrongly float me's live reply on top (a visible reorder jump).
+@MainActor @Test func model_quickHandoff_earlierSpeakerStaysAbove() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
+                             text: "Peer speaking", isFinal: false, language: .en))
+    clock.advance(by: 1)
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .me, kind: .original,
+                             text: "Я отвечаю", isFinal: false, language: .ru))
+    clock.advance(by: 1)   // t=2: peer quiet 2 s → freezes; me quiet 1 s → stays live
+    m.tick(now: clock.now())
+    let b = m.bubbles
+    #expect(b.count == 2)
+    #expect(b[0].speaker == .peer && b[0].isLive == false)  // started first → stays on top
+    #expect(b[1].speaker == .me && b[1].isLive == true)
+}
