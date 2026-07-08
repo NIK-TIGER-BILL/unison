@@ -7,55 +7,58 @@ public struct TranscriptBubble: Identifiable, Equatable, Sendable {
     public let source: String
     public let translation: String
     public let translationLost: Bool
-    /// When the utterance's segment STARTED. Stable across the live→frozen
-    /// transition, so bubbles order by this and a bubble never changes place
-    /// (a later-starting speaker can't jump above an earlier one).
+    /// When the utterance's turn STARTED. Stable across the live→frozen
+    /// transition, so bubbles order by this and never change place.
     public let startedAt: Date
-    /// When the bubble last had activity — the freeze instant for a frozen
-    /// bubble, the last delta for a live one. Drives the recency-window
-    /// expiry, NOT ordering.
+    /// When the bubble last had activity (freeze instant for frozen, last delta
+    /// for live). Drives the recency-window expiry, NOT ordering.
     public let committedAt: Date
     public let isLive: Bool
 }
 
 /// Turns a speaker's streamed source+translation deltas into transcript
-/// bubbles. Deliberately simple: a bubble is ONE continuous speech segment,
-/// frozen WHOLE — never re-split by sentence (that read as jumpy: the bubble
-/// grows, then suddenly chops into pieces). A speaker's segment ends on the
-/// first of: a long pause (`pauseSeconds` of silence), the OTHER speaker
-/// taking a turn (interruption), or a length safety cap (`maxSegmentChars`).
+/// bubbles, ONE per sentence, sealed PROACTIVELY: the moment a sentence is
+/// complete in BOTH the source and the (lagging) translation, it freezes into
+/// its own immutable bubble — no accumulate-then-split, so a frozen bubble is
+/// never re-partitioned (no "jump"). Only the still-forming tail is live.
+///
+/// Sentences pair by index WITHIN a turn; a turn ends (and the index resets) on
+/// a long pause (`pauseSeconds`) or when the OTHER speaker interrupts — so a
+/// rare in-turn sentence mismatch (the translation merging/splitting differently
+/// than the source) is bounded to one turn and self-heals at the next reset,
+/// never cascading globally.
 @MainActor
 @Observable
 public final class TranscriptModel {
-    /// Set by the orchestrator per session. Not read internally (segmentation
-    /// is language-agnostic now); kept as session context.
+    /// Set by the orchestrator per session; feeds the segmenter's language when
+    /// a delta doesn't carry one.
     public var currentLanguagePair: LanguagePair?
     private let clock: Clock
 
-    /// Per-speaker accumulator for the current (still-forming) segment.
-    private struct Segment {
+    /// A speaker's current turn. Holds only the UNSEALED tail — completed
+    /// sentence-pairs have already moved to `frozen`.
+    private struct Turn {
         var source = ""
         var translation = ""
+        var sourceLang: Language?
+        var translationLang: Language?
         var lastSourceAt: Date?
         var lastTranslationAt: Date?
-        let id: UUID
+        let id: UUID            // stable id for the live tail bubble (→ frozen on finalize)
         let startedAt: Date
     }
-    private var live: [Speaker: Segment] = [:]
+    private var turns: [Speaker: Turn] = [:]
     private var frozen: [TranscriptBubble] = []
 
     public struct Config: Sendable {
-        /// A speaker's segment freezes after this much silence. Big on purpose
-        /// — real thinking pauses, not clause-level micro-gaps. Small pauses
-        /// would chop one thought into many bubbles.
-        public var pauseSeconds: TimeInterval = 7.0
-        /// DISTANT runaway guard so a stuck/nonstop stream can't grow one
-        /// bubble to megabytes. ~4000 chars ≈ several MINUTES of unbroken
-        /// speech — a real thinking pause (7 s) lands long before this. NOT a
-        /// normal boundary: pauses / interruptions segment; this only stops a
-        /// pathological runaway.
-        public var maxSegmentChars: Int = 4000
-        public var historyCap: Int = 40
+        /// A turn's tail freezes after this much silence. 4 s = a real pause
+        /// between thoughts, not a clause micro-gap.
+        public var pauseSeconds: TimeInterval = 4.0
+        /// Runaway guard for punctuation-less speech (no sentence to seal): the
+        /// tail force-finalizes past this length so one bubble can't grow
+        /// forever. Rarely hit — the model usually emits sentence punctuation.
+        public var maxTailChars: Int = 500
+        public var historyCap: Int = 60
         public init() {}
     }
     public var config = Config()
@@ -65,53 +68,118 @@ public final class TranscriptModel {
     public func ingest(_ delta: TranscriptDelta) {
         guard !delta.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         // Interruption: the OTHER speaker actively speaking (an `.original`
-        // delta = voice activity) seals the current speaker's bubble. Gated on
-        // `.original` so a lagging translation of the SAME turn — which arrives
-        // as the other speaker's `.translated` — can't trigger a false handoff.
+        // delta = voice activity) finalizes the current speaker's turn. Gated on
+        // `.original` so a lagging translation can't trigger a false handoff.
         if delta.kind == .original {
             let other: Speaker = delta.speaker == .me ? .peer : .me
-            if let otherSeg = live[other], !(otherSeg.source.isEmpty && otherSeg.translation.isEmpty) {
-                commit(other, otherSeg, now: clock.now())
+            if let ot = turns[other], !(ot.source.isEmpty && ot.translation.isEmpty) {
+                finalize(other, now: clock.now())
             }
         }
-        var seg = live[delta.speaker] ?? Segment(id: UUID(), startedAt: clock.now())
+        var turn = turns[delta.speaker] ?? Turn(id: UUID(), startedAt: clock.now())
         switch delta.kind {
         case .original:
-            seg.source = appendChunk(seg.source, delta.text)
-            seg.lastSourceAt = clock.now()
+            turn.source = appendChunk(turn.source, delta.text)
+            turn.sourceLang = delta.language ?? turn.sourceLang
+            turn.lastSourceAt = clock.now()
         case .translated:
-            seg.translation = appendChunk(seg.translation, delta.text)
-            seg.lastTranslationAt = clock.now()
+            turn.translation = appendChunk(turn.translation, delta.text)
+            turn.translationLang = delta.language ?? turn.translationLang
+            turn.lastTranslationAt = clock.now()
         }
-        live[delta.speaker] = seg
-        // Runaway guard only (see Config.maxSegmentChars) — a normal turn stays
-        // ONE growing bubble until a real pause or an interruption seals it.
-        if seg.source.count >= config.maxSegmentChars || seg.translation.count >= config.maxSegmentChars {
-            commit(delta.speaker, seg, now: clock.now())
+        sealCompleted(delta.speaker, &turn, now: clock.now())
+        // Runaway guard: a tail that never yields a sentence (no punctuation)
+        // can't seal — force-finalize so it doesn't grow without bound.
+        if turn.source.count >= config.maxTailChars || turn.translation.count >= config.maxTailChars {
+            turns[delta.speaker] = turn
+            finalize(delta.speaker, now: clock.now())
+            return
+        }
+        turns[delta.speaker] = turn
+    }
+
+    /// Freeze every sentence-pair that is now complete on BOTH sides, in order,
+    /// removing each from the tail as it seals.
+    private func sealCompleted(_ speaker: Speaker, _ turn: inout Turn, now: Date) {
+        let srcLang = turn.sourceLang ?? defaultSourceLang(speaker)
+        let trLang = turn.translationLang ?? defaultTranslationLang(speaker)
+        while true {
+            let src = SentenceSegmenter.segment(turn.source, language: srcLang)
+            let tr = SentenceSegmenter.segment(turn.translation, language: trLang)
+            guard let sentenceSource = src.complete.first,
+                  let sentenceTranslation = tr.complete.first else { break }
+            appendFrozen(speaker, id: UUID(), sentence: (sentenceSource, sentenceTranslation),
+                         startedAt: turn.startedAt, now: now)
+            turn.source = joined(Array(src.complete.dropFirst()) + [src.trailing])
+            turn.translation = joined(Array(tr.complete.dropFirst()) + [tr.trailing])
         }
     }
 
-    /// Append a delta chunk to the accumulation. Chunks join with a single
-    /// space for space-delimited scripts, but with NO space for scripts that
-    /// don't use inter-word spaces (CJK, Thai) or before attached punctuation —
-    /// otherwise "今天" + "很好。" would render as "今天 很好。".
+    /// End a turn: seal any complete pairs, then freeze the remaining tail (the
+    /// last partial sentence) as one bubble — keeping the live id so the tail
+    /// locks in place — and drop the turn (index resets for the next one).
+    private func finalize(_ speaker: Speaker, now: Date) {
+        guard var turn = turns[speaker] else { return }
+        sealCompleted(speaker, &turn, now: now)
+        appendFrozen(speaker, id: turn.id, sentence: (turn.source, turn.translation),
+                     startedAt: turn.startedAt, now: now)
+        turns[speaker] = nil
+    }
+
+    private func appendFrozen(_ speaker: Speaker, id: UUID,
+                              sentence: (source: String, translation: String),
+                              startedAt: Date, now: Date) {
+        let s = sentence.source.trimmingCharacters(in: .whitespacesAndNewlines)
+        let t = sentence.translation.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !(s.isEmpty && t.isEmpty) else { return }
+        frozen.append(TranscriptBubble(
+            id: id, speaker: speaker, source: s, translation: t,
+            translationLost: t.isEmpty && !s.isEmpty,
+            startedAt: startedAt, committedAt: now, isLive: false))
+        if frozen.count > config.historyCap { frozen.removeFirst(frozen.count - config.historyCap) }
+    }
+
+    /// Time-driven: a turn whose streams have gone quiet for `pauseSeconds`
+    /// finalizes. Call ~1/s from the view.
+    public func tick(now: Date) {
+        for (speaker, turn) in Array(turns) where isQuiet(turn, now: now, for: config.pauseSeconds) {
+            finalize(speaker, now: now)   // snapshot: finalize() mutates `turns`
+        }
+    }
+
+    private func isQuiet(_ turn: Turn, now: Date, for seconds: TimeInterval) -> Bool {
+        let last = [turn.lastSourceAt, turn.lastTranslationAt].compactMap { $0 }.max()
+        guard let last else { return false }
+        return now.timeIntervalSince(last) >= seconds
+    }
+
+    // MARK: - Text assembly
+
+    /// Append a delta chunk to a tail. Joins with a single space for
+    /// space-delimited scripts, NO space for space-less scripts (CJK/Thai) or
+    /// attached punctuation. Detects a cumulative restatement (a strictly-longer
+    /// prefix-superset) and replaces rather than duplicating.
     private func appendChunk(_ acc: String, _ chunk: String) -> String {
         let a = acc.trimmingCharacters(in: .whitespacesAndNewlines)
         let c = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
         if a.isEmpty { return c }
         if c.isEmpty { return a }
-        // Cumulative restatement (some models resend the whole transcript, each
-        // longer than the last): the new chunk STRICTLY extends the accumulation
-        // → replace. Must be strictly longer — an identical repeat is a normal
-        // append (a string is its own prefix), not a restatement.
-        if c.count > a.count && c.hasPrefix(a) { return c }
+        if c.count > a.count && c.hasPrefix(a) { return c }   // cumulative restatement
         return joinsWithoutSpace(after: a.last, before: c.first) ? a + c : a + " " + c
+    }
+
+    /// Reassemble sentence fragments (from the segmenter) back into a tail
+    /// string, script-aware, dropping empties.
+    private func joined(_ parts: [String]) -> String {
+        parts.filter { !$0.isEmpty }.reduce("") { acc, part in
+            if acc.isEmpty { return part }
+            return joinsWithoutSpace(after: acc.last, before: part.first) ? acc + part : acc + " " + part
+        }
     }
 
     /// Whether two chunks should join with no space: true for CJK/Thai
     /// (space-less scripts) on either side, or when the next chunk starts with
-    /// attached punctuation. Korean (Hangul) uses inter-word spaces, so it is
-    /// deliberately NOT treated as space-less.
+    /// attached punctuation. Korean (Hangul) uses inter-word spaces.
     private func joinsWithoutSpace(after last: Character?, before first: Character?) -> Bool {
         let attachedLeading: Set<Character> = [
             ".", ",", "!", "?", ";", ":", "\u{2026}",
@@ -128,17 +196,15 @@ public final class TranscriptModel {
         return isSpacelessScript(last) || isSpacelessScript(first)
     }
 
-    /// Frozen bubbles + each speaker's live bubble, ordered by the utterance's
-    /// START time — stable across the live→frozen transition, so a bubble never
-    /// changes place (the reorder "jump" this model avoids). A quick
-    /// cross-speaker handoff can't invert order the way sorting on the
-    /// heterogeneous `committedAt` (freeze-instant vs. last-activity) would. The
-    /// speaker tiebreak makes an exact same-instant cross-speaker start
-    /// deterministic.
+    // MARK: - Output
+
+    /// Frozen sentence bubbles + each speaker's live tail, ordered by turn
+    /// START time (stable across live→frozen, so nothing changes place). Within
+    /// a turn, sentences keep seal order via the stable sort (same `startedAt`).
     public var bubbles: [TranscriptBubble] {
         var out = frozen
-        for (speaker, seg) in live where !(seg.source.isEmpty && seg.translation.isEmpty) {
-            out.append(liveBubble(speaker, seg))
+        for (speaker, turn) in turns {
+            if let bubble = liveBubble(speaker, turn) { out.append(bubble) }
         }
         return out.sorted { lhs, rhs in
             lhs.startedAt != rhs.startedAt
@@ -147,45 +213,25 @@ public final class TranscriptModel {
         }
     }
 
-    private func liveBubble(_ speaker: Speaker, _ seg: Segment) -> TranscriptBubble {
-        TranscriptBubble(
-            id: seg.id, speaker: speaker, source: seg.source, translation: seg.translation,
-            translationLost: false,
-            startedAt: seg.startedAt,
-            committedAt: seg.lastSourceAt ?? seg.lastTranslationAt ?? seg.startedAt,
+    private func liveBubble(_ speaker: Speaker, _ turn: Turn) -> TranscriptBubble? {
+        let s = turn.source.trimmingCharacters(in: .whitespacesAndNewlines)
+        let t = turn.translation.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !(s.isEmpty && t.isEmpty) else { return nil }
+        return TranscriptBubble(
+            id: turn.id, speaker: speaker, source: s, translation: t,
+            translationLost: false, startedAt: turn.startedAt,
+            committedAt: turn.lastSourceAt ?? turn.lastTranslationAt ?? turn.startedAt,
             isLive: true)
     }
 
-    /// Time-driven commit: a speaker whose streams have gone quiet for
-    /// `pauseSeconds` freezes as a segment. Call ~1/s from the view.
-    public func tick(now: Date) {
-        for (speaker, seg) in Array(live) where isQuiet(seg, now: now, for: config.pauseSeconds) {
-            commit(speaker, seg, now: now)   // snapshot: commit() mutates `live`
-        }
+    private func defaultSourceLang(_ speaker: Speaker) -> Language {
+        guard let p = currentLanguagePair else { return .en }
+        return speaker == .me ? p.mine : p.peer   // original is the speaker's own language
+    }
+    private func defaultTranslationLang(_ speaker: Speaker) -> Language {
+        guard let p = currentLanguagePair else { return .en }
+        return speaker == .me ? p.peer : p.mine
     }
 
-    private func isQuiet(_ seg: Segment, now: Date, for seconds: TimeInterval) -> Bool {
-        let last = [seg.lastSourceAt, seg.lastTranslationAt].compactMap { $0 }.max()
-        guard let last else { return false }
-        return now.timeIntervalSince(last) >= seconds
-    }
-
-    /// Freeze the WHOLE segment as ONE bubble (source↔translation as a unit —
-    /// the same speech span) and reset the speaker's live segment. The bubble
-    /// reuses the live segment's `id`, so the freeze reads as an in-place lock
-    /// (not a delete+insert) to the diffing view. `translationLost` marks a
-    /// segment that sealed with a source but no translation.
-    private func commit(_ speaker: Speaker, _ seg: Segment, now: Date) {
-        let source = seg.source.trimmingCharacters(in: .whitespacesAndNewlines)
-        let translation = seg.translation.trimmingCharacters(in: .whitespacesAndNewlines)
-        live[speaker] = nil
-        guard !(source.isEmpty && translation.isEmpty) else { return }
-        frozen.append(TranscriptBubble(
-            id: seg.id, speaker: speaker, source: source, translation: translation,
-            translationLost: translation.isEmpty && !source.isEmpty,
-            startedAt: seg.startedAt, committedAt: now, isLive: false))
-        if frozen.count > config.historyCap { frozen.removeFirst(frozen.count - config.historyCap) }
-    }
-
-    public func clear() { live.removeAll(); frozen.removeAll() }
+    public func clear() { turns.removeAll(); frozen.removeAll() }
 }

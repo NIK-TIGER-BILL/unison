@@ -5,247 +5,237 @@ import Testing
 private func model(_ clock: FakeClock) -> TranscriptModel {
     let m = TranscriptModel(clock: clock)
     m.currentLanguagePair = LanguagePair(mine: .ru, peer: .en)
-    m.config.pauseSeconds = 2   // small threshold for fast, deterministic tests
+    m.config.pauseSeconds = 2   // small threshold for fast, deterministic finalize
     return m
 }
 
-@MainActor @Test func model_defaultPauseSeconds_isBig() {
-    #expect(TranscriptModel().config.pauseSeconds == 7)   // real pauses, not clause gaps
+@MainActor
+private func src(_ m: TranscriptModel, _ speaker: Speaker, _ text: String, _ lang: Language) {
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: speaker, kind: .original,
+                             text: text, isFinal: false, language: lang))
+}
+@MainActor
+private func tr(_ m: TranscriptModel, _ speaker: Speaker, _ text: String, _ lang: Language) {
+    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: speaker, kind: .translated,
+                             text: text, isFinal: false, language: lang))
 }
 
-@MainActor @Test func model_accumulatesLiveSegmentPerSpeaker() {
+@MainActor @Test func model_defaultPause_isFour() {
+    #expect(TranscriptModel().config.pauseSeconds == 4)   // real pauses, not clause gaps
+}
+
+// A still-forming sentence (no terminator) is one LIVE bubble; nothing frozen.
+@MainActor @Test func model_formingSentence_isLiveNothingFrozen() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                             text: "Hello there", isFinal: false, language: .en))
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
-                             text: "Привет", isFinal: false, language: .ru))
+    src(m, .peer, "Hello there", .en)
+    tr(m, .peer, "Привет", .ru)
     let b = m.bubbles
     #expect(b.count == 1)
     #expect(b[0].isLive == true)
-    #expect(b[0].source == "Hello there")
-    #expect(b[0].translation == "Привет")
+    #expect(b[0].source == "Hello there" && b[0].translation == "Привет")
     #expect(b[0].speaker == .peer)
 }
 
-@MainActor @Test func model_pauseFreezesSegment_andResets() {
+// A sentence complete on BOTH sides seals IMMEDIATELY (frozen) — no pause,
+// no accumulate-then-split; the next forming sentence is the live tail.
+@MainActor @Test func model_completeSentence_sealsProactively() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                             text: "Hello there", isFinal: false, language: .en))
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
-                             text: "Привет", isFinal: false, language: .ru))
-    // Both streams quiet for > pauseSeconds → segment freezes on tick.
-    clock.advance(by: 3)
-    m.tick(now: clock.now())
-    #expect(m.bubbles.count == 1)
-    #expect(m.bubbles[0].isLive == false)
-    // A new utterance opens a fresh segment (no carried state).
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                             text: "How are you", isFinal: false, language: .en))
+    src(m, .peer, "First one. Second", .en)   // "First one." done, "Second" forming
+    tr(m, .peer, "Первое. Второе", .ru)
     let b = m.bubbles
     #expect(b.count == 2)
-    #expect(b[1].isLive == true)
-    #expect(b[1].source == "How are you")
-    #expect(b[0].id != b[1].id)
+    #expect(b[0].isLive == false)             // sealed, immutable
+    #expect(b[0].source == "First one." && b[0].translation == "Первое.")
+    #expect(b[1].isLive == true)              // the forming tail
+    #expect(b[1].source == "Second" && b[1].translation == "Второе")
 }
 
-@MainActor @Test func model_multiSentenceSegment_freezesAsOneWholeBubble() {
+// The translation lags: a completed SOURCE sentence waits in the live tail
+// until its translation lands, THEN seals — no wrong pairing.
+@MainActor @Test func model_translationLag_sealsWhenTranslationCatchesUp() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
-    // Several sentences in one uninterrupted turn — NO sentence splitting; the
-    // whole segment freezes as ONE bubble.
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                             text: "First one. Second one now.", isFinal: false, language: .en))
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
-                             text: "Первое. Второе теперь.", isFinal: false, language: .ru))
+    src(m, .peer, "First one. Second one.", .en)   // 2 complete source sentences
+    tr(m, .peer, "Первое.", .ru)                    // only 1 translation sentence so far
+    #expect(m.bubbles.filter { !$0.isLive }.count == 1)      // only pair 0 sealed
+    #expect(m.bubbles.first { $0.isLive }?.source == "Second one.")   // pair 1 waits
+    tr(m, .peer, " Второе.", .ru)                   // translation catches up
+    let sealed = m.bubbles.filter { !$0.isLive }
+    #expect(sealed.count == 2)
+    #expect(sealed[1].source == "Second one." && sealed[1].translation == "Второе.")
+}
+
+// Multiple sentences in one turn become SEPARATE bubbles as each completes.
+@MainActor @Test func model_multiSentenceTurn_sealsEachSentence() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    src(m, .peer, "First one. Second one now.", .en)
+    tr(m, .peer, "Первое. Второе теперь.", .ru)
     clock.advance(by: 3); m.tick(now: clock.now())
     let b = m.bubbles.filter { !$0.isLive }
-    #expect(b.count == 1)
-    #expect(b[0].source == "First one. Second one now.")
-    #expect(b[0].translation == "Первое. Второе теперь.")
+    #expect(b.count == 2)
+    #expect(b[0].source == "First one." && b[0].translation == "Первое.")
+    #expect(b[1].source == "Second one now." && b[1].translation == "Второе теперь.")
 }
 
-// A long CONTINUOUS turn (well under the runaway guard) stays ONE growing
-// bubble — no length-based chopping. The old 240-char cap sealed it mid-turn,
-// which read as "splitting". Uses the default guard (must be generous).
-@MainActor @Test func model_longContinuousTurn_staysOneBubble() {
+// A pause finalizes the tail (the last partial sentence) as a bubble.
+@MainActor @Test func model_pause_finalizesTail() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
-    // ~450 chars across 3 chunks — past the OLD 240 cap, well under the guard.
-    for _ in 0..<3 {
-        m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                                 text: String(repeating: "word ", count: 30), isFinal: false, language: .en))
-    }
-    #expect(m.bubbles.filter { !$0.isLive }.isEmpty)      // nothing sealed by length
-    #expect(m.bubbles.count == 1 && m.bubbles[0].isLive)  // one growing bubble
+    src(m, .peer, "No terminator here", .en)
+    tr(m, .peer, "Без точки", .ru)
+    #expect(m.bubbles.allSatisfy { $0.isLive })     // nothing sealed (no complete sentence)
+    clock.advance(by: 3); m.tick(now: clock.now())
+    let b = m.bubbles
+    #expect(b.count == 1 && b[0].isLive == false)   // tail finalized
+    #expect(b[0].source == "No terminator here" && b[0].translation == "Без точки")
 }
 
-@MainActor @Test func model_maxLength_forcesCommit_noInfiniteBubble() {
+// The other speaker's `.original` (voice) finalizes the current speaker at once.
+@MainActor @Test func model_interruption_finalizesPreviousSpeaker() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
-    m.config.maxSegmentChars = 40
-    // No punctuation, keeps growing.
-    let chunk = "word word word word word word word "
-    for _ in 0..<4 {
-        m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                                 text: chunk, isFinal: false, language: .en))
-        m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
-                                 text: chunk, isFinal: false, language: .en))
-    }
-    // No pause; but the segment must have been force-sealed at least once.
-    #expect(m.bubbles.contains { !$0.isLive })
-    #expect(m.bubbles.allSatisfy { $0.source.count <= 40 + chunk.count })
+    src(m, .peer, "Peer talking", .en)
+    clock.advance(by: 1)
+    src(m, .me, "Я перебиваю", .ru)
+    let b = m.bubbles
+    #expect(b.count == 2)
+    #expect(b[0].speaker == .peer && b[0].isLive == false)   // sealed by the interruption
+    #expect(b[1].speaker == .me && b[1].isLive == true)
 }
 
-@MainActor @Test func model_translationNeverArrives_commitsWithLostMarker() {
+// A lagging translation (the other speaker's `.translated`) is NOT an interrupt.
+@MainActor @Test func model_laggingTranslation_doesNotInterrupt() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                             text: "Hello there.", isFinal: false, language: .en))
-    // Translation never comes; after lag timeout, commit source-only.
-    clock.advance(by: 6); m.tick(now: clock.now())
+    src(m, .me, "Я говорю", .ru)
+    clock.advance(by: 1)
+    tr(m, .peer, "peer translation", .en)
+    #expect(m.bubbles.first { $0.speaker == .me }?.isLive == true)
+}
+
+// translationLost: a turn finalized with a source but no translation.
+@MainActor @Test func model_translationNeverArrives_finalizesLost() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    src(m, .peer, "Hello there.", .en)
+    clock.advance(by: 3); m.tick(now: clock.now())
     let b = m.bubbles.filter { !$0.isLive }
     #expect(b.count == 1)
     #expect(b[0].source == "Hello there.")
-    #expect(b[0].translation.isEmpty)
-    #expect(b[0].translationLost == true)
+    #expect(b[0].translation.isEmpty && b[0].translationLost == true)
 }
 
-@MainActor @Test func model_mismatchedSentenceCounts_stayWholeSegment() {
+// A within-turn sentence mismatch does NOT poison the next turn (reset at pause).
+@MainActor @Test func model_mismatchTurn_doesNotDriftNext() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
-    // Source: 2 sentences; translation merged into 1 → counts differ.
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                             text: "First one. Second one.", isFinal: false, language: .en))
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
-                             text: "Первое и второе вместе.", isFinal: false, language: .ru))
+    src(m, .peer, "A one. B two.", .en)      // 2 source sentences…
+    tr(m, .peer, "Оба вместе.", .ru)          // …translation merged into 1
+    clock.advance(by: 3); m.tick(now: clock.now())   // finalize turn 1 (bounded mispair)
+    src(m, .peer, "Clean now.", .en)
+    tr(m, .peer, "Чисто теперь.", .ru)
     clock.advance(by: 3); m.tick(now: clock.now())
     let b = m.bubbles.filter { !$0.isLive }
-    #expect(b.count == 1)   // NOT split into a wrong pair
-    #expect(b[0].source == "First one. Second one.")
-    #expect(b[0].translation == "Первое и второе вместе.")
+    #expect(b.last?.source == "Clean now.")
+    #expect(b.last?.translation == "Чисто теперь.")   // correct, no carryover
 }
 
-// A bad/mismatched segment must NOT poison the next one — each segment is
-// independent (pause resets alignment).
-@MainActor @Test func model_badSegment_doesNotDriftNext() {
+// Abbreviations don't seal a sentence prematurely ("и т.д." is not a boundary).
+@MainActor @Test func model_abbreviation_doesNotSealMidSentence() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                             text: "First one. Second one.", isFinal: false, language: .en))
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
-                             text: "Первое и второе.", isFinal: false, language: .ru))
-    clock.advance(by: 3); m.tick(now: clock.now())
-    // New, clean segment.
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                             text: "All good now.", isFinal: false, language: .en))
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
-                             text: "Теперь всё хорошо.", isFinal: false, language: .ru))
-    clock.advance(by: 3); m.tick(now: clock.now())
-    let b = m.bubbles.filter { !$0.isLive }
-    #expect(b.last?.source == "All good now.")
-    #expect(b.last?.translation == "Теперь всё хорошо.")   // correctly paired, no carryover
+    src(m, .peer, "We support this and", .en)
+    tr(m, .peer, "Мы поддерживаем это и т.д. Это", .ru)   // "и т.д." mid-sentence, "Это" starts next
+    // Russian NLTokenizer keeps "и т.д." whole; only the real boundary seals —
+    // but the source side has no complete sentence yet, so nothing seals.
+    #expect(m.bubbles.filter { !$0.isLive }.isEmpty)
 }
 
-@MainActor @Test func model_ordersBubblesByTime_acrossSpeakers() {
+// CJK chunks join without a spurious space.
+@MainActor @Test func model_cjkChunks_joinWithoutSpuriousSpace() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original, text: "Hi.", isFinal: false, language: .en))
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated, text: "Привет.", isFinal: false, language: .ru))
-    clock.advance(by: 3); m.tick(now: clock.now())
+    src(m, .peer, "今天天气", .zh)
+    src(m, .peer, "很好", .zh)   // no terminator → stays live
+    #expect(m.bubbles.first?.source == "今天天气很好")
+}
+
+// Cumulative restatement replaces, not appends.
+@MainActor @Test func model_cumulativeRestatement_replacesNotAppends() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    src(m, .peer, "Hello", .en)
+    src(m, .peer, "Hello world", .en)
+    #expect(m.bubbles.first?.source == "Hello world")
+}
+
+// Bubbles order by turn start across speakers.
+@MainActor @Test func model_ordersBubblesByTurnStart_acrossSpeakers() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    src(m, .peer, "Hi.", .en); tr(m, .peer, "Привет.", .ru)   // seals
     clock.advance(by: 1)
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .me, kind: .original, text: "Да.", isFinal: false, language: .ru))
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .me, kind: .translated, text: "Yes.", isFinal: false, language: .en))
-    clock.advance(by: 3); m.tick(now: clock.now())
+    src(m, .me, "Да.", .ru); tr(m, .me, "Yes.", .en)          // seals
     let b = m.bubbles
     #expect(b.count == 2)
     #expect(b[0].speaker == .peer && b[1].speaker == .me)
 }
 
-@MainActor @Test func model_cumulativeRestatement_replacesNotAppends() {
+// Runaway guard: punctuation-less speech can't seal, so it force-finalizes
+// rather than growing one bubble forever.
+@MainActor @Test func model_punctuationlessRunaway_forceFinalizes() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original, text: "Hello", isFinal: false, language: .en))
-    // Some models re-send the cumulative transcript: "Hello world" contains "Hello".
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original, text: "Hello world", isFinal: false, language: .en))
-    #expect(m.bubbles.first?.source == "Hello world")   // replaced, not "Hello Hello world"
+    m.config.maxTailChars = 40
+    let chunk = "word word word word word word word "
+    for _ in 0..<4 {
+        src(m, .peer, chunk, .en)
+        tr(m, .peer, chunk, .en)
+    }
+    #expect(m.bubbles.contains { !$0.isLive })                      // force-sealed at least once
+    #expect(m.bubbles.allSatisfy { $0.source.count <= 40 + chunk.count })
 }
 
-@MainActor @Test func model_liveBubbleId_isStableIntoFrozen() {
-    let clock = FakeClock(now: epochDate(0))
-    let m = model(clock)
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                             text: "One whole thought.", isFinal: false, language: .en))
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
-                             text: "Одна цельная мысль.", isFinal: false, language: .ru))
-    let liveId = m.bubbles.first?.id
-    clock.advance(by: 3); m.tick(now: clock.now())
-    let frozen = m.bubbles.filter { !$0.isLive }
-    #expect(frozen.count == 1)
-    #expect(frozen.first?.id == liveId)   // freeze is an in-place lock, not delete+insert
-}
-
-@MainActor @Test func model_cjkChunks_joinWithoutSpuriousSpace() {
-    let clock = FakeClock(now: epochDate(0))
-    let m = model(clock)
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                             text: "今天天气", isFinal: false, language: .zh))
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                             text: "很好。", isFinal: false, language: .zh))
-    #expect(m.bubbles.first?.source == "今天天气很好。")   // no spurious inter-chunk space
-}
-
+// History cap trims oldest sealed bubbles.
 @MainActor @Test func model_historyCap_trimsOldest() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
     m.config.historyCap = 3
     for i in 0..<6 {
-        m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                                 text: "Line \(i).", isFinal: false, language: .en))
-        m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
-                                 text: "Строка \(i).", isFinal: false, language: .ru))
-        clock.advance(by: 3); m.tick(now: clock.now())
+        src(m, .peer, "Line \(i).", .en); tr(m, .peer, "Строка \(i).", .ru)   // each seals
     }
     let frozen = m.bubbles.filter { !$0.isLive }
-    #expect(frozen.count == 3)                    // capped
-    #expect(frozen.first?.source == "Line 3.")    // oldest three dropped
+    #expect(frozen.count == 3)
+    #expect(frozen.first?.source == "Line 3.")   // 0,1,2 dropped
 }
 
-@MainActor @Test func model_interruption_freezesPreviousSpeaker() {
+// A sealed sentence keeps a stable id (in-place lock, not delete+insert).
+@MainActor @Test func model_sealedSentence_hasStableIdWhileTailContinues() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                             text: "Peer talking", isFinal: false, language: .en))
+    src(m, .peer, "First one. Second", .en)
+    tr(m, .peer, "Первое. Второе", .ru)
+    let sealedId = m.bubbles.first { !$0.isLive }?.id
+    src(m, .peer, " more", .en)   // tail grows; the sealed bubble must not change id
+    #expect(m.bubbles.first { !$0.isLive }?.id == sealedId)
+}
+
+// Quick handoff: peer started first, so it stays ABOVE me even after me speaks.
+@MainActor @Test func model_quickHandoff_earlierSpeakerStaysAbove() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    src(m, .peer, "Peer.", .en); tr(m, .peer, "Пир.", .ru)   // seals at t=0
     clock.advance(by: 1)
-    // me interrupts → peer's bubble seals IMMEDIATELY (not waiting for a pause).
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .me, kind: .original,
-                             text: "Я перебиваю", isFinal: false, language: .ru))
+    src(m, .me, "Я.", .ru); tr(m, .me, "Me.", .en)           // seals at t=1
     let b = m.bubbles
-    #expect(b.count == 2)
-    #expect(b[0].speaker == .peer && b[0].isLive == false)   // frozen by the interruption
-    #expect(b[1].speaker == .me && b[1].isLive == true)
+    #expect(b[0].speaker == .peer && b[1].speaker == .me)
 }
 
-// A lagging translation of the SAME turn (the other speaker's `.translated`)
-// must NOT be mistaken for an interruption.
-@MainActor @Test func model_laggingTranslation_doesNotInterrupt() {
-    let clock = FakeClock(now: epochDate(0))
-    let m = model(clock)
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .me, kind: .original,
-                             text: "Я говорю", isFinal: false, language: .ru))
-    clock.advance(by: 1)
-    // peer's TRANSLATION arrives (kind .translated) — not a new turn.
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
-                             text: "peer translation", isFinal: false, language: .en))
-    // me's segment stays live (not frozen by a translation delta).
-    #expect(m.bubbles.first { $0.speaker == .me }?.isLive == true)
-}
-
-// End-to-end regression: the real captured Gemini timeline from the spec §2
-// (en→ru, real audio, real pace) — two sentences streamed with the translation
-// lagging ~0.5–1 s, then a ~5 s pause. It must pair source↔translation as a
-// unit and split into two correctly-aligned bubbles on the pause.
+// End-to-end regression: the recorded Gemini timeline (spec §2) seals into two
+// correctly-paired sentence bubbles as each completes.
 @MainActor @Test func model_recordedGeminiTimeline_pairsCorrectly() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
@@ -260,29 +250,9 @@ private func model(_ clock: FakeClock) -> TranscriptModel {
     at(7.536, .original, " Then we", .en)
     at(9.598, .original, " make it more complex.", .en)
     at(10.278, .translated, " Затем мы делаем ее более сложной.", .ru)
-    clock.set(epochDate(14.0)); m.tick(now: clock.now())   // pause → commit
+    clock.set(epochDate(14.0)); m.tick(now: clock.now())
     let b = m.bubbles.filter { !$0.isLive }
-    #expect(b.count == 1)   // one whole turn, NOT split by sentence
-    #expect(b[0].source.contains("simple idea") && b[0].source.contains("more complex"))
-    #expect(b[0].translation.contains("простую идею") && b[0].translation.contains("сложной"))
-}
-
-// Quick cross-speaker handoff: peer starts, me replies while peer is still
-// live, then peer freezes. peer STARTED first, so it must stay ABOVE me — the
-// heterogeneous committedAt sort (freeze-instant vs. last-activity) would
-// wrongly float me's live reply on top (a visible reorder jump).
-@MainActor @Test func model_quickHandoff_earlierSpeakerStaysAbove() {
-    let clock = FakeClock(now: epochDate(0))
-    let m = model(clock)
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
-                             text: "Peer speaking", isFinal: false, language: .en))
-    clock.advance(by: 1)
-    m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .me, kind: .original,
-                             text: "Я отвечаю", isFinal: false, language: .ru))
-    clock.advance(by: 1)   // t=2: peer quiet 2 s → freezes; me quiet 1 s → stays live
-    m.tick(now: clock.now())
-    let b = m.bubbles
     #expect(b.count == 2)
-    #expect(b[0].speaker == .peer && b[0].isLive == false)  // started first → stays on top
-    #expect(b[1].speaker == .me && b[1].isLive == true)
+    #expect(b[0].source.contains("simple idea") && b[0].translation.contains("простую идею"))
+    #expect(b[1].source.contains("more complex") && b[1].translation.contains("сложной"))
 }

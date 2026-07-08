@@ -206,9 +206,9 @@ private func commitUtterance(_ model: TranscriptModel, _ clock: FakeClock, _ spe
     #expect(groups[0].bubbles[0].isLive == true)
 }
 
-// A multi-sentence turn commits as ONE whole bubble — no sentence splitting.
+// A multi-sentence turn seals as SEPARATE sentence bubbles (proactive).
 @MainActor
-@Test func transcriptVM_committedMultiSentenceTurn_isOneBubble() {
+@Test func transcriptVM_committedMultiSentenceTurn_isSentenceBubbles() {
     let clock = FakeClock(now: epochDate(0))
     let model = makeModel(clock)
     let vm = TranscriptViewModel(model: model)
@@ -218,7 +218,7 @@ private func commitUtterance(_ model: TranscriptModel, _ clock: FakeClock, _ spe
     model.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .translated,
                                  text: "Первое предложение. Второе предложение.", isFinal: false, language: .ru))
     clock.advance(by: 3); model.tick(now: clock.now())
-    #expect(vm.bubbleGroups.flatMap { $0.bubbles }.count == 1)
+    #expect(vm.bubbleGroups.flatMap { $0.bubbles }.count == 2)
 }
 
 // MARK: - translationLost surfacing
@@ -356,10 +356,10 @@ private func commitUtterance(_ model: TranscriptModel, _ clock: FakeClock, _ spe
     let vm = TranscriptViewModel(model: model)
     var nowSeconds = 1003.0
     vm.nowProvider = { epochDate(nowSeconds) }
-    commitUtterance(model, clock, .me, "Первое.", "First.")   // commits at 1003
+    commitUtterance(model, clock, .me, "Первое.", "First.")   // seals at 1000
     #expect(vm.bubbleGroups.flatMap { $0.bubbles }.count == 1)
-    nowSeconds = 1032                                          // 29 s after → within window
+    nowSeconds = 1029                                          // 29 s after seal → within window
     #expect(vm.bubbleGroups.flatMap { $0.bubbles }.count == 1)
-    nowSeconds = 1034                                          // 31 s after → expired
+    nowSeconds = 1031                                          // 31 s after seal → expired
     #expect(vm.bubbleGroups.isEmpty)
 }
