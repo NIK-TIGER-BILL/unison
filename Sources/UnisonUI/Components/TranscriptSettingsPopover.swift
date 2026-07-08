@@ -42,7 +42,7 @@ struct TranscriptSettingsPopover: View {
         }
         .padding(16)
         .frame(width: 280)
-        .liquidGlass(cornerRadius: 14)
+        .liquidGlassLive(cornerRadius: 14)
     }
 
     private func groupHead(title: String, value: String) -> some View {

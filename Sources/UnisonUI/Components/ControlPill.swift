@@ -113,7 +113,7 @@ public struct ControlPill: View {
         }
         .padding(.vertical, 6)
         .background(WindowDragHandle())
-        .liquidGlass(shape: Capsule())
+        .liquidGlassLive(shape: Capsule())
     }
 
     private var dotState: StatusDot.State {

@@ -173,7 +173,7 @@ public struct TranscriptView: View {
             }
             .padding(22)
             .frame(width: 340)
-            .liquidGlass(cornerRadius: 18)
+            .liquidGlassLive(cornerRadius: 18)
         }
     }
 }
