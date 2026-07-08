@@ -15,13 +15,19 @@ Every glass surface in the UI is rendered via one of two mechanisms:
 - **AppKit windows** (Onboarding, Settings, Diagnostic): wrap content in
   `GlassHostingViewController` → `NSGlassEffectView`. **Compositor-managed
   and live** — refreshes every frame as behind-window content moves.
-- **SwiftUI views** (transcript bubbles, control pill, primary button,
+- **SwiftUI views** (non-transcript glass: primary button, menubar
   popover): go through `.liquidGlass(...)` → `LiquidGlassPanel` →
-  `.glassEffect(in:)`. **Static between view-tree redraws** — Apple's
-  SwiftUI glass only re-samples when SwiftUI re-renders.
+  `.glassEffect(in:)`. **Static between view-tree redraws.**
+- **Transcript surfaces** (bubbles, control pill, settings popover, stop
+  modal): go through `.liquidGlassLive(...)` → `LiquidGlassLive` →
+  `NSGlassEffectView` behind the SwiftUI content. **Compositor-managed
+  and live** — re-samples the backdrop every frame, so bubbles keep
+  adapting as call content moves under them. Falls back to the static
+  `.liquidGlass` path under Reduce Transparency.
 
 The transcript window is the only one **without** panel-level glass — it's
-a transparent floating `NSPanel`; each bubble paints its own glass.
+a transparent floating `NSPanel`; the bubbles, control pill, settings
+popover, and stop modal each paint their own **live** glass.
 
 Corner radii must match the AppKit clip and the SwiftUI glass shape:
 
