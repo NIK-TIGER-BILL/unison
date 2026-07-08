@@ -49,9 +49,12 @@ public final class TranscriptModel {
         /// — real thinking pauses, not clause-level micro-gaps. Small pauses
         /// would chop one thought into many bubbles.
         public var pauseSeconds: TimeInterval = 7.0
-        /// Safety cap so a monologue with no pause can't grow forever. Rarely
-        /// hit; NOT a primary boundary (pauses / interruptions are).
-        public var maxSegmentChars: Int = 240
+        /// DISTANT runaway guard so a stuck/nonstop stream can't grow one
+        /// bubble to megabytes. ~4000 chars ≈ several MINUTES of unbroken
+        /// speech — a real thinking pause (7 s) lands long before this. NOT a
+        /// normal boundary: pauses / interruptions segment; this only stops a
+        /// pathological runaway.
+        public var maxSegmentChars: Int = 4000
         public var historyCap: Int = 40
         public init() {}
     }
@@ -81,7 +84,8 @@ public final class TranscriptModel {
             seg.lastTranslationAt = clock.now()
         }
         live[delta.speaker] = seg
-        // Safety cap only (see Config.maxSegmentChars) — never a primary boundary.
+        // Runaway guard only (see Config.maxSegmentChars) — a normal turn stays
+        // ONE growing bubble until a real pause or an interruption seals it.
         if seg.source.count >= config.maxSegmentChars || seg.translation.count >= config.maxSegmentChars {
             commit(delta.speaker, seg, now: clock.now())
         }

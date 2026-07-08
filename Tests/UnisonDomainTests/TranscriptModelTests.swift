@@ -66,6 +66,21 @@ private func model(_ clock: FakeClock) -> TranscriptModel {
     #expect(b[0].translation == "Первое. Второе теперь.")
 }
 
+// A long CONTINUOUS turn (well under the runaway guard) stays ONE growing
+// bubble — no length-based chopping. The old 240-char cap sealed it mid-turn,
+// which read as "splitting". Uses the default guard (must be generous).
+@MainActor @Test func model_longContinuousTurn_staysOneBubble() {
+    let clock = FakeClock(now: epochDate(0))
+    let m = model(clock)
+    // ~450 chars across 3 chunks — past the OLD 240 cap, well under the guard.
+    for _ in 0..<3 {
+        m.ingest(TranscriptDelta(entryId: freshUUID(), speaker: .peer, kind: .original,
+                                 text: String(repeating: "word ", count: 30), isFinal: false, language: .en))
+    }
+    #expect(m.bubbles.filter { !$0.isLive }.isEmpty)      // nothing sealed by length
+    #expect(m.bubbles.count == 1 && m.bubbles[0].isLive)  // one growing bubble
+}
+
 @MainActor @Test func model_maxLength_forcesCommit_noInfiniteBubble() {
     let clock = FakeClock(now: epochDate(0))
     let m = model(clock)
