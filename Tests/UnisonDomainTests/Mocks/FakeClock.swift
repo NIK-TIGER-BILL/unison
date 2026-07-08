@@ -30,4 +30,16 @@ public final class FakeClock: Clock, @unchecked Sendable {
         lock.unlock()
         for d in due { d.continuation.resume() }
     }
+
+    /// Jump to an absolute instant. Resumes any sleeps now due (only when
+    /// moving forward), mirroring `advance(by:)`.
+    public func set(_ date: Date) {
+        lock.lock()
+        let forward = date > current
+        current = date
+        let due = forward ? pending.filter { $0.deadline <= current } : []
+        if forward { pending.removeAll { $0.deadline <= current } }
+        lock.unlock()
+        for d in due { d.continuation.resume() }
+    }
 }

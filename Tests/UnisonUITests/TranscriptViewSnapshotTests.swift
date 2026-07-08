@@ -7,10 +7,20 @@ import Testing
 struct TranscriptViewSnapshotTests {
 
     private func makeVM(elapsed: TimeInterval? = nil) -> TranscriptViewModel {
-        let store = TranscriptStore()
-        let vm = TranscriptViewModel(store: store, orchestrator: nil)
+        let vm = TranscriptViewModel(model: TranscriptModel(), orchestrator: nil)
         vm.previewElapsedSeconds = elapsed
         return vm
+    }
+
+    /// Build a display bubble the way the VM maps a `TranscriptBubble`:
+    /// `.me` shows the original as primary; `.peer` shows the translation.
+    private func bubble(_ speaker: Speaker, original: String, translated: String,
+                        isLive: Bool = false, translationLost: Bool = false) -> DisplayBubble {
+        DisplayBubble(
+            id: UUID(), speaker: speaker,
+            primaryText: speaker == .me ? original : translated,
+            secondaryText: speaker == .me ? translated : original,
+            isLive: isLive, translationLost: translationLost, lastActivityAt: Date())
     }
 
     private func panel<V: View>(_ view: V, size: CGSize) -> some View {
@@ -39,58 +49,37 @@ struct TranscriptViewSnapshotTests {
 
     @Test func transcript_oneMeBubble() throws {
         let vm = makeVM(elapsed: 12)
-        let store = vm.store
-        store.currentLanguagePair = LanguagePair(mine: .ru, peer: .en)
-        let id = UUID()
-        store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .original, text: "Привет, как дела?", isFinal: true))
-        store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .translated, text: "Hello, how are you?", isFinal: true))
+        vm.previewBubbles = [bubble(.me, original: "Привет, как дела?", translated: "Hello, how are you?")]
         snapSmoke(panel(TranscriptView(vm: vm), size: SnapSize.transcript), size: SnapSize.transcript)
     }
 
     @Test func transcript_multiGroup() throws {
         let vm = makeVM(elapsed: 47)
-        let store = vm.store
-        store.currentLanguagePair = LanguagePair(mine: .ru, peer: .en)
-
-        let id1 = UUID()
-        store.apply(TranscriptDelta(entryId: id1, speaker: .me, kind: .original, text: "Привет, можем начать?", isFinal: true))
-        store.apply(TranscriptDelta(entryId: id1, speaker: .me, kind: .translated, text: "Hi there, can we start?", isFinal: true))
-
-        let id2 = UUID()
-        store.apply(TranscriptDelta(entryId: id2, speaker: .peer, kind: .original, text: "Of course, let's start the meeting.", isFinal: true))
-        store.apply(TranscriptDelta(entryId: id2, speaker: .peer, kind: .translated, text: "Конечно, давай начнём встречу.", isFinal: true))
-
-        let id3 = UUID()
-        store.apply(TranscriptDelta(entryId: id3, speaker: .me, kind: .original, text: "Отлично. Я подготовил слайды.", isFinal: true))
-        store.apply(TranscriptDelta(entryId: id3, speaker: .me, kind: .translated, text: "Great. I have prepared the slides.", isFinal: true))
-
+        vm.previewBubbles = [
+            bubble(.me, original: "Привет, можем начать?", translated: "Hi there, can we start?"),
+            bubble(.peer, original: "Of course, let's start the meeting.",
+                   translated: "Конечно, давай начнём встречу."),
+            bubble(.me, original: "Отлично. Я подготовил слайды.",
+                   translated: "Great. I have prepared the slides.")
+        ]
         snapSmoke(panel(TranscriptView(vm: vm), size: SnapSize.transcript), size: SnapSize.transcript)
     }
 
     @Test func transcript_liveTyping() throws {
         let vm = makeVM(elapsed: 9)
-        let store = vm.store
-        store.currentLanguagePair = LanguagePair(mine: .ru, peer: .en)
-        let id = UUID()
-        store.apply(TranscriptDelta(entryId: id, speaker: .peer, kind: .original, text: "Hi, let's meet tomorrow", isFinal: false))
-        store.apply(TranscriptDelta(entryId: id, speaker: .peer, kind: .translated, text: "Привет, давай встретимся", isFinal: false))
-        // No terminator yet + just applied → the feed derives this as the
-        // live (typing-dots) bubble automatically.
+        // No terminator yet + still forming → the live (typing-dots) bubble.
+        vm.previewBubbles = [bubble(.peer, original: "Hi, let's meet tomorrow",
+                                    translated: "Привет, давай встретимся", isLive: true)]
         snapSmoke(panel(TranscriptView(vm: vm), size: SnapSize.transcript), size: SnapSize.transcript)
     }
 
-    /// An entry that was mid-flight when the orchestrator entered
-    /// `.paused` / `.reconnecting` gets stamped with `translationAtRisk`.
-    /// The bubble renders an italic placeholder + exclamation icon
-    /// instead of the missing translated text — visual proof that the
-    /// user notices the gap.
+    /// A segment that committed with the translation missing renders an italic
+    /// placeholder + exclamation icon instead of the absent translated text —
+    /// visual proof that the user notices the gap.
     @Test func transcript_bubbleWithLostTranslation() throws {
         let vm = makeVM(elapsed: 14)
-        let store = vm.store
-        store.currentLanguagePair = LanguagePair(mine: .ru, peer: .en)
-        let id = UUID()
-        store.apply(TranscriptDelta(entryId: id, speaker: .me, kind: .original, text: "Привет, как дела?", isFinal: false))
-        store.markActiveEntriesAtRisk()
+        vm.previewBubbles = [bubble(.me, original: "Привет, как дела?", translated: "",
+                                    translationLost: true)]
         snapSmoke(panel(TranscriptView(vm: vm), size: SnapSize.transcript), size: SnapSize.transcript)
     }
 }

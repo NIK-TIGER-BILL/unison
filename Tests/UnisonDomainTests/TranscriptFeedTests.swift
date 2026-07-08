@@ -5,17 +5,9 @@ import Testing
 
 // MARK: - Helpers
 
-private func peerEntry(_ original: String, _ translated: String, at seconds: TimeInterval) -> TranscriptEntry {
-    TranscriptEntry(
-        id: freshUUID(),
-        speaker: .peer,
-        originalText: original,
-        translatedText: translated,
-        sourceLanguage: .en,
-        targetLanguage: .ru,
-        timestamp: epochDate(seconds),
-        lastActivityAt: epochDate(seconds)
-    )
+private func peerBubble(_ primary: String, isLive: Bool = false, at seconds: TimeInterval) -> DisplayBubble {
+    DisplayBubble(id: freshUUID(), speaker: .peer, primaryText: primary, secondaryText: "",
+                  isLive: isLive, translationLost: false, lastActivityAt: epochDate(seconds))
 }
 
 // MARK: - Whole-unit expiry
@@ -23,59 +15,59 @@ private func peerEntry(_ original: String, _ translated: String, at seconds: Tim
 // A frozen bubble stays for its full `window`, then vanishes as ONE unit.
 @MainActor
 @Test func feed_frozenBubble_expiresWholeAfterWindow() {
-    let feed = TranscriptFeed(config: .init(finalizeAfter: 2.5, window: 30, maxBubbles: 6))
-    let e = peerEntry("Hi.", "Привет.", at: 0) // completed → freezes at t=0
-    #expect(feed.visibleBubbles(entries: [e], now: epochDate(0)).count == 1)
-    #expect(feed.visibleBubbles(entries: [e], now: epochDate(29)).count == 1)
-    #expect(feed.visibleBubbles(entries: [e], now: epochDate(31)).isEmpty)
+    let feed = TranscriptFeed(config: .init(window: 30, maxBubbles: 6))
+    let b = peerBubble("Привет.", at: 0) // committed at t=0
+    #expect(feed.visible([b], now: epochDate(0)).count == 1)
+    #expect(feed.visible([b], now: epochDate(29)).count == 1)
+    #expect(feed.visible([b], now: epochDate(31)).isEmpty)
 }
 
 // MARK: - Live bubble
 
 @MainActor
 @Test func feed_liveBubble_neverExpiresWhileActive() {
-    let feed = TranscriptFeed(config: .init(finalizeAfter: 2.5, window: 30, maxBubbles: 6))
-    let e = peerEntry("Hi there", "Привет", at: 0) // incomplete translation → live
-    let v = feed.visibleBubbles(entries: [e], now: epochDate(2)) // 2 < 2.5 → still live
+    let feed = TranscriptFeed(config: .init(window: 30, maxBubbles: 6))
+    let b = peerBubble("Привет", isLive: true, at: 0) // live
+    let v = feed.visible([b], now: epochDate(100))     // long past window, but live
     #expect(v.count == 1)
     #expect(v[0].isLive == true)
 }
 
-// MARK: - Count cap
-
-// Regression (review round 2): a bubble that froze with a lagging
-// translation, then is revived by a late `.translated` delta and re-settles,
-// must NOT vanish from a stale freeze time — its lifetime resets on the new
-// activity. (This is the exact "bubble disappears / re-initialises" failure
-// the model is meant to prevent.)
+// A bubble whose last activity is recent stays visible regardless of an
+// earlier freeze — lifetime is measured from `lastActivityAt`, so a bubble the
+// model re-committed with a fresh timestamp can't vanish against a stale one.
 @MainActor
-@Test func feed_lateTranslationRevivesBubble_withFreshLifetime() {
-    let feed = TranscriptFeed(config: .init(finalizeAfter: 2.5, window: 30, maxBubbles: 6))
-    let id = freshUUID()
-    func entry(_ translated: String, activeAt seconds: TimeInterval) -> TranscriptEntry {
-        TranscriptEntry(
-            id: id, speaker: .peer, originalText: "Hi there.", translatedText: translated,
-            sourceLanguage: .en, targetLanguage: .ru,
-            timestamp: epochDate(0), lastActivityAt: epochDate(seconds))
-    }
-    // Translation incomplete + run quiet → frozen around t=5.
-    _ = feed.visibleBubbles(entries: [entry("Прив", activeAt: 0)], now: epochDate(5))
-    #expect(feed.visibleBubbles(entries: [entry("Прив", activeAt: 0)], now: epochDate(29)).count == 1)
-    // A late translation lands at t=40 (> window since first freeze) and
-    // completes the sentence. The bubble must still be visible (fresh
-    // lifetime), re-frozen — not expired against the old freeze time.
-    let v = feed.visibleBubbles(entries: [entry("Привет.", activeAt: 40)], now: epochDate(41))
+@Test func feed_freshLastActivity_staysVisible() {
+    let feed = TranscriptFeed(config: .init(window: 30, maxBubbles: 6))
+    let revived = peerBubble("Привет.", at: 40)
+    let v = feed.visible([revived], now: epochDate(41))
     #expect(v.count == 1)
     #expect(v[0].isLive == false)
 }
 
+// MARK: - Count cap
+
 @MainActor
 @Test func feed_capsToMaxBubbles_keepingNewest() {
-    let feed = TranscriptFeed(config: .init(finalizeAfter: 2.5, window: 30, maxBubbles: 6))
-    // Eight finished utterances → eight bubbles; the cap keeps the last six.
-    let entries = (0..<8).map { i in peerEntry("S\(i).", "П\(i).", at: 0) }
-    let v = feed.visibleBubbles(entries: entries, now: epochDate(0))
+    let feed = TranscriptFeed(config: .init(window: 30, maxBubbles: 6))
+    // Eight frozen bubbles; the cap keeps the last six.
+    let bubbles = (0..<8).map { i in peerBubble("П\(i).", at: 0) }
+    let v = feed.visible(bubbles, now: epochDate(0))
     #expect(v.count == 6)
     #expect(v.first?.primaryText == "П2.") // П0, П1 dropped
     #expect(v.last?.primaryText == "П7.")
+}
+
+// The cap must NEVER drop a live bubble, even when it sorts to the front (a
+// long-running live segment started before a burst of frozen bubbles from the
+// other speaker). The actively-forming bubble must not vanish.
+@MainActor
+@Test func feed_capNeverDropsLiveBubble() {
+    let feed = TranscriptFeed(config: .init(window: 30, maxBubbles: 6))
+    var all: [DisplayBubble] = [peerBubble("live", isLive: true, at: 0)]  // front, oldest
+    for i in 0..<6 { all.append(peerBubble("f\(i).", at: 10)) }            // 6 newer frozen
+    let v = feed.visible(all, now: epochDate(11))
+    #expect(v.count == 6)
+    #expect(v.first?.primaryText == "live")            // live stayed at the front
+    #expect(v.filter { !$0.isLive }.count == 5)        // cap trimmed a FROZEN one instead
 }

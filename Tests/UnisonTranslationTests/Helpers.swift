@@ -38,9 +38,9 @@ func posixOperationCanceledError() -> Error {
     )
 }
 
-func decodeGeminiServerEvent(_ json: String) throws -> GeminiServerEvent {
+func decodeGeminiFrame(_ json: String) throws -> [GeminiServerEvent] {
     let data = json.data(using: .utf8)!
-    return try JSONDecoder().decode(GeminiServerEvent.self, from: data)
+    return try JSONDecoder().decode(GeminiServerFrame.self, from: data).events
 }
 
 /// Structural check on a Gemini setup payload: the transcription configs must
@@ -96,4 +96,18 @@ final class ParkedClock: UnisonDomain.Clock, @unchecked Sendable {
         lock.lock(); let ps = parked; parked = []; lock.unlock()
         ps.forEach { $0.resume() }
     }
+}
+
+/// Clock with a manually-advanced `now()` — lets a test drive the stream's
+/// pause-based `entryId` rotation deterministically. `sleep` is a no-op (the
+/// stream never sleeps; only the orchestrator's tick task does).
+final class ManualClock: UnisonDomain.Clock, @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Date
+    init(_ start: Date) { current = start }
+    func now() -> Date { lock.lock(); defer { lock.unlock() }; return current }
+    func advance(_ seconds: TimeInterval) {
+        lock.lock(); current = current.addingTimeInterval(seconds); lock.unlock()
+    }
+    func sleep(for seconds: TimeInterval) async throws {}
 }

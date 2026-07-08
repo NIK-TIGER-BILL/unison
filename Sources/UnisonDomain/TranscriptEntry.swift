@@ -57,12 +57,18 @@ public struct TranscriptDelta: Sendable, Equatable {
     public let kind: Kind
     public let text: String
     public let isFinal: Bool
+    /// BCP-47-derived language of this chunk (source language for `.original`,
+    /// target for `.translated`), when the stream reports it. Drives
+    /// language-aware sentence segmentation downstream.
+    public let language: Language?
 
-    public init(entryId: UUID, speaker: Speaker, kind: Kind, text: String, isFinal: Bool) {
+    public init(entryId: UUID, speaker: Speaker, kind: Kind, text: String,
+                isFinal: Bool, language: Language? = nil) {
         self.entryId = entryId
         self.speaker = speaker
         self.kind = kind
         self.text = text
         self.isFinal = isFinal
+        self.language = language
     }
 }
