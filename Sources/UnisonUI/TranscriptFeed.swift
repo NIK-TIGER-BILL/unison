@@ -22,15 +22,27 @@ final class TranscriptFeed {
 
     /// Window a pre-built bubble list (mapped from `TranscriptModel`): keep
     /// every live bubble and every frozen bubble whose last activity is within
-    /// `window`, capped to the last `maxBubbles`. Per-bubble filter → removal
-    /// is always whole; a live bubble always stays.
+    /// `window`, capped to `maxBubbles`. Removal is always whole. A live bubble
+    /// ALWAYS stays — the cap trims only the oldest FROZEN bubbles. (A naive
+    /// `suffix(maxBubbles)` would drop a long-running live segment, which sorts
+    /// to the front by `startedAt`, once the other speaker commits enough newer
+    /// frozen bubbles — making the actively-forming bubble vanish.)
     func visible(_ all: [DisplayBubble], now: Date) -> [DisplayBubble] {
-        var visible = all.filter { bubble in
+        let filtered = all.filter { bubble in
             bubble.isLive || now.timeIntervalSince(bubble.lastActivityAt) <= config.window
         }
-        if visible.count > config.maxBubbles {
-            visible = Array(visible.suffix(config.maxBubbles))
+        guard filtered.count > config.maxBubbles else { return filtered }
+        let liveCount = filtered.lazy.filter(\.isLive).count
+        var frozenSlots = max(0, config.maxBubbles - liveCount)
+        var keep = Set<UUID>()
+        for bubble in filtered.reversed() {   // newest → oldest
+            if bubble.isLive {
+                keep.insert(bubble.id)
+            } else if frozenSlots > 0 {
+                keep.insert(bubble.id)
+                frozenSlots -= 1
+            }
         }
-        return visible
+        return filtered.filter { keep.contains($0.id) }
     }
 }

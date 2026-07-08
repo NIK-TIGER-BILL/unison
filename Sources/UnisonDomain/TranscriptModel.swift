@@ -62,6 +62,11 @@ public final class TranscriptModel {
             seg.lastTranslationAt = clock.now()
         }
         live[delta.speaker] = seg
+        // Safety valve: a segment with no pause and no punctuation can't grow
+        // forever. Rare (~240 pause-free chars ≈ 15–20 s of unbroken speech);
+        // the residual cost is that a translation still in flight when this
+        // fires seals partial and its tail opens the next segment — one coarser
+        // bubble, not a cross-segment drift.
         if seg.source.count >= config.maxSegmentChars || seg.translation.count >= config.maxSegmentChars {
             commit(delta.speaker, seg, now: clock.now())
         }

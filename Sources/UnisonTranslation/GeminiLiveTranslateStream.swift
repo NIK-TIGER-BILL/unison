@@ -125,6 +125,14 @@ public actor GeminiLiveTranslateStream: TranslationStream {
         for event in frame.events { apply(event: event) }
     }
 
+    /// Map a Gemini `languageCode` (BCP-47-ish) to our `Language`, tolerating a
+    /// region/script subtag ("en-US" → en, "zh-Hans" → zh). Unmatched codes →
+    /// nil (downstream falls back to the pair-derived default language).
+    private static func language(from code: String?) -> Language? {
+        guard let code else { return nil }
+        return Language(rawValue: String(code.prefix { $0 != "-" }))
+    }
+
     private func apply(event: GeminiServerEvent) {
         switch event {
         case .setupComplete:
@@ -146,12 +154,12 @@ public actor GeminiLiveTranslateStream: TranslationStream {
             lastInputAt = now
             transcriptContinuation.yield(TranscriptDelta(
                 entryId: currentEntryId, speaker: speaker, kind: .original, text: text,
-                isFinal: false, language: lang.flatMap(Language.init(rawValue:))))
+                isFinal: false, language: Self.language(from: lang)))
         case .outputTranscript(let text, let lang):
             receivedAnyData = true
             transcriptContinuation.yield(TranscriptDelta(
                 entryId: currentEntryId, speaker: speaker, kind: .translated, text: text,
-                isFinal: false, language: lang.flatMap(Language.init(rawValue:))))
+                isFinal: false, language: Self.language(from: lang)))
         case .turnComplete:
             // No longer used for pairing (TranscriptModel segments on pause).
             // Kept only as a turn-boundary diagnostic.

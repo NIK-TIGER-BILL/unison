@@ -116,6 +116,17 @@ import UnisonDomain
         #expect(nextOriginal?.entryId != original?.entryId)  // rotated after the pause
     }
 
+    // A region/script-tagged languageCode ("en-US", "zh-Hans") maps to the bare
+    // Language via its primary subtag, rather than failing to nil.
+    @Test func transcriptDelta_regionTaggedLanguageCode_normalizes() async throws {
+        let ws = FakeWSClient()
+        let stream = GeminiLiveTranslateStream(apiKey: "AQ.k", client: ws, clock: SystemClock(), speaker: .peer)
+        try await stream.connect(target: .ru)
+        var it = stream.transcripts.makeAsyncIterator()
+        ws.push(.text(#"{"serverContent":{"inputTranscription":{"text":"hi","languageCode":"en-US"}}}"#))
+        #expect(await it.next()?.language == .en)
+    }
+
     @Test func decodesAudioFromBinaryFrame() async throws {
         // Gemini delivers serverContent as BINARY WebSocket frames (not text
         // like OpenAI); handle(_:) must decode `.data` frames too, else the

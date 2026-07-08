@@ -57,3 +57,17 @@ private func peerBubble(_ primary: String, isLive: Bool = false, at seconds: Tim
     #expect(v.first?.primaryText == "П2.") // П0, П1 dropped
     #expect(v.last?.primaryText == "П7.")
 }
+
+// The cap must NEVER drop a live bubble, even when it sorts to the front (a
+// long-running live segment started before a burst of frozen bubbles from the
+// other speaker). The actively-forming bubble must not vanish.
+@MainActor
+@Test func feed_capNeverDropsLiveBubble() {
+    let feed = TranscriptFeed(config: .init(window: 30, maxBubbles: 6))
+    var all: [DisplayBubble] = [peerBubble("live", isLive: true, at: 0)]  // front, oldest
+    for i in 0..<6 { all.append(peerBubble("f\(i).", at: 10)) }            // 6 newer frozen
+    let v = feed.visible(all, now: epochDate(11))
+    #expect(v.count == 6)
+    #expect(v.first?.primaryText == "live")            // live stayed at the front
+    #expect(v.filter { !$0.isLive }.count == 5)        // cap trimmed a FROZEN one instead
+}

@@ -1622,6 +1622,11 @@ public final class TranslationOrchestrator {
         reconnectTasks.removeAll()
         transcriptTickTask?.cancel()
         transcriptTickTask = nil
+        // Clear the live-display model so a manual transcript re-open while idle
+        // doesn't show the prior session's still-"typing" tail. The history
+        // `transcript` store is intentionally NOT cleared here (archiving reads
+        // it; a fresh start() clears both).
+        transcriptModel.clear()
         // Drop the per-speaker ring buffers entirely on stop — a fresh
         // start() re-allocates them. Keeping the instance around past
         // session boundaries would leak stale audio into a later
