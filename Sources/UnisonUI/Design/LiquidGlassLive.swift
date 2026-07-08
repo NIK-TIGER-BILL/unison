@@ -52,11 +52,21 @@ final class LiquidGlassContainerView: NSView {
     override func layout() {
         super.layout()
         glass.frame = bounds
+        // Manually-created mask layers default to contentsScale 1.0 and do
+        // NOT auto-track the window scale — set it so the clipped silhouette
+        // stays crisp on Retina (matters for pill/popover/modal, which have
+        // no border to hide a soft edge).
+        maskLayer.contentsScale = window?.backingScaleFactor ?? 2.0
         // Пути SwiftUI — top-left origin; маски CALayer — bottom-left.
         // Flip по Y, чтобы верхне-тяжёлый хвост бабла лёг на верный край.
         let raw = pathProvider(bounds)
         var flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.height)
         maskLayer.path = raw.copy(using: &flip) ?? raw
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        needsLayout = true
     }
 }
 

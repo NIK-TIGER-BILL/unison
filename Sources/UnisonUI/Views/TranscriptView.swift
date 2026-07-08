@@ -85,9 +85,10 @@ public struct TranscriptView: View {
     // MARK: - Pill + popover
 
     private var controlPillWithPopover: some View {
-        // `GlassEffectContainer` groups the pill + settings popover
-        // into one rendering pass when both are on screen — per
-        // Apple's Liquid Glass guidance.
+        // Retained as a layout passthrough. The pill and settings popover
+        // moved to live `.liquidGlassLive` (AppKit NSGlassEffectView), so
+        // there's no SwiftUI `.glassEffect` pass left for this container to
+        // merge — pill and popover no longer visually merge.
         GlassEffectContainer {
             VStack(spacing: 12) {
                 if isSettingsOpen {

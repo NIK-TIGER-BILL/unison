@@ -36,6 +36,16 @@ struct LiquidGlassLiveTests {
         #expect(abs(bbox.height - 60) < 1.0)
     }
 
+    @Test func maskUsesBackingScaleForCrispCorners() {
+        // No window in the test → falls back to 2.0 so an offscreen mask
+        // isn't rasterized at 1x (which would soften the clipped corners).
+        let v = LiquidGlassContainerView(frame: NSRect(x: 0, y: 0, width: 100, height: 40))
+        v.needsLayout = true
+        v.layoutSubtreeIfNeeded()
+        let mask = v.layer?.mask as? CAShapeLayer
+        #expect(mask?.contentsScale == 2.0)
+    }
+
     @Test func maskFlipsAsymmetricShapeToCorrectEdge() {
         // UnevenRoundedRectangle carved ONLY at the SwiftUI top-leading
         // corner. SwiftUI is top-left/y-down; the CALayer mask is
