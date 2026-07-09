@@ -2,8 +2,8 @@ import SwiftUI
 import UnisonDomain
 
 /// Session-mode toggle at the top of the popover — Call / Listen.
-/// A single Liquid-Glass "chip" glides between the two halves on a
-/// spring, instead of each segment lighting its own background.
+/// A single Liquid-Glass "chip" glides between the two halves on an
+/// ease-out curve, instead of each segment lighting its own background.
 ///
 /// The chip is real, live glass (`NSGlassEffectView` via
 /// `.liquidGlassLive`) — a subtle white *tint* (not an opaque fill, which
@@ -12,18 +12,21 @@ import UnisonDomain
 /// label is white with a 1px dark shadow so it stays legible over the
 /// frosted chip even when it refracts bright call content — the same
 /// tinted-glass + shadowed-white-text recipe as the transcript `Bubble`.
-/// Positioning is done with
-/// `matchedGeometryEffect` against a per-segment anchor rather than a
-/// `GeometryReader`/`.alignmentGuide` measurement: both of those can
-/// drive the popover's auto-sizing `NSHostingView` into a layout-size
-/// recursion crash, and matched geometry needs no second layout pass
-/// (so it renders correctly in one synchronous offscreen pass). One
-/// chip instance is slaved to the selected anchor, so a single glass
-/// view survives the whole slide — no representable teardown mid-move.
+/// Under Reduce Transparency the glass resolves to `.identity`, so the
+/// chip draws a solid fallback fill to keep the selection visible.
+///
+/// Positioning is done with `matchedGeometryEffect` against a per-segment
+/// anchor rather than a `GeometryReader`/`.alignmentGuide` measurement:
+/// both of those can drive the popover's auto-sizing `NSHostingView` into
+/// a layout-size recursion crash, and matched geometry needs no second
+/// layout pass (so it renders correctly in one synchronous offscreen
+/// pass). One chip instance is slaved to the selected anchor, so a single
+/// glass view survives the whole slide — no representable teardown
+/// mid-move.
 ///
 /// Still hand-drawn rather than `Picker(.segmented)`, which carries
 /// macOS accent blue that clashes with the neutral palette. DESIGN.md
-/// §5.6. The third mode (Проверка / test) stays a separate header
+/// §5.4. The third mode (Проверка / test) stays a separate header
 /// button (`testButton` in `PopoverView`), so this picker remains
 /// binary for the two real-world routing modes.
 public struct SegmentedToggle: View {
@@ -49,23 +52,17 @@ public struct SegmentedToggle: View {
         self.segments = segments
     }
 
-    public init(selection: Binding<SessionMode>) {
-        self._selection = selection
-        self.segments = [
-            Segment(id: "call", title: "Звонок", icon: Image(systemName: "phone.fill"), mode: .call),
-            Segment(id: "listen", title: "Слушать", icon: Image(systemName: "ear.fill"), mode: .listen)
-        ]
-    }
-
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
     @Namespace private var chipNamespace
+    @SwiftUI.State private var hoveredID: String?
 
     private let trackPadding: CGFloat = 3
 
-    /// The segment whose anchor the chip snaps to. Falls back to the
-    /// first segment if `selection` isn't among them (shouldn't happen),
-    /// so the chip always has a source frame to adopt.
+    /// The segment whose anchor the chip tracks — falls back to the first
+    /// segment if `selection` isn't among them. `segments` is never empty
+    /// at any call site (an empty list would leave the chip anchorless).
     private var selectedID: String {
         (segments.first { $0.mode == selection } ?? segments.first)?.id ?? ""
     }
@@ -104,8 +101,9 @@ public struct SegmentedToggle: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity)
             // Active: white — reads on the frosted chip. Inactive: dimmed
-            // white on the dark track (contrast-aware, like `Bubble`).
-            .foregroundStyle(isSelected ? Color.white : inactiveLabelColor)
+            // white on the dark track, brightening a touch under the
+            // pointer (contrast-aware, like `Bubble`).
+            .foregroundStyle(isSelected ? Color.white : inactiveLabelColor(hovered: hoveredID == seg.id))
             // A 1px dark shadow keeps the active label legible on the
             // frosted chip even when it refracts light call content —
             // the transcript bubbles use the same trick.
@@ -117,11 +115,18 @@ public struct SegmentedToggle: View {
         .buttonStyle(.plain)
         // Each button publishes its frame as a chip slide target.
         .matchedGeometryEffect(id: seg.id, in: chipNamespace, isSource: true)
+        .onHover { hovering in hoveredID = hovering ? seg.id : nil }
+        .animation(.easeOut(duration: 0.12), value: hoveredID)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private var inactiveLabelColor: Color {
-        UnisonColors.whiteAlpha(contrast == .increased ? 0.85 : 0.6)
+    /// Inactive-label grey. Brighter under Increase Contrast, and a touch
+    /// brighter under the pointer so an inactive half previews on hover.
+    /// (Selection itself is carried by the chip, so this never has to
+    /// out-signal the active label.)
+    private func inactiveLabelColor(hovered: Bool) -> Color {
+        let base = contrast == .increased ? 0.75 : 0.6
+        return UnisonColors.whiteAlpha(hovered ? min(base + 0.2, 0.9) : base)
     }
 
     private func selectMode(_ mode: SessionMode) {
@@ -143,8 +148,26 @@ public struct SegmentedToggle: View {
             .liquidGlassLive(
                 shape: shape,
                 tint: UnisonColors.whiteAlpha(0.14),
-                highContrastHairline: false
+                // Reinforce the selected tile with a hairline border under
+                // Increase Contrast — the low tint barely differentiates.
+                highContrastHairline: true
             )
+            .background {
+                // Reduce Transparency resolves the glass to `.identity`, and
+                // does so BEFORE the tint is applied — a tint-only chip would
+                // collapse to just its rim. Draw a solid selected-fill
+                // underneath (as `PrimaryGlassButton` keeps a plain-colour
+                // layer) so the selection stays visible without the material.
+                if reduceTransparency {
+                    shape.fill(
+                        LinearGradient(
+                            colors: [UnisonColors.whiteAlpha(0.20), UnisonColors.whiteAlpha(0.08)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                }
+            }
             .overlay(
                 // Top-lit rim: bright along the top edge, fading down —
                 // the cue that reads as a raised glass tile.
