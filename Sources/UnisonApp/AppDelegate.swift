@@ -15,7 +15,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public var transcriptWindow: TranscriptWindowController!
     public var onboardingWindow: OnboardingWindowController!
     public var settingsWindow: SettingsWindowController!
-    public var helpWindow: HelpWindowController!
     public var diagnosticWindow: DiagnosticWindowController!
     public var historyWindow: MeetingHistoryWindowController!
     public var hotkeyService: HotkeyService!
@@ -116,9 +115,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             self.composition.settingsVM.cancelRecordingHotkey()
         }
 
-        // Help window — same chromeless-glass design as Settings.
-        helpWindow = HelpWindowController()
-
         // Diagnostic window — built before StatusItemController so the
         // context-menu callback can capture it. The collector pulls
         // OSLog entries + device state at the moment `show()` is called,
@@ -132,9 +128,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             popoverVM: composition.popoverVM,
             onOpenSettings: { [weak self] in
                 self?.settingsWindow.show()
-            },
-            onShowHelp: { [weak self] in
-                self?.helpWindow.show()
             },
             onStartStop: { [weak self] in
                 self?.toggleSession()
