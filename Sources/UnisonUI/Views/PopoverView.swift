@@ -221,12 +221,16 @@ public struct PopoverView: View {
             .padding(.horizontal, 6)
             .accessibilityLabel("Поменять языки местами")
             .help("Поменять языки местами")
-            // Drop the arrow by half of (caption height + spacing)
-            // so it lines up with the picker box centre instead of
-            // the whole column's midpoint.
-            .alignmentGuide(VerticalAlignment.center) { d in
-                d[VerticalAlignment.center] - 9
-            }
+            // Drop the arrow to line up with the picker BOX centre (not the
+            // whole column, whose caption sits above). Uses `.offset` — a
+            // visual-only shift — instead of `.alignmentGuide`: a custom
+            // center guide on this 26pt button pushes the button's bottom
+            // past the pickers' bounds, which sends the popover's
+            // `NSHostingView.updateAnimatedWindowSize` into infinite
+            // recursion on macOS 26.5.1 (stack overflow at open). `.offset`
+            // doesn't touch the measured size, so the window auto-size stays
+            // stable.
+            .offset(y: 9)
             languagePicker(
                 caption: "Слушаю",
                 alignment: .trailing,
