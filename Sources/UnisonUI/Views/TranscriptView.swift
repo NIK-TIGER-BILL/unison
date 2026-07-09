@@ -23,7 +23,7 @@ public struct TranscriptView: View {
 
     /// Height of the top fade-out band where scrolling bubbles dissolve
     /// into the transparent panel edge instead of hitting a hard clip line.
-    private static let topFadeHeight: CGFloat = 40
+    private static let topFadeHeight: CGFloat = 24
 
     public var body: some View {
         ZStack {
