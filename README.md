@@ -16,7 +16,7 @@ in real time, so the conversation just flows.
 
 <br>
 
-<img src="docs/images/transcript.png" alt="Unison live transcript — bidirectional translation bubbles floating over the desktop" width="840">
+<img src="docs/images/transcript.png" alt="Unison live transcript — bidirectional translation bubbles floating over a video call" width="880">
 
 </div>
 
@@ -43,30 +43,35 @@ macOS 26 Tahoe's native **Liquid Glass**.
 
 ---
 
-## Screenshots
+## A look inside
 
-The live transcript is up top. The rest of the app:
+The hero above is the live transcript, floating over a call. Here's the rest of
+the app:
+
+<div align="center">
+  <img src="docs/images/menu.png" alt="Menu-bar popover with the Call / Listen toggle" width="400"><br>
+  <sub><b>Menu bar</b> — pick your direction (<b>Call</b> or <b>Listen</b>) and the
+  language pair, then start translating in one click. No Dock icon, no clutter.</sub>
+</div>
+
+<br>
 
 <table>
   <tr>
-    <td width="50%" valign="top">
+    <td width="50%" valign="top" align="center">
       <img src="docs/images/onboarding.png" alt="Guided onboarding" width="100%"><br>
-      <sub><b>Setup</b> — a guided three-step onboarding: install the virtual
-      audio driver, grant the mic, choose a translation engine and paste your API key.</sub>
+      <sub><b>Setup</b> — a guided onboarding: install the virtual audio driver,
+      grant microphone + system-audio access, and pick an engine (OpenAI or
+      Gemini) with its API key.</sub>
     </td>
-    <td width="50%" valign="top">
+    <td width="50%" valign="top" align="center">
       <img src="docs/images/settings.png" alt="Settings window" width="100%"><br>
-      <sub><b>Settings</b> — pick input/output devices, the language pair, manage
-      the API key, and remap hotkeys.</sub>
+      <sub><b>Settings</b> — input and output devices, the quiet original-audio
+      bleed, per-app translation scope, the default language pair, engine, and
+      hotkeys.</sub>
     </td>
   </tr>
 </table>
-
-<div align="center">
-  <img src="docs/images/menu.png" alt="Menu-bar popover" width="380"><br>
-  <sub><b>Menu bar</b> — choose your direction and language pair, then start a
-  session in one click.</sub>
-</div>
 
 ---
 
