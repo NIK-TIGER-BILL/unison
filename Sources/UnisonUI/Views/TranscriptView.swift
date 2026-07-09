@@ -39,7 +39,10 @@ public struct TranscriptView: View {
             // Bottom anchor — transcript reads bottom-up, older entries
             // dissolve off the top through the fade mask below.
             .defaultScrollAnchor(.bottom)
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            // Soft scroll edge only at the bottom — the top is owned by the
+            // fade mask below (scoping avoids double-treating the top, which
+            // would make the top fade taller than `topFadeHeight`).
+            .scrollEdgeEffectStyle(.soft, for: .bottom)
             // Soft top edge: fade the scrolling content — live AppKit glass
             // included — to transparent over `topFadeHeight`, so bubbles
             // dissolve past the top instead of hitting a hard clip line. A
@@ -108,30 +111,27 @@ public struct TranscriptView: View {
     // MARK: - Pill + popover
 
     private var controlPillWithPopover: some View {
-        // Retained as a layout passthrough. The pill and settings popover
-        // moved to live `.liquidGlassLive` (AppKit NSGlassEffectView), so
-        // there's no SwiftUI `.glassEffect` pass left for this container to
-        // merge — pill and popover no longer visually merge.
-        GlassEffectContainer {
-            VStack(spacing: 12) {
-                if isSettingsOpen {
-                    TranscriptSettingsPopover(
-                        sizeIndex: Binding(
-                            get: { vm.sizeIndex },
-                            set: { vm.updateSizeIndex($0) }
-                        ),
-                        volume: Binding(
-                            get: { Double(vm.originalVolume) / 100.0 },
-                            set: { vm.updateOriginalVolume(Int(($0 * 100).rounded())) }
-                        )
+        // Pill + settings popover stack. No `GlassEffectContainer`: both
+        // surfaces render live `.liquidGlassLive` (AppKit NSGlassEffectView),
+        // so there's no SwiftUI `.glassEffect` pass for a container to group.
+        VStack(spacing: 12) {
+            if isSettingsOpen {
+                TranscriptSettingsPopover(
+                    sizeIndex: Binding(
+                        get: { vm.sizeIndex },
+                        set: { vm.updateSizeIndex($0) }
+                    ),
+                    volume: Binding(
+                        get: { Double(vm.originalVolume) / 100.0 },
+                        set: { vm.updateOriginalVolume(Int(($0 * 100).rounded())) }
                     )
-                    .transition(reduceMotion
-                        ? .opacity
-                        : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
-                    .zIndex(20)
-                }
-                controlPill
+                )
+                .transition(reduceMotion
+                    ? .opacity
+                    : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
+                .zIndex(20)
             }
+            controlPill
         }
     }
 
