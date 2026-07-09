@@ -33,6 +33,12 @@ in real time, so the conversation just flows.
 - **Menu-bar native.** No Dock icon, no clutter. Start, stop, and the transcript are a
   hotkey away.
 
+<div align="center">
+  <img src="docs/images/menu.png" alt="Unison menu-bar popover" width="380"><br>
+  <sub>Pick your direction (<b>Call</b> or <b>Listen</b>) and the language pair, then
+  start in one click.</sub>
+</div>
+
 ## Languages
 
 Choose your engine and language pair right in the app:
