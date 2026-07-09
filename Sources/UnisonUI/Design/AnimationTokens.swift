@@ -14,6 +14,11 @@ enum UnisonAnimations {
 
     /// Generic state transition (selection, mode swap).
     static let state: Animation = .easeOut(duration: 0.20)
+
+    /// Segmented-toggle chip slide — ports the web reference's
+    /// `cubic-bezier(0.16, 1, 0.3, 1)` @ 300ms ("ease-out-expo" feel):
+    /// a fast launch that eases into a gentle, overshoot-free settle.
+    static let segmentSlide: Animation = .timingCurve(0.16, 1.0, 0.3, 1.0, duration: 0.3)
 }
 
 extension Animation {

@@ -95,9 +95,10 @@ import Foundation
 ///
 /// ### Inputs & toggles
 ///
-/// - **`SegmentedToggle`** — neutral Call/Listen segmented control.
+/// - **`SegmentedToggle`** — neutral Call/Listen segmented control; a
+///   single live-glass chip slides between the halves.
 ///   `init(selection: Binding<SessionMode>, segments: [Segment])`
-///   `// SegmentedToggle(selection: $mode)`
+///   `// SegmentedToggle(selection: $mode, segments: [callSeg, listenSeg])`
 ///
 /// - **Native `Toggle`** with `.toggleStyle(.switch)` — on/off switches
 ///   in Settings. macOS 26 supplies Liquid Glass styling automatically;

@@ -306,30 +306,48 @@ Destructive вариант (stop):
 
 ### 5.4 Segmented control (mode toggle Call/Listen)
 
+A single **selection chip slides** between the two halves rather than each
+segment lighting its own background. In the app the chip is live Liquid
+Glass (`NSGlassEffectView` via `.liquidGlassLive`) with a low white tint
+(≤ 0.16 — higher flattens the material) plus a top-lit rim; it is
+positioned with `matchedGeometryEffect` (not a `GeometryReader`, which can
+crash the popover's auto-sizing host). The slide uses the web reference's
+`cubic-bezier(0.16, 1, 0.3, 1)` @ 300ms (`UnisonAnimations.segmentSlide`).
+Under Reduce Transparency the glass resolves to `.identity`, so the chip
+swaps in a solid fallback fill; under Increase Contrast it gains a
+hairline border. The CSS below approximates the look (the sliding tint +
+rim); it can't reproduce the live refraction.
+
 ```css
 .segmented {
+  position: relative;
   display: grid; grid-template-columns: 1fr 1fr;
-  gap: 2px; padding: 3px;
+  padding: 3px;
   background: rgba(0,0,0,0.22);
   border-radius: 11px;
-  box-shadow: inset 0 1px 2px rgba(0,0,0,0.25);
+  box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.25);
 }
-.segmented .seg {
-  padding: 8px 0;
-  text-align: center;
-  font-size: 12.5px;
-  color: rgba(255,255,255,0.55);
+/* Sliding selection chip — one tile that springs between the halves. */
+.segmented::after {
+  content: "";
+  position: absolute; top: 3px; bottom: 3px; left: 3px;
+  width: calc(50% - 3px);
   border-radius: 8px;
-  font-weight: 500;
-  transition: background 0.18s, color 0.18s, transform 0.1s, box-shadow 0.18s;
+  background: rgba(255,255,255,0.14);            /* the glass tint */
+  box-shadow: inset 0 0.6px 0 rgba(255,255,255,0.38),   /* top-lit rim */
+              inset 0 -0.6px 0 rgba(255,255,255,0.10);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.segmented[data-mode="listen"]::after { transform: translateX(100%); }
+.segmented .seg {
+  position: relative; z-index: 1;
+  padding: 8px 0; text-align: center;
+  font-size: 12.5px; font-weight: 500;
+  color: rgba(255,255,255,0.6);                  /* inactive */
 }
 .segmented .seg.on {
-  background: linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.06));
-  color: #fff;
-  box-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.25),
-    inset 0 -1px 0 rgba(0,0,0,0.1),
-    0 1px 2px rgba(0,0,0,0.2);
+  color: #fff;                                   /* active */
+  text-shadow: 0 1px 0 rgba(0,0,0,0.25);
 }
 ```
 
