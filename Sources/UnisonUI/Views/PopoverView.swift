@@ -12,6 +12,8 @@ public struct PopoverView: View {
     let onShowDiagnostic: () -> Void
 
     @SwiftUI.State private var isTestHovered = false
+    @SwiftUI.State private var isSwapHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(
         vm: PopoverViewModel,
@@ -175,17 +177,56 @@ public struct PopoverView: View {
                     set: { lang in pick(lang, for: .mine) }
                 )
             )
-            Image(systemName: "arrow.left.arrow.right")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .accessibilityHidden(true)
-                // Drop the arrow by half of (caption height + spacing)
-                // so it lines up with the picker box centre instead of
-                // the whole column's midpoint.
-                .alignmentGuide(VerticalAlignment.center) { d in
-                    d[VerticalAlignment.center] - 9
-                }
+            // Tappable swap: flip the two languages in place. The swap
+            // itself is instant (no animation, per design); only the
+            // hover highlight fades. The whole `languageBar` is
+            // `.disabled(locked)` during an active session, so this
+            // button inherits that lock and can't fire mid-call.
+            Button {
+                vm.updateLanguagePair(vm.settings.languagePair.swapped)
+            } label: {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 26, height: 26)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            // `&& !locked`: a disabled bar must not paint a
+                            // hover highlight (see `.pointerStyle`/`.onHover`
+                            // note below). Also covers the hover-then-lock
+                            // case where no exit event fires.
+                            .fill(UnisonColors.whiteAlpha(isSwapHovered && !locked ? 0.08 : 0))
+                    )
+                    // Claim the full rounded-square as the tap surface,
+                    // not just the glyph — otherwise only the thin arrow
+                    // pixels would respond to clicks.
+                    .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
+            // `.disabled` (inherited from `languageBar`) blocks the tap but
+            // NOT `.onHover`/`.pointerStyle` — those are region-based. Gate
+            // both on `locked` so a session-locked bar shows neither the
+            // link cursor nor a highlight (which would read as clickable).
+            .pointerStyle(locked ? nil : .link)
+            .onHover { isSwapHovered = $0 }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isSwapHovered)
+            .padding(.horizontal, 6)
+            .accessibilityLabel("Поменять языки местами")
+            // Empty tooltip while locked: AppKit shows `.help` even on a
+            // disabled control, which would imply the arrow is actionable
+            // mid-session. Mirrors the `.pointerStyle`/highlight gating above.
+            .help(locked ? "" : "Поменять языки местами")
+            // Drop the arrow to line up with the picker BOX centre (not the
+            // whole column, whose caption sits above). Uses `.offset` — a
+            // visual-only shift — instead of `.alignmentGuide`: a custom
+            // center guide on this 26pt button pushes the button's bottom
+            // past the pickers' bounds, which sends the popover's
+            // `NSHostingView.updateAnimatedWindowSize` into infinite
+            // recursion on macOS 26.5.1 (stack overflow at open). `.offset`
+            // doesn't touch the measured size, so the window auto-size stays
+            // stable.
+            .offset(y: 9)
             languagePicker(
                 caption: "Слушаю",
                 alignment: .trailing,
