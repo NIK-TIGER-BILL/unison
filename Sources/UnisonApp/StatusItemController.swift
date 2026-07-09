@@ -25,7 +25,6 @@ public final class StatusItemController {
     public var onStartStop: (() -> Void)?
     public var onShowTranscript: (() -> Void)?
     public var onOpenSettings: (() -> Void)?
-    public var onShowHelp: (() -> Void)?
     public var onShowDiagnostic: (() -> Void)?
     public var onShowHistory: (() -> Void)?
     public var onShowAbout: (() -> Void)?
@@ -53,7 +52,6 @@ public final class StatusItemController {
     public init(
         popoverVM: PopoverViewModel,
         onOpenSettings: @escaping () -> Void = {},
-        onShowHelp: @escaping () -> Void = {},
         onStartStop: @escaping () -> Void = {},
         onShowTranscript: @escaping () -> Void = {},
         onShowDiagnostic: @escaping () -> Void = {},
@@ -63,7 +61,6 @@ public final class StatusItemController {
     ) {
         self.popoverVM = popoverVM
         self.onOpenSettings = onOpenSettings
-        self.onShowHelp = onShowHelp
         self.onStartStop = onStartStop
         self.onShowTranscript = onShowTranscript
         self.onShowDiagnostic = onShowDiagnostic
@@ -101,10 +98,6 @@ public final class StatusItemController {
                 onOpenSettings: { [weak self] in
                     self?.popoverPanel.orderOut(nil)
                     self?.onOpenSettings?()
-                },
-                onShowHelp: { [weak self] in
-                    self?.popoverPanel.orderOut(nil)
-                    self?.onShowHelp?()
                 },
                 onShowDiagnostic: { [weak self] in
                     self?.popoverPanel.orderOut(nil)

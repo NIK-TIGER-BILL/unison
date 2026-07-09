@@ -9,7 +9,6 @@ import UnisonDomain
 public struct PopoverView: View {
     @Bindable var vm: PopoverViewModel
     let onOpenSettings: () -> Void
-    let onShowHelp: () -> Void
     let onShowDiagnostic: () -> Void
 
     @SwiftUI.State private var isTestHovered = false
@@ -17,12 +16,10 @@ public struct PopoverView: View {
     public init(
         vm: PopoverViewModel,
         onOpenSettings: @escaping () -> Void = {},
-        onShowHelp: @escaping () -> Void = {},
         onShowDiagnostic: @escaping () -> Void = {}
     ) {
         self.vm = vm
         self.onOpenSettings = onOpenSettings
-        self.onShowHelp = onShowHelp
         self.onShowDiagnostic = onShowDiagnostic
     }
 
@@ -124,10 +121,6 @@ public struct PopoverView: View {
             .accessibilityLabel("Проверка перевода")
             .onHover { hovering in isTestHovered = hovering }
             Spacer()
-            IconButton(label: "Как пользоваться", action: onShowHelp) {
-                Image(systemName: "questionmark")
-                    .font(.system(size: 12, weight: .regular))
-            }
             IconButton(label: "Настройки", action: onOpenSettings) {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 12, weight: .regular))
