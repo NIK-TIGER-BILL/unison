@@ -21,6 +21,10 @@ public struct TranscriptView: View {
     /// latency on expiry at trivial cost.
     private static let windowTickInterval: TimeInterval = 1
 
+    /// Height of the top fade-out band where scrolling bubbles dissolve
+    /// into the transparent panel edge instead of hitting a hard clip line.
+    private static let topFadeHeight: CGFloat = 40
+
     public var body: some View {
         ZStack {
             ScrollView {
@@ -32,10 +36,29 @@ public struct TranscriptView: View {
                 }
             }
             .scrollIndicators(.hidden)
-            // Bottom anchor — transcript reads bottom-up, older
-            // entries fade off the top under the soft edge effect.
+            // Bottom anchor — transcript reads bottom-up, older entries
+            // dissolve off the top through the fade mask below.
             .defaultScrollAnchor(.bottom)
             .scrollEdgeEffectStyle(.soft, for: .all)
+            // Soft top edge: fade the scrolling content — live AppKit glass
+            // included — to transparent over `topFadeHeight`, so bubbles
+            // dissolve past the top instead of hitting a hard clip line. A
+            // SwiftUI `.mask` becomes a CALayer mask, which fades the
+            // compositor glass too (the same layer-mask mechanism
+            // `LiquidGlassLive` clips each bubble with). The control pill
+            // sits in the `.safeAreaBar` outside this mask, so it stays
+            // fully opaque.
+            .mask(alignment: .top) {
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [.clear, .black],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: Self.topFadeHeight)
+                    Color.black
+                }
+            }
             .safeAreaBar(edge: .bottom) {
                 controlPillWithPopover
                     .frame(maxWidth: .infinity, alignment: .center)
