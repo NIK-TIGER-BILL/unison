@@ -14,6 +14,7 @@ public struct PopoverView: View {
 
     @SwiftUI.State private var isTestHovered = false
     @SwiftUI.State private var isSwapHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(
         vm: PopoverViewModel,
@@ -197,7 +198,11 @@ public struct PopoverView: View {
                     .frame(width: 26, height: 26)
                     .background(
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(UnisonColors.whiteAlpha(isSwapHovered ? 0.08 : 0))
+                            // `&& !locked`: a disabled bar must not paint a
+                            // hover highlight (see `.pointerStyle`/`.onHover`
+                            // note below). Also covers the hover-then-lock
+                            // case where no exit event fires.
+                            .fill(UnisonColors.whiteAlpha(isSwapHovered && !locked ? 0.08 : 0))
                     )
                     // Claim the full rounded-square as the tap surface,
                     // not just the glyph — otherwise only the thin arrow
@@ -206,9 +211,13 @@ public struct PopoverView: View {
             }
             .buttonStyle(.plain)
             .focusEffectDisabled()
-            .pointerStyle(.link)
+            // `.disabled` (inherited from `languageBar`) blocks the tap but
+            // NOT `.onHover`/`.pointerStyle` — those are region-based. Gate
+            // both on `locked` so a session-locked bar shows neither the
+            // link cursor nor a highlight (which would read as clickable).
+            .pointerStyle(locked ? nil : .link)
             .onHover { isSwapHovered = $0 }
-            .animation(.easeOut(duration: 0.12), value: isSwapHovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isSwapHovered)
             .padding(.horizontal, 6)
             .accessibilityLabel("Поменять языки местами")
             .help("Поменять языки местами")
