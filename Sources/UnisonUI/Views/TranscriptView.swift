@@ -21,6 +21,10 @@ public struct TranscriptView: View {
     /// latency on expiry at trivial cost.
     private static let windowTickInterval: TimeInterval = 1
 
+    /// Height of the top fade-out band where scrolling bubbles dissolve
+    /// into the transparent panel edge instead of hitting a hard clip line.
+    private static let topFadeHeight: CGFloat = 24
+
     public var body: some View {
         ZStack {
             ScrollView {
@@ -32,10 +36,32 @@ public struct TranscriptView: View {
                 }
             }
             .scrollIndicators(.hidden)
-            // Bottom anchor — transcript reads bottom-up, older
-            // entries fade off the top under the soft edge effect.
+            // Bottom anchor — transcript reads bottom-up, older entries
+            // dissolve off the top through the fade mask below.
             .defaultScrollAnchor(.bottom)
-            .scrollEdgeEffectStyle(.soft, for: .all)
+            // Soft scroll edge only at the bottom — the top is owned by the
+            // fade mask below (scoping avoids double-treating the top, which
+            // would make the top fade taller than `topFadeHeight`).
+            .scrollEdgeEffectStyle(.soft, for: .bottom)
+            // Soft top edge: fade the scrolling content — live AppKit glass
+            // included — to transparent over `topFadeHeight`, so bubbles
+            // dissolve past the top instead of hitting a hard clip line. A
+            // SwiftUI `.mask` becomes a CALayer mask, which fades the
+            // compositor glass too (the same layer-mask mechanism
+            // `LiquidGlassLive` clips each bubble with). The control pill
+            // sits in the `.safeAreaBar` outside this mask, so it stays
+            // fully opaque.
+            .mask(alignment: .top) {
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [.clear, .black],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: Self.topFadeHeight)
+                    Color.black
+                }
+            }
             .safeAreaBar(edge: .bottom) {
                 controlPillWithPopover
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -85,29 +111,27 @@ public struct TranscriptView: View {
     // MARK: - Pill + popover
 
     private var controlPillWithPopover: some View {
-        // `GlassEffectContainer` groups the pill + settings popover
-        // into one rendering pass when both are on screen — per
-        // Apple's Liquid Glass guidance.
-        GlassEffectContainer {
-            VStack(spacing: 12) {
-                if isSettingsOpen {
-                    TranscriptSettingsPopover(
-                        sizeIndex: Binding(
-                            get: { vm.sizeIndex },
-                            set: { vm.updateSizeIndex($0) }
-                        ),
-                        volume: Binding(
-                            get: { Double(vm.originalVolume) / 100.0 },
-                            set: { vm.updateOriginalVolume(Int(($0 * 100).rounded())) }
-                        )
+        // Pill + settings popover stack. No `GlassEffectContainer`: both
+        // surfaces render live `.liquidGlassLive` (AppKit NSGlassEffectView),
+        // so there's no SwiftUI `.glassEffect` pass for a container to group.
+        VStack(spacing: 12) {
+            if isSettingsOpen {
+                TranscriptSettingsPopover(
+                    sizeIndex: Binding(
+                        get: { vm.sizeIndex },
+                        set: { vm.updateSizeIndex($0) }
+                    ),
+                    volume: Binding(
+                        get: { Double(vm.originalVolume) / 100.0 },
+                        set: { vm.updateOriginalVolume(Int(($0 * 100).rounded())) }
                     )
-                    .transition(reduceMotion
-                        ? .opacity
-                        : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
-                    .zIndex(20)
-                }
-                controlPill
+                )
+                .transition(reduceMotion
+                    ? .opacity
+                    : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
+                .zIndex(20)
             }
+            controlPill
         }
     }
 
@@ -173,7 +197,7 @@ public struct TranscriptView: View {
             }
             .padding(22)
             .frame(width: 340)
-            .liquidGlass(cornerRadius: 18)
+            .liquidGlassLive(cornerRadius: 18)
         }
     }
 }

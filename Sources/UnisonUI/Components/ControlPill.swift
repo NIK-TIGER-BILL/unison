@@ -4,9 +4,10 @@ import SwiftUI
 /// Скрыть/Показать + stop, sitting on a single Liquid Glass capsule.
 /// Doubles as the drag handle for the host panel (see CLAUDE.md).
 ///
-/// `interactive: false` on the glass is deliberate — `Glass.interactive()`
-/// installs a hit-testable surface that intercepts mouse-down before
-/// it reaches the `WindowDragHandle` background and kills drag.
+/// The capsule uses live `.liquidGlassLive`, whose backing view is
+/// hit-test-transparent by construction (`LiquidGlassContainerView.hitTest`
+/// returns nil), so the glass never intercepts mouse-down before the
+/// `WindowDragHandle` background — the pill's drag keeps working.
 public struct ControlPill: View {
     public let isActive: Bool
     public let elapsedLabel: String
@@ -113,7 +114,7 @@ public struct ControlPill: View {
         }
         .padding(.vertical, 6)
         .background(WindowDragHandle())
-        .liquidGlass(shape: Capsule())
+        .liquidGlassLive(shape: Capsule())
     }
 
     private var dotState: StatusDot.State {

@@ -77,7 +77,7 @@ public struct Bubble: View {
         }
         .padding(.vertical, 11 * scale)
         .padding(.horizontal, 15 * scale)
-        .liquidGlass(shape: shape, tint: tintColor, highContrastHairline: false)
+        .liquidGlassLive(shape: shape, tint: tintColor, highContrastHairline: false)
         .overlay(
             shape
                 .strokeBorder(border, lineWidth: borderWidth)
