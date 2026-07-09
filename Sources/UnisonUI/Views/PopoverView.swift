@@ -220,7 +220,10 @@ public struct PopoverView: View {
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isSwapHovered)
             .padding(.horizontal, 6)
             .accessibilityLabel("Поменять языки местами")
-            .help("Поменять языки местами")
+            // Empty tooltip while locked: AppKit shows `.help` even on a
+            // disabled control, which would imply the arrow is actionable
+            // mid-session. Mirrors the `.pointerStyle`/highlight gating above.
+            .help(locked ? "" : "Поменять языки местами")
             // Drop the arrow to line up with the picker BOX centre (not the
             // whole column, whose caption sits above). Uses `.offset` — a
             // visual-only shift — instead of `.alignmentGuide`: a custom
