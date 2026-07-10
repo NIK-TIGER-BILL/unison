@@ -52,7 +52,25 @@ Choose your engine and language pair right in the app:
 - An **API key** for OpenAI or Google Gemini — add both and switch anytime.
 - The **BlackHole** virtual audio driver — Unison installs it for you during setup.
 
-## Get started
+## Install
+
+1. Download **Unison.dmg** from the
+   [latest release](https://github.com/NIK-TIGER-BILL/unison/releases/latest)
+   and drag **Unison** into **Applications**.
+2. Open Unison. macOS will refuse the first launch — the app isn't notarized
+   (no paid Apple Developer subscription behind this project). Click **Done**
+   — *not* "Move to Trash".
+3. Go to **System Settings → Privacy & Security**, scroll down to
+   *"Unison" was blocked to protect your Mac*, click **Open Anyway** and
+   confirm. One time only — after this it opens like any other app.
+
+Onboarding does the rest: installs the audio driver, asks for microphone
+access, takes your API key. Then pick **BlackHole 2ch** as your microphone in
+the call app and start translating.
+
+<details>
+<summary>Build from source instead</summary>
+<br>
 
 ```bash
 git clone https://github.com/NIK-TIGER-BILL/unison.git
@@ -60,9 +78,9 @@ cd unison
 bash scripts/bundle_app.sh && open build/Unison.app
 ```
 
-Onboarding installs the audio driver, asks for microphone access, and takes your
-API key. Then pick **BlackHole 2ch** as your microphone in the call app and start
-translating.
+A locally built app is signed on your machine, so Gatekeeper lets it straight through.
+
+</details>
 
 <div align="center">
 <sub>Built for macOS 26 Tahoe · Liquid Glass</sub>
