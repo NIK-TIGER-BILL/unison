@@ -51,6 +51,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             message: "applicationDidFinishLaunching — pid=\(ProcessInfo.processInfo.processIdentifier)"
         )
 
+        // Lock the whole app to dark. The design is dark-only: the
+        // palette is accents + `whiteAlpha(_:)` overlays over dark call
+        // content, and every Liquid Glass surface expects a dark
+        // backdrop. Under the light system theme those overlays and the
+        // glass wash out. Set this BEFORE any window controller is built
+        // so every window (onboarding, settings, diagnostic, transcript,
+        // history) inherits `.darkAqua` via `effectiveAppearance` and the
+        // first frame is already dark — no light flash. The menubar
+        // popover keeps its own `.vibrantDark`; the menubar icon is a
+        // template image and follows the system menubar, not this.
+        NSApp.appearance = NSAppearance(named: .darkAqua)
+
         // Single-instance guard — "new replaces old". Dev builds are
         // launched by exec'ing the binary directly, which bypasses
         // Launch Services' one-instance coalescing, and the app is
