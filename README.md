@@ -14,14 +14,7 @@ in real time, so the conversation just flows.
 
 <br>
 
-<img src="docs/images/transcript.png" alt="Unison live transcript — original and translated bubbles for both speakers" width="840">
-
-<br><br>
-
 <video src="https://github.com/user-attachments/assets/05c76904-c4f2-42d7-81f7-cad96a43f2cf" width="300" height="533" controls></video>
-
-<br>
-<sub>30-second demo</sub>
 
 </div>
 
@@ -44,6 +37,10 @@ in real time, so the conversation just flows.
   <img src="docs/images/menu.png" alt="Unison menu-bar popover" width="380"><br>
   <sub>Pick your direction (<b>Call</b> or <b>Listen</b>) and the language pair, then
   start in one click.</sub>
+</div>
+
+<div align="center">
+  <img src="docs/images/transcript.png" alt="Unison live transcript — original and translated bubbles for both speakers" width="840">
 </div>
 
 ## Languages
