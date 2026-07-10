@@ -16,6 +16,13 @@ in real time, so the conversation just flows.
 
 <img src="docs/images/transcript.png" alt="Unison live transcript — original and translated bubbles for both speakers" width="840">
 
+<br><br>
+
+<a href="https://github.com/NIK-TIGER-BILL/unison/blob/main/docs/videos/demo.mp4"><img src="docs/videos/demo-poster.jpg" alt="Watch the 30-second Unison demo" width="300"></a>
+
+<br>
+<sub>▶ 30-second demo — plays with sound</sub>
+
 </div>
 
 ---
