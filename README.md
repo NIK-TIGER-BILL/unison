@@ -18,10 +18,10 @@ in real time, so the conversation just flows.
 
 <br><br>
 
-<a href="https://github.com/NIK-TIGER-BILL/unison/blob/main/docs/videos/demo.mp4"><img src="docs/videos/demo-poster.jpg" alt="Watch the 30-second Unison demo" width="300"></a>
+<video src="https://github.com/user-attachments/assets/05c76904-c4f2-42d7-81f7-cad96a43f2cf" width="300" height="533" controls></video>
 
 <br>
-<sub>▶ 30-second demo — plays with sound</sub>
+<sub>30-second demo</sub>
 
 </div>
 
