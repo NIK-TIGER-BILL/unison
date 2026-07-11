@@ -13,6 +13,10 @@ import UnisonUI
 public final class StatusItemController {
     private let statusItem: NSStatusItem
     private let popoverPanel: MenubarPanel
+    // Implicitly-unwrapped: it's built from `PopoverView`, whose closures
+    // capture `self`, so it can only be assigned after those closures exist —
+    // a plain `let` would read as "used before initialized" at capture time.
+    private var popoverHost: NSHostingController<PopoverView>!
     private let popoverVM: PopoverViewModel
     /// Timestamp of the most recent `resignKey` dismissal. See the
     /// debounce in `togglePopover`.
@@ -102,20 +106,57 @@ public final class StatusItemController {
                 onShowDiagnostic: { [weak self] in
                     self?.popoverPanel.orderOut(nil)
                     self?.onShowDiagnostic?()
+                },
+                onContentHeightChange: { [weak self] height in
+                    // onGeometryChange fires during SwiftUI's main-thread
+                    // update; assumeIsolated to reach the @MainActor resize
+                    // (same pattern as the didResize observer below).
+                    MainActor.assumeIsolated {
+                        self?.resizePanelToContentHeight(height)
+                    }
                 }
             )
         )
-        host.sizingOptions = [.preferredContentSize]
-        panel.contentViewController = host
-
-        // Layer-clip the AppKit content view to the SwiftUI
-        // `.liquidGlass(cornerRadius: 24)` silhouette so the
-        // `hasShadow` doesn't leak into the corners.
-        if let contentView = panel.contentView {
-            contentView.wantsLayer = true
-            contentView.layer?.cornerRadius = 24
-            contentView.layer?.masksToBounds = true
-        }
+        // CRASH FIX (macOS 26.5.1): the SwiftUI card must NOT be the window's
+        // size-driving content view.
+        //
+        // As an `NSHostingController` set directly as `contentViewController`,
+        // NSHostingView owns the window size and *animates* every resize
+        // (`windowDidLayout` → `updateAnimatedWindowSize` →
+        // `NSAnimationContext.runAnimationGroup`). Whenever the popover's height
+        // changes while it's visible, that animated resize re-resolves the
+        // card's SwiftUI Liquid Glass on every animation frame and faults with
+        // EXC_BAD_ACCESS inside Apple's private DesignLibrary
+        // (`MaterialProviderBox.resolveLayers`). It's reliably hit by pressing
+        // TEST (adds the timer/status rows) and, worse, by a Bluetooth HFP route
+        // flapping the "route degraded" row on and off. Removing
+        // `.preferredContentSize` isn't enough — NSHostingView still drives the
+        // window whenever it's the content view.
+        //
+        // So we host the card as a *child* controller whose view is a plain
+        // `autoresizingMask` subview of a container, and make a plain
+        // `NSViewController` (which publishes no `preferredContentSize`) the
+        // window's content VC. NSHostingView then never drives/animates the
+        // window, so no mid-animation glass re-resolve can happen. We size the
+        // panel ourselves, non-animated (`onContentHeightChange` →
+        // `resizePanelToContentHeight`); `.intrinsicContentSize` keeps
+        // `host.view.fittingSize` reporting the card's ideal size for the open.
+        // (Same containment shape as `GlassHostingViewController`.)
+        host.sizingOptions = [.intrinsicContentSize]
+        self.popoverHost = host
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 320))
+        host.view.frame = container.bounds
+        host.view.autoresizingMask = [.width, .height]
+        container.addSubview(host.view)
+        // Layer-clip the container to the SwiftUI `.liquidGlass(cornerRadius: 24)`
+        // silhouette so the `hasShadow` doesn't leak into the corners.
+        container.wantsLayer = true
+        container.layer?.cornerRadius = 24
+        container.layer?.masksToBounds = true
+        let containerVC = NSViewController()
+        containerVC.view = container
+        containerVC.addChild(host)
+        panel.contentViewController = containerVC
 
         panel.onResignKey = { [weak self] in
             self?.lastDismissAt = Date()
@@ -161,6 +202,7 @@ public final class StatusItemController {
         guard let button = statusItem.button else { return }
         if popoverPanel.isVisible { return }
         popoverPanel.forceVisible = true
+        sizePanelToFittingContent()
         repositionPanelBelow(button: button)
         popoverPanel.orderFront(nil)
         // Cocoa frame → CG coords for `screencapture -R`.
@@ -199,6 +241,7 @@ public final class StatusItemController {
             lastDismissAt = nil
             return
         }
+        sizePanelToFittingContent()
         repositionPanelBelow(button: sender)
         popoverPanel.makeKeyAndOrderFront(nil)
     }
@@ -235,6 +278,38 @@ public final class StatusItemController {
     private func repositionPanelBelowStatusItem() {
         guard let button = statusItem.button else { return }
         repositionPanelBelow(button: button)
+    }
+
+    /// Size the panel to the SwiftUI card's current fitting height WITHOUT
+    /// animation. Called before showing the popover so it opens at the right
+    /// size (the card is a subview now, not an auto-resizing content view — see
+    /// the crash note where the container is built). Width is fixed
+    /// (`PopoverView` is 340pt), so only the height tracks the content.
+    private func sizePanelToFittingContent() {
+        popoverHost.view.layoutSubtreeIfNeeded()
+        let height = popoverHost.view.fittingSize.height
+        guard height > 1 else { return }
+        var frame = popoverPanel.frame
+        frame.size.height = height
+        popoverPanel.setFrame(frame, display: false, animate: false)
+    }
+
+    /// Resize the visible panel to a new content height, NON-animated. This is
+    /// the whole point of the crash fix: an animated hosting-window resize
+    /// re-resolves the popover's Liquid Glass every frame and faults in
+    /// DesignLibrary on macOS 26.5.1. `setFrame(animate: false)` changes the
+    /// window in one step, so the glass resolves once, outside any animation
+    /// group. The top edge stays pinned (the card grows downward from the
+    /// menubar) and we re-anchor under the status item afterwards.
+    private func resizePanelToContentHeight(_ height: CGFloat) {
+        guard height > 1, abs(popoverPanel.frame.height - height) > 0.5 else { return }
+        var frame = popoverPanel.frame
+        frame.origin.y = frame.maxY - height   // pin the top edge
+        frame.size.height = height
+        popoverPanel.setFrame(frame, display: true, animate: false)
+        if popoverPanel.isVisible {
+            repositionPanelBelowStatusItem()
+        }
     }
 
     // MARK: - Context menu
