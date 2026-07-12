@@ -10,6 +10,14 @@ public struct PopoverView: View {
     @Bindable var vm: PopoverViewModel
     let onOpenSettings: () -> Void
     let onShowDiagnostic: () -> Void
+    /// Reports the card's laid-out height so the host can size its window
+    /// itself, non-animated. See the crash note in `StatusItemController`:
+    /// the card is hosted as a plain subview (not the window's
+    /// `contentViewController`) precisely so the animated hosting-window
+    /// resize — which re-resolves this view's Liquid Glass mid-animation and
+    /// faults in DesignLibrary on macOS 26.5.1 — never runs. `nil` in
+    /// previews/tests.
+    let onContentHeightChange: ((CGFloat) -> Void)?
 
     @SwiftUI.State private var isTestHovered = false
     @SwiftUI.State private var isSwapHovered = false
@@ -18,11 +26,13 @@ public struct PopoverView: View {
     public init(
         vm: PopoverViewModel,
         onOpenSettings: @escaping () -> Void = {},
-        onShowDiagnostic: @escaping () -> Void = {}
+        onShowDiagnostic: @escaping () -> Void = {},
+        onContentHeightChange: ((CGFloat) -> Void)? = nil
     ) {
         self.vm = vm
         self.onOpenSettings = onOpenSettings
         self.onShowDiagnostic = onShowDiagnostic
+        self.onContentHeightChange = onContentHeightChange
     }
 
     public var body: some View {
@@ -30,6 +40,14 @@ public struct PopoverView: View {
             .frame(width: PopoverLayout.width)
             .liquidGlass(cornerRadius: 24)
             .frame(width: PopoverLayout.width)
+            // Drive the window height from the card's real height so the host
+            // can resize the panel non-animated. The card is hosted as a plain
+            // subview (see StatusItemController) so NSHostingView's animated
+            // auto-resize — which crashes the glass layer resolution on a
+            // content change (timer/status rows, HFP route flapping) — never runs.
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { height in
+                onContentHeightChange?(height)
+            }
     }
 
     // MARK: - Content
